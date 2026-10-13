@@ -424,3 +424,103 @@ pub struct FitResult {
     pub applied: bool,
     pub cases: Vec<FitCaseResult>,
 }
+
+// ---- orchestrator decisions
+
+/// A decision point of the orchestrator's task flow (`orchestrator.rs`), or a terminal state.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum DecisionNode {
+    Ready,
+    Pick,
+    Launch,
+    Watch,
+    Verify,
+    Audit,
+    Post,
+    End,
+    Retry,
+    Blocked,
+    Failed,
+    Done,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct DecisionPoint {
+    pub id: DecisionNode,
+    pub label: String,
+    /// The question the orchestrator answers here.
+    pub question: String,
+    /// The condition as the code checks it, e.g. "every cfg.verify command exits 0".
+    pub rule: String,
+    /// Where it lives: function and config keys.
+    pub source: String,
+    pub terminal: bool,
+}
+
+/// One kind of `decision.<node>.<outcome>` event and the edge it takes (`from == to`: progress within a node).
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct DecisionKind {
+    pub kind: String,
+    pub from: DecisionNode,
+    pub to: DecisionNode,
+    pub outcome: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct DecisionEdge {
+    pub from: DecisionNode,
+    pub to: DecisionNode,
+    pub label: String,
+}
+
+/// The decision graph plus the config values its rules read, for the Decisions screen.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct DecisionModel {
+    pub nodes: Vec<DecisionPoint>,
+    pub edges: Vec<DecisionEdge>,
+    pub kinds: Vec<DecisionKind>,
+    #[ts(type = "number")]
+    pub tick_secs: u64,
+    #[ts(type = "number")]
+    pub max_parallel: usize,
+    #[ts(type = "number")]
+    pub max_attempts: i64,
+    #[ts(type = "number")]
+    pub task_timeout_minutes: u64,
+    pub provider_order: Vec<String>,
+    pub verify: Vec<String>,
+    pub post_done: Vec<String>,
+    pub audit_enabled: bool,
+    pub audit_required: bool,
+    pub audit_chain: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct DecisionEdgeCount {
+    pub from: DecisionNode,
+    pub to: DecisionNode,
+    #[ts(type = "number")]
+    pub count: i64,
+}
+
+/// How often each edge was taken since `since` (`GET /api/decisions/edges`).
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct DecisionCounts {
+    pub since: DateTime<Utc>,
+    pub edges: Vec<DecisionEdgeCount>,
+}
+
+/// What one `POST /api/orchestrator/step` did: the decision events of that tick, oldest first.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct StepResult {
+    pub decisions: Vec<Event>,
+}

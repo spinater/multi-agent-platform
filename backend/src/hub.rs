@@ -27,6 +27,8 @@ pub struct Hub {
     pub term: Arc<dyn Terminal>,
     tx: broadcast::Sender<ServerMessage>,
     orchestrator_running: AtomicBool,
+    /// Runs one orchestrator tick on request (`POST /api/orchestrator/step`).
+    pub step: crate::decisions::Stepper,
     cooldowns: Mutex<HashMap<String, DateTime<Utc>>>,
     pub reflex: reflex::Manager,
     pub http: reqwest::Client,
@@ -58,6 +60,7 @@ impl Hub {
             term,
             tx,
             orchestrator_running: AtomicBool::new(running),
+            step: Default::default(),
             cooldowns: Mutex::new(HashMap::new()),
             reflex: reflex::Manager::default(),
             http: reqwest::Client::new(),

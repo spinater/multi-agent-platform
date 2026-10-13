@@ -1,5 +1,7 @@
 import type { DecideResponse } from "./generated/DecideResponse";
 import type { Decision } from "./generated/Decision";
+import type { DecisionCounts } from "./generated/DecisionCounts";
+import type { DecisionModel } from "./generated/DecisionModel";
 import type { Event } from "./generated/Event";
 import type { FitResult } from "./generated/FitResult";
 import type { Overview } from "./generated/Overview";
@@ -8,6 +10,7 @@ import type { Question } from "./generated/Question";
 import type { ReflexStatus } from "./generated/ReflexStatus";
 import type { RepoListing } from "./generated/RepoListing";
 import type { Session } from "./generated/Session";
+import type { StepResult } from "./generated/StepResult";
 import type { Task } from "./generated/Task";
 
 const TOKEN_KEY = "map.apiToken";
@@ -113,4 +116,21 @@ export function cloneUrl(slug: string, repo: RepoName): string {
   return `${location.origin}/git/${slug}/${repo}.git`;
 }
 
-export const fmtConf = (c: number | null | undefined) => (c == null ? "—" : c === 0 ? "0" : c < 0.001 ? c.toExponential(2) : c.toFixed(4));
+// ---- orchestrator decisions (backend decisions.rs; not Reflex decisions)
+
+/** `project`: `null` is the default workspace (tasks without a project). */
+const projectQuery = (project: string | null) => `project=${encodeURIComponent(project ?? "")}`;
+
+export const decisionsApi = {
+  model: () => request<DecisionModel>("GET", "/decisions/model"),
+  edges: (since: string, project: string | null) => request<DecisionCounts>("GET", `/decisions/edges?since=${encodeURIComponent(since)}&${projectQuery(project)}`),
+  latest: (project: string | null) => request<Event[]>("GET", `/decisions/latest?${projectQuery(project)}`),
+  /** The task's `decision.*` events, newest first. */
+  trace: (id: number, limit = 300) => request<Event[]>("GET", `/tasks/${id}/trace?limit=${limit}`),
+  /** One orchestrator tick while it is paused. */
+  step: () => request<StepResult>("POST", "/orchestrator/step"),
+};
+
+// ----
+
+export const fmtConf =(c: number | null | undefined) => (c == null ? "—" : c === 0 ? "0" : c < 0.001 ? c.toExponential(2) : c.toFixed(4));

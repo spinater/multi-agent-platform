@@ -352,6 +352,69 @@ impl Store {
             })
             .collect()
     }
+
+    // ---- orchestrator decisions (`decision.*` events, see decisions.rs)
+
+    fn decision_row(row: &SqliteRow) -> Result<Event> {
+        Ok(Event {
+            id: row.get("id"),
+            at: row.get("at"),
+            level: parse_enum(row.get("level"))?,
+            kind: row.get("kind"),
+            session: row.get("session"),
+            task_id: row.get("task_id"),
+            message: row.get("message"),
+        })
+    }
+
+    /// A task's decision trace, newest first.
+    pub async fn decision_events(&self, task_id: i64, limit: i64) -> Result<Vec<Event>> {
+        let rows = sqlx::query("SELECT * FROM events WHERE task_id = ? AND kind LIKE 'decision.%' ORDER BY id DESC LIMIT ?")
+            .bind(task_id)
+            .bind(limit)
+            .fetch_all(&self.pool)
+            .await?;
+        rows.iter().map(Self::decision_row).collect()
+    }
+
+    /// Decision events with an id above `after`, oldest first.
+    pub async fn decision_events_after(&self, after: i64) -> Result<Vec<Event>> {
+        let rows = sqlx::query("SELECT * FROM events WHERE id > ? AND kind LIKE 'decision.%' ORDER BY id").bind(after).fetch_all(&self.pool).await?;
+        rows.iter().map(Self::decision_row).collect()
+    }
+
+    pub async fn last_event_id(&self) -> Result<i64> {
+        Ok(sqlx::query("SELECT COALESCE(MAX(id), 0) AS id FROM events").fetch_one(&self.pool).await?.get("id"))
+    }
+
+    /// The newest decision event of every task (in `project`: `None` all, `Some("")` the default workspace).
+    pub async fn latest_decisions(&self, project: Option<&str>) -> Result<Vec<Event>> {
+        let rows = sqlx::query(
+            "SELECT e.* FROM events e JOIN tasks t ON t.id = e.task_id
+             WHERE e.id IN (SELECT MAX(id) FROM events WHERE kind LIKE 'decision.%' AND task_id IS NOT NULL GROUP BY task_id)
+               AND (?1 IS NULL OR (?1 = '' AND t.project IS NULL) OR t.project = ?1)
+             ORDER BY e.id DESC",
+        )
+        .bind(project)
+        .fetch_all(&self.pool)
+        .await?;
+        rows.iter().map(Self::decision_row).collect()
+    }
+
+    /// How many decision events of each kind happened since `since` (project filter as in `latest_decisions`).
+    pub async fn decision_kind_counts(&self, since: DateTime<Utc>, project: Option<&str>) -> Result<Vec<(String, i64)>> {
+        let rows = sqlx::query(
+            "SELECT e.kind, COUNT(*) AS n FROM events e JOIN tasks t ON t.id = e.task_id
+             WHERE e.kind LIKE 'decision.%' AND julianday(e.at) >= julianday(?1)
+               AND (?2 IS NULL OR (?2 = '' AND t.project IS NULL) OR t.project = ?2)
+             GROUP BY e.kind",
+        )
+        .bind(since)
+        .bind(project)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows.iter().map(|r| (r.get("kind"), r.get("n"))).collect())
+    }
 }
 
 #[cfg(test)]

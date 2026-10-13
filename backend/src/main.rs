@@ -1,6 +1,7 @@
 mod api;
 mod config;
 mod decide;
+mod decisions;
 mod detect;
 mod hub;
 mod model;
