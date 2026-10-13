@@ -4,7 +4,6 @@ import clsx from "clsx";
 import { Search } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 
-import { cloneUrl } from "@/lib/api";
 import type { CheckLine } from "@/lib/generated/CheckLine";
 import type { ProjectInfo } from "@/lib/generated/ProjectInfo";
 
@@ -74,7 +73,6 @@ function ProjectList({ reveal }: { reveal: Reveal | null }) {
   const defaults = useDefaults();
   const [query, setQuery] = useState("");
 
-  const origin = typeof location === "undefined" ? "" : location.origin;
   const cards: Card[] = [
     {
       key: "",
@@ -85,11 +83,8 @@ function ProjectList({ reveal }: { reveal: Reveal | null }) {
       info: null,
     },
     ...projects.map((p) => {
-      const src = p.project.settings.source;
-      const repo =
-        src.kind === "empty"
-          ? `${cloneUrl(p.project.slug, "code").replace(origin, "")} · main`
-          : `${src.location} @ ${src.branch ?? "default"} → ${cloneUrl(p.project.slug, "code").replace(origin, "")}`;
+      const kind = p.project.settings.source.kind;
+      const repo = kind === "local" ? "existing folder · used in place" : kind === "empty" ? "new folder" : `legacy ${kind} import`;
       return { key: p.project.slug, slug: p.project.slug, name: p.project.name, path: p.workspace, repo, info: p };
     }),
   ];
@@ -111,7 +106,7 @@ function ProjectList({ reveal }: { reveal: Reveal | null }) {
       <PageHeader
         kicker="Workspaces"
         title="Projects"
-        lead="Each project is a code repo, a corpus repo and its own Reflex engine, with its own providers, verify commands and task history. Tasks without a project run in the default workspace. Pick one to open its command centre."
+        lead="Each project is a folder on this machine that agents work in directly, plus a corpus repo and its own Reflex engine, with its own providers, verify commands and task history. Tasks without a project run in the default workspace. Pick one to open its command centre."
         actions={
           <>
             <label className="flex h-9 items-center gap-2 rounded-lg border border-line-2 bg-surface px-3">

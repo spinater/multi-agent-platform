@@ -30,7 +30,7 @@ import {
 } from "./project-ui";
 
 const STEPS: [string, string][] = [
-  ["Source", "new · local · git"],
+  ["Folder", "existing · new"],
   ["Identity", "name · prefix"],
   ["Providers", "order · parallel"],
   ["Checks", "verify · audit"],
@@ -47,24 +47,18 @@ export function slugify(name: string): string {
     .replace(/-+$/, "");
 }
 
-const base = (p: string) =>
-  p
-    .trim()
-    .replace(/\/+$/, "")
-    .split(/[/:]/)
-    .pop()
-    ?.replace(/\.git$/, "") ?? "";
+const base = (p: string) => p.trim().replace(/\/+$/, "").split("/").pop() ?? "";
 
-type Source = { kind: SourceKind; location: string; branch: string };
+type Source = { kind: SourceKind; location: string };
 
-/** The 5-step "New project" wizard (Projects.dc.html). It creates a real project: the code repo is new or imported
- * with `git clone --bare`, and the settings are stored in the platform database. `onCreated` gets the server's check
- * lines. */
+/** The 5-step "New project" wizard (Projects.dc.html). A project is a folder on this machine that agents work in
+ * directly, an existing one or a new empty one; the platform never copies or hosts the code. The settings are stored
+ * in the platform database. `onCreated` gets the server's check lines. */
 export function ProjectWizard({ onClose, onCreated, initialStep = 0 }: { onClose: () => void; onCreated: (slug: string, checks: CheckLine[]) => void; initialStep?: number }) {
   const { providers, server, openAuth } = useApp();
   const defaults = useDefaults();
   const [step, setStep] = useState(initialStep);
-  const [source, setSource] = useState<Source>({ kind: "empty", location: "", branch: "" });
+  const [source, setSource] = useState<Source>({ kind: "local", location: "" });
   const [name, setName] = useState("");
   const [nameTouched, setNameTouched] = useState(false);
   const [slug, setSlug] = useState("");
@@ -86,16 +80,16 @@ export function ProjectWizard({ onClose, onCreated, initialStep = 0 }: { onClose
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
 
-  // Look at the source as it is typed (branches, commits, top-level files).
+  // Look at the folder as it is typed (git branch, commits, top-level files; or that a new one is free).
   const location = source.location.trim();
-  const ready = source.kind === "git" ? location.length > 6 : source.kind === "local" ? /^(\/|~\/)./.test(location) : false;
+  const ready = /^(\/|~\/)./.test(location);
   useEffect(() => {
     if (!ready) return;
     let stale = false;
     const t = window.setTimeout(() => {
       setInspecting(true);
       api
-        .inspectSource({ kind: source.kind, location, branch: source.branch.trim() || undefined })
+        .inspectSource({ kind: source.kind, location })
         .then((r) => !stale && setInspection(r))
         .catch((e) => !stale && setInspection({ ok: false, error: errText(e), default_branch: null, branches: [], files: [], commits: null }))
         .finally(() => !stale && setInspecting(false));
@@ -104,19 +98,19 @@ export function ProjectWizard({ onClose, onCreated, initialStep = 0 }: { onClose
       stale = true;
       window.clearTimeout(t);
     };
-  }, [ready, source.kind, location, source.branch]);
+  }, [ready, source.kind, location]);
   const seen = ready ? inspection : null;
 
   const shownName = nameTouched ? name : base(source.location);
   const shownSlug = slug || slugify(shownName);
   const prefix = server?.session_prefix ?? defaults?.session_prefix ?? "map-";
-  const sourceValue = { kind: source.kind, location: source.kind === "empty" ? null : location || null, branch: source.kind === "empty" ? null : source.branch.trim() || null };
+  const sourceValue = { kind: source.kind, location: location || null, branch: null };
   const settings = rows ? settingsFromForm(rows, defaults, sourceValue) : null;
   const toml = settings ? tomlLines({ name: shownName, slug: shownSlug, description, fallback, model: "" }, settings, defaults) : [];
 
   const canNext =
     step === 0
-      ? source.kind === "empty" || (ready && seen?.ok !== false)
+      ? ready && seen?.ok === true
       : step === 1
         ? shownName.trim().length > 0 && /^[a-z0-9][a-z0-9-]{0,38}[a-z0-9]$/.test(shownSlug)
         : step === 2
@@ -186,64 +180,47 @@ export function ProjectWizard({ onClose, onCreated, initialStep = 0 }: { onClose
           <div className="flex flex-1 flex-col gap-[18px] overflow-auto px-5 py-6 sm:px-[26px]">
             {step === 0 && (
               <>
-                <Heading title="Where does the code live?">
-                  Agents work in a checkout of the project&apos;s code repo, served at <code>/git/&lt;slug&gt;/code.git</code>. Start it empty, or import a git
-                  repo with <code>git clone --bare</code>.
+                <Heading title="Which folder do agents work in?">
+                  A folder on this machine. Agents work in it directly: the platform never copies the code, never hosts it in a git repo of its own and
+                  adds no files to it.
                 </Heading>
                 <Segmented<SourceKind>
                   value={source.kind}
                   options={[
-                    ["empty", "New repo"],
-                    ["local", "Local repo"],
-                    ["git", "Git URL"],
+                    ["local", "Folder on this machine"],
+                    ["empty", "New folder"],
                   ]}
                   onChange={(kind) => {
                     setSource({ ...source, kind });
                     setInspection(null);
                   }}
                 />
-                {source.kind === "empty" && (
-                  <p className="text-[13px] leading-normal text-text-2">A new repo with a README and a CLAUDE.md that points agents at the project&apos;s decision endpoint.</p>
-                )}
-                {source.kind !== "empty" && (
-                  <>
-                    <Field label={source.kind === "git" ? "Repository URL" : "Repo on this machine"}>
-                      <TextInput
-                        value={source.location}
-                        onChange={(e) => setSource({ ...source, location: e.target.value })}
-                        placeholder={source.kind === "git" ? "https://github.com/you/your-repo.git" : "~/code/my-repo"}
-                        autoFocus
-                      />
-                    </Field>
-                    <Field label="Branch" hint="Imported as the platform repo's main. Empty: the source's default branch.">
-                      <TextInput value={source.branch} onChange={(e) => setSource({ ...source, branch: e.target.value })} placeholder={seen?.default_branch ?? "main"} list="wizard-branches" />
-                      <datalist id="wizard-branches">
-                        {seen?.branches.map((b) => (
-                          <option key={b} value={b} />
-                        ))}
-                      </datalist>
-                    </Field>
-                    {ready && (
-                      <Inset>
-                        <span className="text-muted">{inspecting ? `looking at ${location}…` : `found at ${location}`}</span>
-                        {seen?.error && <span className="text-bad">✗ {seen.error}</span>}
-                        {seen?.ok && (
-                          <>
-                            <span className="text-ok">
-                              ✓ git repo · default branch {seen.default_branch ?? "?"} · {seen.branches.length} branch{seen.branches.length === 1 ? "" : "es"}
-                            </span>
-                            {seen.commits !== null && (
-                              <span className="text-ok">
-                                ✓ {seen.commits} commits on {source.branch.trim() || seen.default_branch}
-                              </span>
-                            )}
-                            {seen.files.length > 0 && <span className="text-ok">✓ {seen.files.filter((f) => !f.startsWith(".")).slice(0, 10).join(" · ")}</span>}
-                            {source.branch.trim() && !seen.branches.includes(source.branch.trim()) && <span className="text-warn">! no branch {source.branch.trim()} in this repo</span>}
-                          </>
+                <Field label={source.kind === "local" ? "Folder" : "New folder"} hint="An absolute path, or ~/…, on the machine the platform runs on.">
+                  <TextInput value={source.location} onChange={(e) => setSource({ ...source, location: e.target.value })} placeholder="~/project/my-app" autoFocus />
+                </Field>
+                {ready && (
+                  <Inset>
+                    <span className="text-muted">{inspecting ? `looking at ${location}…` : location}</span>
+                    {seen?.error && <span className="text-bad">✗ {seen.error}</span>}
+                    {seen?.ok && source.kind === "empty" && <span className="text-ok">✓ free: the folder will be created empty</span>}
+                    {seen?.ok && source.kind === "local" && (
+                      <>
+                        {seen.default_branch ? (
+                          <span className="text-ok">
+                            ✓ git repo · on {seen.default_branch} · {seen.branches.length} branch{seen.branches.length === 1 ? "" : "es"}
+                            {seen.commits !== null && ` · ${seen.commits} commits`}
+                          </span>
+                        ) : (
+                          <span className="text-warn">! not a git repo: agents still work here, but there is no history to review their changes against</span>
                         )}
-                      </Inset>
+                        {seen.files.length > 0 ? (
+                          <span className="text-ok">✓ {seen.files.filter((f) => !f.startsWith(".")).slice(0, 10).join(" · ")}</span>
+                        ) : (
+                          <span className="text-muted">the folder is empty</span>
+                        )}
+                      </>
                     )}
-                  </>
+                  </Inset>
                 )}
               </>
             )}
@@ -266,7 +243,7 @@ export function ProjectWizard({ onClose, onCreated, initialStep = 0 }: { onClose
                   />
                 </Field>
                 <div className="grid gap-[18px] sm:grid-cols-2">
-                  <Field label="Slug" hint={`/git/${shownSlug || "…"}/code.git`}>
+                  <Field label="Slug" hint="The project's id in URLs and the API.">
                     <TextInput value={shownSlug} onChange={(e) => setSlug(e.target.value)} placeholder="from the name" />
                   </Field>
                   <Field label="Session prefix" hint="Set in map.toml (workspace.session_prefix); shared by every project.">
@@ -338,7 +315,7 @@ export function ProjectWizard({ onClose, onCreated, initialStep = 0 }: { onClose
                 Back
               </Btn>
               <Btn tone="primary" onClick={next} disabled={!canNext || busy}>
-                {step === 4 ? (busy ? (source.kind === "empty" ? "Creating…" : "Importing…") : "Create project") : "Continue"}
+                {step === 4 ? (busy ? "Creating…" : "Create project") : "Continue"}
               </Btn>
             </div>
           </div>

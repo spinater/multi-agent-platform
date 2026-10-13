@@ -99,7 +99,8 @@ timeout_secs = 600
 # idle_markers = ["> "]
 # auth_markers = ["API key"]
 
-# Projects: each one has a code repo, a corpus repo and its own Reflex decision engine (https://reflex.gist.rs).
+# Projects: each one is a folder on this machine (used in place), a corpus repo and its own Reflex decision engine
+# (https://reflex.gist.rs).
 # Questions go to Reflex first; only those below the project's threshold reach the fallback LLM.
 [reflex]
 # binary = "reflex"

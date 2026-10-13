@@ -144,7 +144,8 @@ export const api = {
   archiveDomains: (slug: string, body: { domains?: string[]; restore?: boolean }) => request<ArchiveResult>("POST", `/projects/${slug}/corpus/archive`, body),
 };
 
-export type RepoName = "code" | "corpus";
+/** The platform hosts one repo per project: the Reflex corpus. The code stays in the project's own folder. */
+export type RepoName = "corpus";
 export type Route = "auto" | "reflex" | "llm";
 export type ProjectUpdate = {
   name?: string;
@@ -158,7 +159,7 @@ export type ProjectUpdate = {
   paused?: boolean;
 };
 
-/** Clone URL for a project repo; git asks for the API token as the password when one is set. */
+/** Clone URL for a project's corpus repo; git asks for the API token as the password when one is set. */
 export function cloneUrl(slug: string, repo: RepoName): string {
   return `${location.origin}/git/${slug}/${repo}.git`;
 }

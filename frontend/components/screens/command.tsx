@@ -203,7 +203,7 @@ export function CommandScreen() {
   const runs = cmd.graph.nodes.filter((n) => n.type === "run").length;
   const statsLine = `${all ? `${cmd.projectOrder.length} projects · ` : ""}${cmd.tasks.length} tasks · ${live} live sessions · ${cmd.graph.links.length} links · ${runs} runs`;
   const total = cmd.sessions.length + cmd.tasks.length;
-  const workspace = all ? "all projects" : project === null ? shortPath(server?.workspace_dir, 3) : `/git/${project}/code.git`;
+  const workspace = all ? "all projects" : shortPath(project === null ? server?.workspace_dir : current?.workspace, 3);
 
   const status = (
     <div className="flex flex-wrap items-center gap-x-[18px] gap-y-1.5 font-mono text-[10px] leading-[1.3] font-medium tracking-[0.1em] text-muted uppercase">

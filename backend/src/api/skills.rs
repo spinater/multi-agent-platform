@@ -32,7 +32,7 @@ pub struct EnabledBody {
 /// Writes the workspace's `.claude/settings.local.json`, then returns the fresh overview.
 pub async fn set_enabled(State(hub): State<Arc<Hub>>, Json(b): Json<EnabledBody>) -> ApiResult<SkillsOverview> {
     let project = known_project(&hub, b.project).await?;
-    let (cfg, workspace) = (hub.config.skills.clone(), hub.work_dir(project.as_deref()));
+    let (cfg, workspace) = (hub.config.skills.clone(), hub.work_dir(project.as_deref()).await);
     let id = b.skill.clone();
     let invocation = tokio::task::spawn_blocking(move || skills::toggle(&cfg, &workspace, &id, b.enabled)).await.map_err(anyhow::Error::from)??;
     let word = if b.enabled { "enabled" } else { "disabled" };
@@ -50,7 +50,7 @@ pub struct FileQuery {
 
 pub async fn file(State(hub): State<Arc<Hub>>, Query(q): Query<FileQuery>) -> ApiResult<SkillFile> {
     let project = known_project(&hub, q.project).await?;
-    let (cfg, workspace) = (hub.config.skills.clone(), hub.work_dir(project.as_deref()));
+    let (cfg, workspace) = (hub.config.skills.clone(), hub.work_dir(project.as_deref()).await);
     let file = tokio::task::spawn_blocking(move || skills::read_file(&cfg, &workspace, &q.path)).await.map_err(anyhow::Error::from)??;
     Ok(Json(file))
 }

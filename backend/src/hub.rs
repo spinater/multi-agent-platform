@@ -14,7 +14,7 @@ use tokio::sync::broadcast;
 
 use crate::config::{Config, PromptMode, ProviderSpec};
 use crate::detect::{EndDecision, end_decision};
-use crate::model::{Event, Level, OrchestratorStatus, Project, ProjectInfo, ProviderInfo, ReflexStatus, Role, ServerInfo, ServerMessage, Session, SessionState, Task, TaskStatus};
+use crate::model::{Event, Level, OrchestratorStatus, Project, ProjectInfo, ProviderInfo, ReflexStatus, Role, ServerInfo, ServerMessage, Session, SessionState, SourceKind, Task, TaskStatus};
 use crate::reflex;
 use crate::store::Store;
 use crate::terminal::Terminal;
@@ -131,26 +131,30 @@ impl Hub {
         self.config.server.data_dir.join("projects").join(slug)
     }
 
-    pub fn code_repo(&self, slug: &str) -> PathBuf {
-        self.project_dir(slug).join("code.git")
-    }
-
     pub fn corpus_repo(&self, slug: &str) -> PathBuf {
         self.project_dir(slug).join("corpus.git")
     }
 
-    /// The checkout of `code.git` that the project's agents work in.
-    pub fn project_workspace(&self, slug: &str) -> PathBuf {
-        self.project_dir(slug).join("workspace")
+    /// The folder the project's agents work in: its folder on this machine, or for a legacy `git` project the
+    /// checkout the platform made of it.
+    pub fn workspace_of(&self, project: &Project) -> PathBuf {
+        match (project.settings.source.kind, project.settings.source.location.as_deref()) {
+            (SourceKind::Empty | SourceKind::Local, Some(path)) => crate::login::expand_home(path),
+            _ => self.project_dir(&project.slug).join("workspace"),
+        }
     }
 
     pub fn reflex_log(&self, slug: &str) -> PathBuf {
         self.project_dir(slug).join("reflex.log")
     }
 
-    /// Where a task or session of `project` runs: the project's workspace, or `workspace.dir`.
-    pub fn work_dir(&self, project: Option<&str>) -> PathBuf {
-        project.map_or_else(|| self.config.workspace.dir.clone(), |slug| self.project_workspace(slug))
+    /// Where a task or session of `project` runs: the project's folder, or `workspace.dir`.
+    pub async fn work_dir(&self, project: Option<&str>) -> PathBuf {
+        let Some(slug) = project else { return self.config.workspace.dir.clone() };
+        match self.store.project(slug).await {
+            Ok(Some(p)) => self.workspace_of(&p),
+            _ => self.project_dir(slug).join("workspace"),
+        }
     }
 
     /// The API as agents on this machine reach it (a wildcard bind is reached through loopback).
@@ -165,7 +169,7 @@ impl Hub {
 
     pub async fn project_info(&self, project: Project) -> Result<ProjectInfo> {
         let stats = self.store.decision_stats(&project.slug).await?;
-        let workspace = self.project_workspace(&project.slug).display().to_string();
+        let workspace = self.workspace_of(&project).display().to_string();
         Ok(ProjectInfo { reflex: self.reflex.status(&project.slug), stats, project, workspace })
     }
 
@@ -392,7 +396,7 @@ impl Hub {
             std::fs::set_permissions(&script_path, std::fs::Permissions::from_mode(0o700))?;
         }
 
-        let cwd = self.work_dir(req.project.as_deref());
+        let cwd = self.work_dir(req.project.as_deref()).await;
         if !cwd.is_dir() {
             bail!("workspace {} does not exist", cwd.display());
         }

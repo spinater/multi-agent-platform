@@ -1,5 +1,5 @@
 # map.toml for docker-compose.yml: copy to ${MAP_DIR}/map.toml and edit. Paths are inside the container:
-# /data is ${MAP_DIR}/data on the host, and the agent CLIs are the host's, mounted at the same paths.
+# /data is ${MAP_DIR}/data on the host; the agent CLIs and ${MAP_PROJECTS_DIR} are the host's, at the same paths.
 # Every other setting is documented in map.example.toml.
 
 [server]

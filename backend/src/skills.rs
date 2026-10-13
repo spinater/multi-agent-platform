@@ -801,7 +801,7 @@ fn count_usage(skills: &mut [Skill], loads: &[Load], runs: &[Run], now: DateTime
 
 /// Context files, skills and usage for a project's workspace (`None`: `workspace.dir`).
 pub async fn overview(hub: &Hub, project: Option<&str>) -> Result<SkillsOverview> {
-    let workspace = hub.work_dir(project);
+    let workspace = hub.work_dir(project).await;
     let sessions = hub.store.sessions().await?;
     let cfg = hub.config.skills.clone();
     let runs_dir = hub.config.server.data_dir.join("runs");

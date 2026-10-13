@@ -1,6 +1,6 @@
-//! A project's git repos: bare `code.git` and `corpus.git` (cloned and pushed over `/git`), and the `workspace/`
-//! checkout of `code.git` that agents work in. The platform writes to the bare repos with plumbing (a temporary
-//! index and `commit-tree`), so it never needs a working tree there and never races a user's push unnoticed.
+//! A project's bare `corpus.git` (cloned and pushed over `/git`), and read-only looks at a project's folder. The
+//! platform writes to the corpus with plumbing (a temporary index and `commit-tree`), so it never needs a working tree
+//! there and never races a user's push unnoticed.
 
 use std::path::Path;
 use std::process::Stdio;
@@ -64,64 +64,28 @@ pub async fn init_bare(repo: &Path) -> Result<()> {
     Ok(())
 }
 
-/// `git` for a source someone typed: no prompts, no ssh password prompt, and no transport that runs commands.
-fn import_cmd() -> Command {
-    let mut cmd = git_cmd();
-    cmd.env("GIT_SSH_COMMAND", "ssh -o BatchMode=yes -o ConnectTimeout=20").args(["-c", "protocol.ext.allow=never", "-c", "protocol.fd.allow=never"]);
-    cmd
-}
-
-async fn run_for(cmd: Command, what: &str, limit: std::time::Duration) -> Result<Vec<u8>> {
-    match tokio::time::timeout(limit, run(cmd, None, what)).await {
-        Ok(out) => out,
-        Err(_) => bail!("{what} timed out after {}s", limit.as_secs()),
+/// What is in a folder on this machine: its top-level entries and, when it is a git repo, the branch checked out,
+/// the local branches and the commit count. Read-only.
+pub async fn inspect_folder(dir: &Path) -> crate::model::SourceInspection {
+    let mut out = crate::model::SourceInspection { ok: true, ..Default::default() };
+    if let Ok(entries) = std::fs::read_dir(dir) {
+        let mut files: Vec<String> = entries.filter_map(|e| e.ok()?.file_name().into_string().ok()).filter(|n| n != ".git").collect();
+        files.sort();
+        files.truncate(60);
+        out.files = files;
     }
-}
-
-/// `git clone --bare` of `source` (a URL or a local repo) into `repo`, keeping only `branch` (default: the source's
-/// HEAD) and naming it `main`, the branch the platform works on. Returns the source branch and its commit count.
-pub async fn clone_bare(source: &str, branch: Option<&str>, repo: &Path) -> Result<(String, u64)> {
-    let mut cmd = import_cmd();
-    cmd.args(["clone", "--bare", "-q", "--single-branch", "--no-tags"]);
-    if let Some(b) = branch {
-        cmd.args(["--branch", b]);
+    let work = |args: &'static [&'static str]| {
+        let mut cmd = git_cmd();
+        cmd.arg("-C").arg(dir).args(args);
+        run(cmd, None, "git")
+    };
+    if text(work(&["rev-parse", "--is-inside-work-tree"]).await.unwrap_or_default()) != "true" {
+        return out;
     }
-    cmd.arg("--").arg(source).arg(repo);
-    run_for(cmd, "git clone", std::time::Duration::from_secs(600)).await?;
-    let head = text(git(repo, &["symbolic-ref", "--short", "HEAD"], None, None).await?);
-    if head != "main" {
-        git(repo, &["branch", "-M", &head, "main"], None, None).await?;
-        git(repo, &["symbolic-ref", "HEAD", BRANCH], None, None).await?;
-    }
-    git(repo, &["config", "http.receivepack", "true"], None, None).await?;
-    let count = text(git(repo, &["rev-list", "--count", BRANCH], None, None).await?).parse().unwrap_or(0);
-    Ok((head, count))
-}
-
-/// Branches of a source, and for a local repo its commit count and top-level files, without importing it.
-pub async fn inspect(source: &str, local: bool, branch: Option<&str>) -> Result<crate::model::SourceInspection> {
-    let mut cmd = import_cmd();
-    cmd.args(["ls-remote", "--symref", "--heads", "--"]).arg(source);
-    // `--heads` drops HEAD, so ask for it separately.
-    let heads = text(run_for(cmd, "git ls-remote", std::time::Duration::from_secs(30)).await?);
-    let mut cmd = import_cmd();
-    cmd.args(["ls-remote", "--symref", "--", source, "HEAD"]);
-    let head = text(run_for(cmd, "git ls-remote", std::time::Duration::from_secs(30)).await.unwrap_or_default());
-    let default_branch = head.lines().find_map(|l| l.strip_prefix("ref: refs/heads/")?.split('\t').next().map(String::from));
-    let branches: Vec<String> = heads.lines().filter_map(|l| l.split('\t').nth(1)?.strip_prefix("refs/heads/").map(String::from)).collect();
-    let mut out = crate::model::SourceInspection { ok: true, default_branch: default_branch.clone(), branches, ..Default::default() };
-    if local {
-        let dir = Path::new(source);
-        let rev = branch.map(String::from).or(default_branch).unwrap_or_else(|| "HEAD".into());
-        let git_dir = if dir.join(".git").exists() { dir.join(".git") } else { dir.to_path_buf() };
-        if let Ok(n) = git(&git_dir, &["rev-list", "--count", &rev], None, None).await {
-            out.commits = text(n).parse().ok();
-        }
-        if let Ok(names) = git(&git_dir, &["ls-tree", "--name-only", &rev], None, None).await {
-            out.files = text(names).lines().map(String::from).collect();
-        }
-    }
-    Ok(out)
+    out.default_branch = Some(text(work(&["rev-parse", "--abbrev-ref", "HEAD"]).await.unwrap_or_default())).filter(|b| !b.is_empty());
+    out.branches = text(work(&["branch", "--format=%(refname:short)"]).await.unwrap_or_default()).lines().map(String::from).collect();
+    out.commits = text(work(&["rev-list", "--count", "HEAD"]).await.unwrap_or_default()).parse().ok();
+    out
 }
 
 pub async fn head(repo: &Path) -> Option<String> {
@@ -233,26 +197,12 @@ pub async fn export_corpus(repo: &Path, dest: &Path) -> Result<Vec<String>> {
     Ok(domains)
 }
 
-/// Clones `code.git` into `dir` the first time, then fast-forwards it so a task starts from what was pushed.
-/// Returns a warning when the fast-forward is not possible (local agent commits, or a dirty tree).
-pub async fn sync_workspace(bare: &Path, dir: &Path) -> Result<Option<String>> {
-    if !dir.join(".git").exists() {
-        let mut cmd = git_cmd();
-        cmd.args(["clone", "-q"]).arg(bare).arg(dir);
-        run(cmd, None, "git clone").await?;
-        return Ok(None);
-    }
-    let mut cmd = git_cmd();
-    cmd.arg("-C").arg(dir).args(["pull", "-q", "--ff-only", "origin", "main"]);
-    Ok(run(cmd, None, "git pull").await.err().map(|e| format!("{e:#}")))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[tokio::test]
-    async fn commits_lists_exports_and_clones() {
+    async fn commits_lists_and_exports() {
         let dir = tempfile::tempdir().unwrap();
         let repo = dir.path().join("corpus.git");
         init_bare(&repo).await.unwrap();
@@ -274,40 +224,33 @@ mod tests {
         assert_eq!(export_corpus(&repo, &live).await.unwrap(), vec!["refund"]);
         assert!(!live.join(ARCHIVE_DIR).exists());
 
-        let ws = dir.path().join("ws");
-        assert_eq!(sync_workspace(&repo, &ws).await.unwrap(), None);
-        assert!(ws.join("refund/a.md").exists());
-        commit(&repo, &[("new.md".into(), Some("n".into()))], "third").await.unwrap();
-        assert_eq!(sync_workspace(&repo, &ws).await.unwrap(), None);
-        assert!(ws.join("new.md").exists());
     }
 
     #[tokio::test]
-    async fn imports_a_branch_as_main() {
+    async fn inspects_a_folder_in_place() {
         let dir = tempfile::tempdir().unwrap();
-        let source = dir.path().join("src.git");
-        init_bare(&source).await.unwrap();
-        commit(&source, &[("a.txt".into(), Some("a".into()))], "one").await.unwrap();
-        let main = head(&source).await.unwrap();
-        // A `develop` branch one commit ahead of main.
-        git(&source, &["update-ref", "refs/heads/develop", &main], None, None).await.unwrap();
-        let index = dir.path().join("idx");
-        git(&source, &["read-tree", &main], Some(&index), None).await.unwrap();
-        let sha = text(git(&source, &["hash-object", "-w", "--stdin"], None, Some(b"Cargo")).await.unwrap());
-        git(&source, &["update-index", "--add", "--cacheinfo", &format!("100644,{sha},Cargo.toml")], Some(&index), None).await.unwrap();
-        let tree = text(git(&source, &["write-tree"], Some(&index), None).await.unwrap());
-        let c = text(git(&source, &["commit-tree", &tree, "-p", &main, "-m", "two"], None, None).await.unwrap());
-        git(&source, &["update-ref", "refs/heads/develop", &c], None, None).await.unwrap();
+        let plain = dir.path().join("plain");
+        std::fs::create_dir_all(plain.join("src")).unwrap();
+        std::fs::write(plain.join("package.json"), "{}").unwrap();
+        let seen = inspect_folder(&plain).await;
+        assert!(seen.ok);
+        assert_eq!(seen.files, vec!["package.json", "src"]);
+        assert_eq!((seen.default_branch, seen.commits), (None, None), "not a git repo");
 
-        let seen = inspect(source.to_str().unwrap(), true, Some("develop")).await.unwrap();
-        assert_eq!(seen.default_branch.as_deref(), Some("main"));
-        assert_eq!(seen.branches, vec!["develop", "main"]);
-        assert_eq!(seen.commits, Some(2));
-        assert_eq!(seen.files, vec!["Cargo.toml", "a.txt"]);
-
-        let code = dir.path().join("code.git");
-        assert_eq!(clone_bare(source.to_str().unwrap(), Some("develop"), &code).await.unwrap(), ("develop".into(), 2));
-        assert_eq!(head(&code).await.as_deref(), Some(c.as_str()));
-        assert!(clone_bare("--upload-pack=x", None, &dir.path().join("x.git")).await.is_err());
+        let repo = dir.path().join("repo");
+        std::fs::create_dir_all(&repo).unwrap();
+        std::fs::write(repo.join("Cargo.toml"), "[package]").unwrap();
+        let sh = |args: &[&str]| {
+            let ok = std::process::Command::new("git").arg("-C").arg(&repo).args(args).env("GIT_AUTHOR_NAME", "t").env("GIT_AUTHOR_EMAIL", "t@t").env("GIT_COMMITTER_NAME", "t").env("GIT_COMMITTER_EMAIL", "t@t").status().unwrap().success();
+            assert!(ok, "git {args:?}");
+        };
+        sh(&["init", "-q", "-b", "develop"]);
+        sh(&["add", "."]);
+        sh(&["commit", "-q", "-m", "one"]);
+        let seen = inspect_folder(&repo).await;
+        assert_eq!(seen.default_branch.as_deref(), Some("develop"));
+        assert_eq!(seen.branches, vec!["develop"]);
+        assert_eq!(seen.commits, Some(1));
+        assert_eq!(seen.files, vec!["Cargo.toml"], "without .git");
     }
 }

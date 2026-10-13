@@ -5,6 +5,6 @@ import type { ReflexStatus } from "./ReflexStatus";
 
 export type ProjectInfo = { project: Project, reflex: ReflexStatus, stats: DecisionStats, 
 /**
- * The checkout of the code repo that the project's agents work in.
+ * The folder the project's agents work in.
  */
 workspace: string, };

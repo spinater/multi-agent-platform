@@ -35,7 +35,7 @@ import {
 import { Card, Main, PageHeader, SectionTitle } from "./shell/page";
 import { SessionBadge } from "./ui";
 
-const TABS = ["overview", "code", "corpus", "settings"] as const;
+const TABS = ["overview", "corpus", "settings"] as const;
 type Tab = (typeof TABS)[number];
 
 const reflexText: Record<string, string> = { running: "text-ok", starting: "text-info", no_corpus: "text-warn", error: "text-bad", stopped: "text-muted" };
@@ -49,7 +49,7 @@ function Box({ title, note, children, className }: { title: ReactNode; note?: Re
   );
 }
 
-/** A project's page (`#projects/<slug>`): workspace and repos, activity, Reflex, code and corpus editors, settings. */
+/** A project's page (`#projects/<slug>`): its folder, activity, Reflex, the corpus editor, settings. */
 export function ProjectDetail({ slug }: { slug: string }) {
   const { projects, tasks, sessions, orchestrator, go, setProject, setScope, scope, project, toast, connection, now } = useApp();
   const [tab, setTab] = useState<Tab>("overview");
@@ -112,7 +112,6 @@ export function ProjectDetail({ slug }: { slug: string }) {
         ))}
       </nav>
       {tab === "overview" && <Overview info={info} />}
-      {tab === "code" && <RepoEditor key={`${slug}-code`} slug={slug} repo="code" />}
       {tab === "corpus" && <RepoEditor key={`${slug}-corpus`} slug={slug} repo="corpus" />}
       {tab === "settings" && <Settings key={slug} info={info} />}
     </Main>
@@ -150,24 +149,13 @@ function Overview({ info }: { info: ProjectInfo }) {
 
   return (
     <div className="grid gap-4 lg:grid-cols-2">
-      <Box title="Workspace" note={src.kind === "empty" ? "new repo" : `imported · ${src.kind}`}>
+      <Box title="Folder" note={src.kind === "empty" ? "created new" : src.kind === "local" ? "existing · in place" : `legacy · ${src.kind}`}>
         <dl className="grid grid-cols-[7rem_minmax(0,1fr)] gap-x-3 gap-y-1.5 font-mono text-[11.5px]">
-          <dt className="text-muted">checkout</dt>
+          <dt className="text-muted">agents work in</dt>
           <dd className="break-all">{info.workspace}</dd>
-          {src.kind !== "empty" && (
-            <>
-              <dt className="text-muted">source</dt>
-              <dd className="break-all">
-                {src.location} @ {src.branch ?? "default"}
-              </dd>
-            </>
-          )}
-          <dt className="text-muted">branch</dt>
-          <dd>main · fast-forwarded before each task</dd>
         </dl>
+        <p className="font-mono text-[11px] text-muted">The platform never copies the code or hosts it in a git repo of its own; agents change this folder directly.</p>
         <Inset className="gap-1 overflow-x-auto">
-          <span className="text-muted"># code: agents work in a checkout of it</span>
-          <span className="whitespace-nowrap">git clone {cloneUrl(p.slug, "code")}</span>
           <span className="text-muted"># corpus: one folder per Reflex domain; a push to main reloads Reflex</span>
           <span className="whitespace-nowrap">git clone {cloneUrl(p.slug, "corpus")}</span>
         </Inset>
@@ -325,7 +313,7 @@ function RepoEditor({ slug, repo }: { slug: string; repo: RepoName }) {
     setError("");
     try {
       const r = await api.writeFile(slug, repo, { path, content: remove ? null : content, message });
-      setStatus(`committed ${r.commit.slice(0, 8)}${repo === "corpus" ? " · Reflex restarted" : ""}`);
+      setStatus(`committed ${r.commit.slice(0, 8)} · Reflex restarted`);
       setMessage("");
       if (remove) {
         setPath("");
@@ -344,12 +332,10 @@ function RepoEditor({ slug, repo }: { slug: string; repo: RepoName }) {
 
   return (
     <div className="flex flex-col gap-4">
-      {repo === "corpus" && (
-        <p className="max-w-[760px] text-[13px] leading-normal text-text-2">
-          Each top-level folder is one Reflex domain (1 to 8). Write each <code>.md</code> as prose describing that domain&apos;s situations and how they are handled, like a
-          runbook. English works best.
-        </p>
-      )}
+      <p className="max-w-[760px] text-[13px] leading-normal text-text-2">
+        Each top-level folder is one Reflex domain (1 to 8). Write each <code>.md</code> as prose describing that domain&apos;s situations and how they are handled, like a
+        runbook. English works best.
+      </p>
       <div className="grid gap-4 lg:grid-cols-[260px_minmax(0,1fr)]">
         <Box
           title="Files"
@@ -357,7 +343,7 @@ function RepoEditor({ slug, repo }: { slug: string; repo: RepoName }) {
             <button
               className="flex items-center gap-1 text-link hover:text-link-hover"
               onClick={() => {
-                setPath(repo === "corpus" ? "domain/notes.md" : "");
+                setPath("domain/notes.md");
                 setContent("");
                 setOriginal(null);
                 setStatus("");

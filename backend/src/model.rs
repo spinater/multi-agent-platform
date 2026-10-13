@@ -329,7 +329,7 @@ pub struct ProjectInfo {
     pub project: Project,
     pub reflex: ReflexStatus,
     pub stats: DecisionStats,
-    /// The checkout of the code repo that the project's agents work in.
+    /// The folder the project's agents work in.
     pub workspace: String,
 }
 
@@ -682,17 +682,18 @@ pub struct PipelineInfo {
 
 // ---- project settings
 
-/// Where a project's code repo came from.
+/// The folder a project's agents work in. The platform works on folders on this machine in place: it never copies,
+/// clones or hosts a project's code.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
 #[serde(rename_all = "snake_case")]
 #[ts(export)]
 pub enum SourceKind {
-    /// A new repo with the platform's seed files.
+    /// A new, empty folder created at `location`.
     #[default]
     Empty,
-    /// `git clone --bare` of a URL.
+    /// Projects made before folders were used in place, whose code was cloned into the platform. No longer created.
     Git,
-    /// `git clone --bare` of a git repo on this machine.
+    /// A folder already on this machine, used as it is.
     Local,
 }
 
@@ -700,10 +701,10 @@ pub enum SourceKind {
 #[ts(export)]
 pub struct ProjectSource {
     pub kind: SourceKind,
-    /// The git URL (`git`) or the path of the repo on this machine (`local`).
+    /// The project's folder on this machine (`empty`, `local`), or the URL a legacy `git` project was cloned from.
     #[serde(default)]
     pub location: Option<String>,
-    /// The branch imported as the platform repo's `main`; `None` is the source's default branch.
+    /// The branch a legacy `git` project was cloned from; unused for folders.
     #[serde(default)]
     pub branch: Option<String>,
 }
@@ -776,15 +777,17 @@ pub struct ProjectDefaults {
     pub session_prefix: String,
 }
 
-/// What the wizard found at a project source before importing it.
+/// What the wizard found at a project's folder before creating the project.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, TS)]
 #[ts(export)]
 pub struct SourceInspection {
     pub ok: bool,
     pub error: Option<String>,
+    /// The branch checked out in the folder; `None` when it is not a git repo.
     pub default_branch: Option<String>,
+    /// The folder's local branches.
     pub branches: Vec<String>,
-    /// Marker files at the top of a local repo's branch (`Cargo.toml`, `package.json`, `CLAUDE.md`, …).
+    /// What is at the top of the folder (`Cargo.toml`, `package.json`, `CLAUDE.md`, …).
     pub files: Vec<String>,
     #[ts(type = "number | null")]
     pub commits: Option<u64>,

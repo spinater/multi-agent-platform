@@ -120,37 +120,54 @@ fn corpus_seed() -> Vec<(String, Option<String>)> {
     )]
 }
 
-fn code_seed(p: &Project) -> Vec<(String, Option<String>)> {
-    let readme = format!(
-        "# {name}\n\n{desc}\n\nCreated by multi-agent-platform. Its decision engine is the project's Reflex, fed by the sibling corpus repo \
-         (`/git/{slug}/corpus.git` on the platform).\n",
-        name = p.name,
-        desc = p.description,
-        slug = p.slug,
-    );
-    let claude = "# Decisions\n\n\
-        Before spending an LLM call to classify, route, triage or decide something, ask this project's decision endpoint. \
-        Agents started by the platform have its URL in `$MAP_DECIDE_URL`.\n\n\
-        ```sh\ncurl -s \"$MAP_DECIDE_URL\" -H 'content-type: application/json' -d '{\n  \"state\": \"the facts of the situation\",\n  \
-        \"questions\": [{\"id\": \"route\", \"kind\": \"choice\", \"prompt\": \"Route this ticket\", \"options\": [\"billing\", \"shipping\"]}]\n}'\n```\n\n\
-        - Kinds: `choice` (2+ options), `score` (2+ levels, lowest first), `noul` (yes/no, no options).\n\
-        - Put the facts in `state`: a thin state makes Reflex abstain.\n\
-        - Each item in `answers` has `answer` and `lane`: `reflex` (no LLM used), `llm` (the fallback answered) or `abstain` (nobody did: handle it).\n\
-        - Corpus changes go to the corpus repo; a push to `main` reloads Reflex.\n";
-    vec![("README.md".into(), Some(readme)), ("CLAUDE.md".into(), Some(claude.into()))]
-}
-
+/// A project in a new folder next to the data dir, for tests.
 #[cfg(test)]
 pub async fn create(hub: &Hub, req: NewProject) -> Result<Project> {
-    create_with(hub, req, ProjectSettings::default()).await.map(|(p, _)| p)
+    let folder = hub.config.server.data_dir.with_file_name("folders").join(slugify(&req.name));
+    let source = crate::model::ProjectSource { kind: SourceKind::Empty, location: Some(folder.display().to_string()), branch: None };
+    create_with(hub, req, ProjectSettings { source, ..Default::default() }).await.map(|(p, _)| p)
+}
+
+/// Checks the project's folder and returns it as an absolute path: an existing folder for `local`, a missing or
+/// empty one for `empty` (created by the caller). Folders that are the platform's own or another project's are refused.
+async fn project_folder(hub: &Hub, kind: SourceKind, location: Option<&str>, slug: &str) -> Result<std::path::PathBuf> {
+    if kind == SourceKind::Git {
+        bail!("the platform works on folders on this machine and never clones code: clone the repo yourself, then add its folder");
+    }
+    let path = crate::login::expand_home(location.unwrap_or_default().trim());
+    let path = match kind {
+        SourceKind::Local => {
+            if !path.is_dir() {
+                bail!("{} is not a folder on this machine", path.display());
+            }
+            path.canonicalize()?
+        }
+        _ => {
+            if path.exists() && (!path.is_dir() || std::fs::read_dir(&path)?.next().is_some()) {
+                bail!("{} already exists and is not an empty folder", path.display());
+            }
+            path
+        }
+    };
+    let data = hub.config.server.data_dir.canonicalize().unwrap_or_else(|_| hub.config.server.data_dir.clone());
+    if path.starts_with(&data) || data.starts_with(&path) {
+        bail!("{} overlaps the platform's data folder {}", path.display(), data.display());
+    }
+    for other in hub.store.projects().await? {
+        let theirs = hub.workspace_of(&other);
+        if other.slug != slug && (path.starts_with(&theirs) || theirs.starts_with(&path)) {
+            bail!("{} overlaps project {}'s folder {}", path.display(), other.slug, theirs.display());
+        }
+    }
+    Ok(path)
 }
 
 fn check(checks: &mut Vec<CheckLine>, level: Level, text: impl Into<String>) {
     checks.push(CheckLine { level, text: text.into() });
 }
 
-/// Creates the project's code repo (new, or imported from `settings.source`), its corpus repo, the agents'
-/// workspace and its Reflex, and reports each step as a check line.
+/// Creates a project on its folder (existing, used in place, or new and empty), its corpus repo and its Reflex, and
+/// reports each step as a check line. The folder is never copied or written to.
 pub async fn create_with(hub: &Hub, req: NewProject, settings: ProjectSettings) -> Result<(Project, Vec<CheckLine>)> {
     let mut settings = project_settings::normalize(settings);
     project_settings::validate(hub, &settings)?;
@@ -178,50 +195,38 @@ pub async fn create_with(hub: &Hub, req: NewProject, settings: ProjectSettings) 
         created_at: Utc::now(),
         settings: ProjectSettings::default(),
     };
+    let folder = project_folder(hub, settings.source.kind, settings.source.location.as_deref(), &slug).await?;
+    settings.source.location = Some(folder.display().to_string());
+    settings.source.branch = None;
     let mut checks = vec![];
+    let mut created_folder = false;
     let setup = async {
-        let code = hub.code_repo(&slug);
         let corpus = hub.corpus_repo(&slug);
-        match settings.source.kind {
-            SourceKind::Empty => {
-                repo::init_bare(&code).await?;
-                repo::commit(&code, &code_seed(&project), "Initial commit").await?;
-                check(&mut checks, Level::Success, format!("code repo created · /git/{slug}/code.git · README.md, CLAUDE.md"));
-            }
-            SourceKind::Git | SourceKind::Local => {
-                let location = settings.source.location.clone().unwrap_or_default();
-                let source = if settings.source.kind == SourceKind::Local {
-                    let path = crate::login::expand_home(&location);
-                    if !path.is_dir() {
-                        bail!("{} is not a directory", path.display());
-                    }
-                    path.display().to_string()
-                } else {
-                    location.clone()
-                };
-                std::fs::create_dir_all(hub.project_dir(&slug))?;
-                let (branch, commits) = repo::clone_bare(&source, settings.source.branch.as_deref(), &code).await?;
-                check(&mut checks, Level::Success, format!("imported {commits} commit{} from {location} @ {branch} as main · /git/{slug}/code.git", if commits == 1 { "" } else { "s" }));
-                settings.source.branch = Some(branch);
-                if repo::read(&code, "CLAUDE.md").await.is_none() {
-                    let claude = code_seed(&project).into_iter().filter(|(p, _)| p == "CLAUDE.md").collect::<Vec<_>>();
-                    repo::commit(&code, &claude, "Add the platform's decision notes").await?;
-                    check(&mut checks, Level::Success, "added CLAUDE.md with the project's decision endpoint");
-                } else {
-                    check(&mut checks, Level::Warning, "kept the repo's own CLAUDE.md; agents still get $MAP_DECIDE_URL in their prompt");
-                }
-            }
+        if settings.source.kind == SourceKind::Empty {
+            created_folder = !folder.exists();
+            std::fs::create_dir_all(&folder).with_context(|| format!("creating {}", folder.display()))?;
+            check(&mut checks, Level::Success, format!("folder created · {}", folder.display()));
+        } else {
+            let found = repo::inspect_folder(&folder).await;
+            let git = match (&found.default_branch, found.commits) {
+                (Some(branch), Some(n)) => format!("git branch {branch} · {n} commit{}", if n == 1 { "" } else { "s" }),
+                (Some(branch), None) => format!("git branch {branch}"),
+                _ => "not a git repo".into(),
+            };
+            check(&mut checks, Level::Success, format!("using {} in place · {git}", folder.display()));
         }
+        std::fs::create_dir_all(hub.project_dir(&slug))?;
         repo::init_bare(&corpus).await?;
         repo::commit(&corpus, &corpus_seed(), "Initial corpus").await?;
         check(&mut checks, Level::Success, format!("corpus repo created · /git/{slug}/corpus.git · 1 example domain"));
-        let workspace = hub.project_workspace(&slug);
-        repo::sync_workspace(&code, &workspace).await?;
-        check(&mut checks, Level::Success, format!("workspace checked out at {}", workspace.display()));
         hub.put_project(&Project { settings: settings.clone(), ..project.clone() }).await
     };
     if let Err(err) = setup.await {
+        // Only the platform's own files: the project's folder is removed only when it was created here and is still empty.
         let _ = std::fs::remove_dir_all(hub.project_dir(&slug));
+        if created_folder {
+            let _ = std::fs::remove_dir(&folder);
+        }
         let _ = hub.store.delete_project(&slug).await;
         return Err(err);
     }
@@ -262,10 +267,6 @@ pub async fn create_with(hub: &Hub, req: NewProject, settings: ProjectSettings) 
 /// Commits one file to a project repo (`None` deletes it); a corpus change restarts Reflex.
 pub async fn write_file(hub: &Hub, slug: &str, repo_name: &str, path: &str, content: Option<String>, message: &str) -> Result<String> {
     let repo_path = match repo_name {
-        "code" => {
-            validate_repo_path(path)?;
-            hub.code_repo(slug)
-        }
         "corpus" => {
             validate_corpus_path(path)?;
             let repo_path = hub.corpus_repo(slug);
@@ -283,7 +284,7 @@ pub async fn write_file(hub: &Hub, slug: &str, repo_name: &str, path: &str, cont
             }
             repo_path
         }
-        other => bail!("unknown repo `{other}`; use code or corpus"),
+        other => bail!("unknown repo `{other}`; the only one is corpus"),
     };
     let message = if message.trim().is_empty() { format!("{} {path}", if content.is_some() { "Update" } else { "Delete" }) } else { message.trim().to_string() };
     let commit = repo::commit(&repo_path, &[(path.to_string(), content)], &message).await?;

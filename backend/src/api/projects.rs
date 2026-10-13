@@ -118,7 +118,6 @@ pub async fn delete(State(hub): State<Arc<Hub>>, UrlPath(slug): UrlPath<String>)
 
 fn repo_dir(hub: &Hub, slug: &str, name: &str) -> Result<std::path::PathBuf, ApiError> {
     match name {
-        "code" => Ok(hub.code_repo(slug)),
         "corpus" => Ok(hub.corpus_repo(slug)),
         _ => Err(not_found("repo")),
     }
@@ -240,20 +239,24 @@ pub async fn defaults(State(hub): State<Arc<Hub>>) -> ApiResult<ProjectDefaults>
 pub struct InspectBody {
     kind: SourceKind,
     location: String,
-    branch: Option<String>,
 }
 
-/// Looks at a git URL or a local repo before it is imported. Problems come back as `ok: false` with `error`, so the
+/// Looks at a project's folder before the project is made. Problems come back as `ok: false` with `error`, so the
 /// wizard can show them next to the field.
 pub async fn inspect(Json(b): Json<InspectBody>) -> ApiResult<SourceInspection> {
-    let branch = b.branch.filter(|x| !x.trim().is_empty());
     let failed = |err: anyhow::Error| SourceInspection { error: Some(format!("{err:#}")), ..Default::default() };
-    if let Err(err) = project_settings::validate_location(b.kind, Some(&b.location)).and_then(|_| project_settings::validate_branch(branch.as_deref())) {
+    if let Err(err) = project_settings::validate_location(b.kind, Some(&b.location)) {
         return Ok(Json(failed(err)));
     }
-    let local = b.kind == SourceKind::Local;
-    let source = if local { crate::login::expand_home(b.location.trim()).display().to_string() } else { b.location.trim().to_string() };
-    Ok(Json(repo::inspect(&source, local, branch.as_deref()).await.unwrap_or_else(failed)))
+    let path = crate::login::expand_home(b.location.trim());
+    Ok(Json(match b.kind {
+        SourceKind::Local if path.is_dir() => repo::inspect_folder(&path).await,
+        SourceKind::Local => failed(anyhow::anyhow!("{} is not a folder on this machine", path.display())),
+        SourceKind::Empty if !path.exists() => SourceInspection { ok: true, ..Default::default() },
+        SourceKind::Empty if path.is_dir() && std::fs::read_dir(&path).is_ok_and(|mut d| d.next().is_none()) => SourceInspection { ok: true, ..Default::default() },
+        SourceKind::Empty => failed(anyhow::anyhow!("{} already exists and is not an empty folder", path.display())),
+        SourceKind::Git => failed(anyhow::anyhow!("the platform never clones code: clone the repo yourself, then add its folder")),
+    }))
 }
 
 pub async fn login_start(State(hub): State<Arc<Hub>>, UrlPath(name): UrlPath<String>) -> ApiResult<crate::model::LoginState> {

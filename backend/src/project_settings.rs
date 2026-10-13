@@ -86,10 +86,10 @@ pub async fn audit_chain(hub: &Hub, task: &Task) -> Vec<String> {
     }
 }
 
-/// A local repo path or a git URL that `git clone` takes, never an option or a transport that runs commands.
+/// A folder on this machine as an absolute path; for a legacy `git` project, a git URL that is never an option or a
+/// transport that runs commands.
 pub fn validate_location(kind: SourceKind, location: Option<&str>) -> Result<()> {
     match kind {
-        SourceKind::Empty => Ok(()),
         SourceKind::Git => {
             let url = location.map(str::trim).filter(|l| !l.is_empty()).context("a git source needs a URL")?;
             let scp = regex::Regex::new(r"^[A-Za-z0-9._-]+@[A-Za-z0-9.-]+:[^\s]+$").unwrap();
@@ -99,10 +99,10 @@ pub fn validate_location(kind: SourceKind, location: Option<&str>) -> Result<()>
             }
             Ok(())
         }
-        SourceKind::Local => {
-            let path = location.map(str::trim).filter(|l| !l.is_empty()).context("a local source needs a path")?;
+        SourceKind::Empty | SourceKind::Local => {
+            let path = location.map(str::trim).filter(|l| !l.is_empty()).context("a project needs its folder on this machine")?;
             if !(path.starts_with('/') || path.starts_with("~/")) {
-                bail!("give the local repo as an absolute path (or ~/…)");
+                bail!("give the folder as an absolute path (or ~/…)");
             }
             Ok(())
         }
@@ -199,7 +199,11 @@ mod tests {
         NewTask { title: title.into(), prompt: "p".into(), depends_on: vec![], provider: None, model: None, project: project.map(String::from) }
     }
 
-    async fn project(hub: &Hub, name: &str, settings: ProjectSettings) -> String {
+    /// A project in a new folder next to the data dir, unless `settings` names one.
+    async fn project(hub: &Hub, name: &str, mut settings: ProjectSettings) -> String {
+        if settings.source.location.is_none() {
+            settings.source.location = Some(hub.config.server.data_dir.with_file_name("folders").join(name).display().to_string());
+        }
         let new = NewProject { name: name.into(), slug: None, description: String::new(), fallback: Some("none".into()), model: None };
         create_with(hub, new, settings).await.unwrap().0.slug
     }
@@ -237,29 +241,40 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn imports_a_local_repo_and_reports_checks() {
+    async fn uses_a_folder_in_place_and_reports_checks() {
         let (hub, dir) = hub("").await;
-        let source = dir.path().join("upstream.git");
-        crate::repo::init_bare(&source).await.unwrap();
-        crate::repo::commit(&source, &[("Cargo.toml".into(), Some("[package]".into()))], "first").await.unwrap();
-        let settings = ProjectSettings {
-            source: ProjectSource { kind: SourceKind::Local, location: Some(source.display().to_string()), branch: None },
-            ..Default::default()
-        };
-        let new = NewProject { name: "Imported".into(), slug: None, description: String::new(), fallback: Some("none".into()), model: None };
-        let (p, checks) = create_with(&hub, new, settings).await.unwrap();
-        assert_eq!(p.settings.source.branch.as_deref(), Some("main"));
-        assert!(hub.project_workspace(&p.slug).join("Cargo.toml").exists());
-        assert!(hub.project_workspace(&p.slug).join("CLAUDE.md").exists(), "decision notes added");
+        let folder = dir.path().join("my-app");
+        std::fs::create_dir_all(&folder).unwrap();
+        std::fs::write(folder.join("Cargo.toml"), "[package]").unwrap();
+        let local = |path: &Path| ProjectSettings { source: ProjectSource { kind: SourceKind::Local, location: Some(path.display().to_string()), branch: None }, ..Default::default() };
+        let new = |name: &str| NewProject { name: name.into(), slug: None, description: String::new(), fallback: Some("none".into()), model: None };
+        let (p, checks) = create_with(&hub, new("Mine"), local(&folder)).await.unwrap();
+        assert_eq!(hub.workspace_of(&p), folder.canonicalize().unwrap());
+        assert_eq!(std::fs::read_dir(&folder).unwrap().count(), 1, "nothing added to the folder");
+        assert!(!hub.project_dir(&p.slug).join("code.git").exists(), "the code is never copied");
         let text: Vec<&str> = checks.iter().map(|c| c.text.as_str()).collect();
-        assert!(text[0].starts_with("imported 1 commit from"), "{text:?}");
-        assert!(text.iter().any(|t| t.starts_with("workspace checked out at")), "{text:?}");
+        assert!(text[0].starts_with("using ") && text[0].ends_with("not a git repo"), "{text:?}");
         assert!(text.iter().any(|t| t.starts_with("claude · sonnet · found")), "{text:?}");
 
-        let bad = ProjectSettings { source: ProjectSource { kind: SourceKind::Local, location: Some("/nonexistent/repo".into()), branch: None }, ..Default::default() };
-        let new = NewProject { name: "Broken".into(), slug: None, description: String::new(), fallback: Some("none".into()), model: None };
-        assert!(create_with(&hub, new, bad).await.is_err());
-        assert!(!hub.project_dir("broken").exists(), "a failed import leaves nothing behind");
+        // Another project cannot take the same folder or one inside it; missing folders and git URLs are refused.
+        assert!(create_with(&hub, new("Again"), local(&folder)).await.is_err());
+        std::fs::create_dir_all(folder.join("sub")).unwrap();
+        assert!(create_with(&hub, new("Inside"), local(&folder.join("sub"))).await.is_err());
+        assert!(create_with(&hub, new("Broken"), local(Path::new("/nonexistent/repo"))).await.is_err());
+        assert!(!hub.project_dir("broken").exists(), "a failed create leaves nothing behind");
+        let git = ProjectSettings { source: ProjectSource { kind: SourceKind::Git, location: Some("https://github.com/a/b.git".into()), branch: None }, ..Default::default() };
+        assert!(create_with(&hub, new("Cloned"), git).await.is_err());
+
+        // A new folder is created, and deleting the project leaves the folder and its files alone.
+        let fresh = dir.path().join("fresh");
+        let empty = ProjectSettings { source: ProjectSource { kind: SourceKind::Empty, location: Some(fresh.display().to_string()), branch: None }, ..Default::default() };
+        let (q, _) = create_with(&hub, new("Fresh"), empty).await.unwrap();
+        assert!(fresh.is_dir());
+        std::fs::write(fresh.join("work.txt"), "x").unwrap();
+        crate::projects::delete(&hub, &q.slug).await.unwrap();
+        assert!(fresh.join("work.txt").exists());
+        crate::projects::delete(&hub, &p.slug).await.unwrap();
+        assert!(folder.join("Cargo.toml").exists());
     }
 
     #[tokio::test]
@@ -281,6 +296,7 @@ mod tests {
         assert!(validate_location(SourceKind::Git, Some("ext::sh -c touch% /tmp/x")).is_err());
         assert!(validate_location(SourceKind::Local, Some("relative/path")).is_err());
         assert!(validate_location(SourceKind::Local, Some("~/code/x")).is_ok());
+        assert!(validate_location(SourceKind::Empty, None).is_err());
         assert!(validate_branch(Some("feat/i18n-th-en")).is_ok());
         assert!(validate_branch(Some("-x")).is_err());
         assert!(validate_branch(Some("a..b")).is_err());

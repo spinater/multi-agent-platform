@@ -3,10 +3,10 @@ import type { SourceKind } from "./SourceKind";
 
 export type ProjectSource = { kind: SourceKind, 
 /**
- * The git URL (`git`) or the path of the repo on this machine (`local`).
+ * The project's folder on this machine (`empty`, `local`), or the URL a legacy `git` project was cloned from.
  */
 location: string | null, 
 /**
- * The branch imported as the platform repo's `main`; `None` is the source's default branch.
+ * The branch a legacy `git` project was cloned from; unused for folders.
  */
 branch: string | null, };

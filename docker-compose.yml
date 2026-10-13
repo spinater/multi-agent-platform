@@ -22,9 +22,14 @@ services:
       # ~/.claude.json by renaming over it, which a single-file bind mount cannot follow. Sign-in stays shared.
       CLAUDE_CONFIG_DIR: ${MAP_HOME}/.claude
     volumes:
-      # Config (read-only) and state: the database, run files, project repos and workspaces.
+      # Config (read-only) and state: the database, run files, corpus repos.
       - ${MAP_DIR}/map.toml:/config/map.toml:ro
       - ${MAP_DIR}/data:/data
+      # The folder that holds your projects, at the same path: projects are folders the agents work in place.
+      - ${MAP_PROJECTS_DIR:?set MAP_PROJECTS_DIR in .env}:${MAP_PROJECTS_DIR}
+      # Optional, only if they exist on the host (a missing file becomes an empty directory): your global git identity
+      # (`- ${MAP_HOME}/.gitconfig:${MAP_HOME}/.gitconfig:ro`) and ssh keys for agents that push
+      # (`- ${MAP_HOME}/.ssh:${MAP_HOME}/.ssh:ro`). A project's own .git/config works without them.
       # Agent sign-ins and history, shared with the host so a token refresh on one side does not log out the other.
       - ${MAP_HOME}/.claude:${MAP_HOME}/.claude
       - ${MAP_HOME}/.codex:${MAP_HOME}/.codex

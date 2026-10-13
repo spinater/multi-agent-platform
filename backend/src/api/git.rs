@@ -1,5 +1,5 @@
-//! `/git/<slug>/{code,corpus}.git`: git smart HTTP through `git http-backend`, so a project's repos can be cloned
-//! and pushed with plain git. With `server.api_token` set, git sends it as the Basic-auth password (any user name).
+//! `/git/<slug>/corpus.git`: git smart HTTP through `git http-backend`, so a project's Reflex corpus can be cloned
+//! and pushed with plain git. The project's code is never served: it stays in the project's folder. With `server.api_token` set, git sends it as the Basic-auth password (any user name).
 //! A successful push to the corpus repo restarts the project's Reflex.
 
 use std::process::Stdio;
@@ -46,8 +46,8 @@ pub async fn handler(
         return resp;
     }
     let repo = rest.split('/').next().unwrap_or("");
-    if !matches!(repo, "code.git" | "corpus.git") || rest.split('/').any(|s| s == ".." || s.is_empty()) {
-        return plain(StatusCode::NOT_FOUND, "repos are code.git and corpus.git");
+    if repo != "corpus.git" || rest.split('/').any(|s| s == ".." || s.is_empty()) {
+        return plain(StatusCode::NOT_FOUND, "the only repo is corpus.git");
     }
     match hub.store.project(&slug).await {
         Ok(Some(_)) => {}

@@ -144,7 +144,9 @@ impl Orchestrator {
         }
         if let Some(slug) = &task.project {
             p.push_str(&format!(
-                "- This is project `{slug}`. Before using an LLM to classify, route or decide something, POST it to $MAP_DECIDE_URL (see CLAUDE.md).\n"
+                "- This is project `{slug}`. Before using an LLM to classify, route or decide something, POST it to $MAP_DECIDE_URL: \
+                 {{\"state\": \"<the facts>\", \"questions\": [{{\"id\", \"kind\": \"choice\"|\"score\"|\"noul\", \"prompt\", \"options\"}}]}}. \
+                 Each answer has a `lane`; `abstain` means nobody decided, so handle it yourself.\n"
             ));
         }
         if let Some(failure) = previous_failure {
@@ -171,24 +173,6 @@ impl Orchestrator {
         task.attempts += 1;
         let session = format!("{}task-{}-{}", self.hub.config.workspace.session_prefix, task.id, task.attempts);
         let previous_failure = if task.attempts > 1 { task.result.clone() } else { None };
-        if let Some(slug) = &task.project {
-            // Start from what was pushed to the project's code repo.
-            match crate::repo::sync_workspace(&self.hub.code_repo(slug), &self.hub.project_workspace(slug)).await {
-                Ok(None) => {}
-                Ok(Some(warning)) => {
-                    self.hub.event(Level::Warning, "task.workspace", None, Some(task.id), format!("Workspace not updated: {warning}")).await;
-                }
-                Err(err) => {
-                    record(&self.hub, Kind::LAUNCH_ERROR, &task, format!("could not prepare the {slug} workspace: {err:#}")).await;
-                    record(&self.hub, Kind::RETRY_FAILED, &task, "workspace error · no retry").await;
-                    task.attempts -= 1;
-                    task.result = Some(format!("Could not prepare the {slug} workspace: {err:#}"));
-                    task.status = TaskStatus::Failed;
-                    self.hub.put_task(&mut task).await?;
-                    return Ok(false);
-                }
-            }
-        }
         let prompt = self.build_prompt(&task, &session, previous_failure.as_deref(), &crate::project_settings::verify(&self.hub, &task).await);
         let req = LaunchRequest {
             name: Some(session.clone()),
@@ -338,7 +322,7 @@ impl Orchestrator {
     async fn finish(&self, mut task: Task) -> Result<()> {
         let hub = &self.hub;
         let cfg = &hub.config.orchestrator;
-        let dir = hub.work_dir(task.project.as_deref());
+        let dir = hub.work_dir(task.project.as_deref()).await;
 
         if task.status == TaskStatus::Verifying {
             let verify = crate::project_settings::verify(hub, &task).await;
@@ -442,7 +426,7 @@ impl Orchestrator {
                 .map(|a| a.replace("{binary}", &spec.binary).replace("{model}", &spec.default_model).replace("{session}", "audit").replace("{prompt}", &prompt))
                 .collect();
             let mut cmd = Command::new(&argv[0]);
-            cmd.args(&argv[1..]).current_dir(hub.work_dir(task.project.as_deref())).envs(&hub.config.workspace.env);
+            cmd.args(&argv[1..]).current_dir(hub.work_dir(task.project.as_deref()).await).envs(&hub.config.workspace.env);
             hub.event(Level::Info, "task.audit", None, Some(task.id), format!("Auditing with {provider}")).await;
             record(hub, Kind::AUDIT_ASK, task, format!("{provider} · reviewing git status, git diff, git log -5")).await;
             let (ok, output) = run_captured(cmd, Duration::from_secs(hub.config.orchestrator.audit.timeout_secs)).await?;
@@ -605,7 +589,7 @@ mod tests {
         )
         .await
         .unwrap();
-        assert!(hub.project_workspace(&project.slug).join("CLAUDE.md").exists());
+        assert!(hub.workspace_of(&project).is_dir());
         let t = hub.store.create_task(NewTask { project: Some(project.slug.clone()), ..new_task("a", vec![]) }).await.unwrap();
         Orchestrator::new(hub.clone()).tick().await.unwrap();
         let session = hub.store.task(t.id).await.unwrap().unwrap().session.unwrap();

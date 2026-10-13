@@ -63,7 +63,7 @@ function ProjectSwitcher() {
           <div role="menu" className="absolute top-9 left-0 z-50 w-[290px] max-w-[calc(100vw-32px)] rounded-[10px] border border-line-2 bg-menu p-1.5 shadow-[0_20px_50px_rgba(0,0,0,.55)]">
             <p className="label px-2.5 pt-1.5 pb-1">Switch project</p>
             {row("", workspaceName(server?.workspace_dir), `${server?.workspace_dir ?? ""} · default workspace`, scope === "project" && project === null, () => pick(null), "var(--muted)")}
-            {projects.map((p) => row(p.project.slug, p.project.name, `/git/${p.project.slug} · reflex ${p.reflex.state.replace("_", " ")}`, scope === "project" && project === p.project.slug, () => pick(p.project.slug)))}
+            {projects.map((p) => row(p.project.slug, p.project.name, `${p.workspace} · reflex ${p.reflex.state.replace("_", " ")}`, scope === "project" && project === p.project.slug, () => pick(p.project.slug)))}
             <div className="my-1 border-t border-line" />
             {row("*", "All projects", "merged view, read-only", scope === "all", () => {
               setScope("all");

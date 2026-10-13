@@ -23,20 +23,21 @@ nothing is tied to one repository, session name or provider.
     (`VERDICT: PASS`), then `post_done` hooks (e.g. commit).
   - **Retries.** A failed check retries the task with the failure output in the new prompt, up to `max_attempts`.
   - **Human safety.** It never kills a worker that someone is attached to, or one with typing on its input line.
-- **Projects.** A project is a code repo, a corpus repo and its own [Reflex](https://reflex.gist.rs) decision engine.
-  - **Repos.** Both are bare git repos served at `/git/<slug>/code.git` and `/git/<slug>/corpus.git`: clone, push,
-    or edit files from the dashboard. Tasks and sessions of a project run in a checkout of its code repo, which the
-    orchestrator fast-forwards before each task.
+- **Projects.** A project is a folder on the machine MAP is installed on, a corpus repo and its own
+  [Reflex](https://reflex.gist.rs) decision engine.
+  - **Folder.** Tasks and sessions of a project run in its folder, in place: an existing folder (a git repo or not),
+    or a new empty one MAP creates. MAP never copies, clones, hosts or pushes a project's code, and adds no files to
+    it; deleting a project leaves the folder alone. Two projects cannot share a folder or nest.
+  - **Corpus.** A bare git repo of the platform's own, served at `/git/<slug>/corpus.git`: clone, push, or edit
+    files from the dashboard.
   - **Decide before calling an LLM.** `POST /api/projects/<slug>/decide` asks Reflex first (local, no model, a few
     milliseconds). Answers at or above the project's confidence threshold are final; only the rest go to the
     project's fallback: the Anthropic API, or any provider run headless (`claude -p`, `codex exec`, `agy -p`).
-    Agents started in a project get the endpoint as `$MAP_DECIDE_URL`, and the code repo's `CLAUDE.md` tells them
-    to use it.
-  - **Corpus.** One top-level folder per Reflex domain (1–8), prose `.md` files inside. A push or an edit restarts
-    the project's Reflex on the new corpus.
-  - **Import.** A project's code repo starts empty (README and CLAUDE.md), or is imported from a git URL or a local
-    repo with `git clone --bare` (one branch, renamed `main`). Creating a project returns check lines: repos created,
-    commits imported, workspace checked out, Reflex started or why not, each provider found and signed in.
+    Agents started in a project get the endpoint as `$MAP_DECIDE_URL`, and their prompt tells them to use it.
+  - **Corpus content.** One top-level folder per Reflex domain (1–8), prose `.md` files inside. A push or an edit
+    restarts the project's Reflex on the new corpus.
+  - **Create.** Creating a project returns check lines: the folder used (its git branch and commits) or created,
+    the corpus repo, Reflex started or why not, each provider found and signed in.
   - **Settings.** Each project can set its own provider order (with a model and a session limit per provider), verify
     commands and audit (on, off, or a given auditor), and can be paused so the orchestrator starts none of its pending
     tasks. Unset fields fall back to `[orchestrator]` in `map.toml`. They live in the database, not in a file.
@@ -93,10 +94,10 @@ nothing is tied to one repository, session name or provider.
 | `backend/src/orchestrator.rs` | Task scheduling, provider failover, verify, audit, retry |
 | `backend/src/hub.rs` | Launching and closing sessions; the single place that writes state and broadcasts it |
 | `backend/src/terminal/` | `Terminal` trait; `tmux.rs` in production, `fake.rs` in tests |
-| `backend/src/projects.rs` | Creating (new or imported) and deleting projects; repo and corpus path rules |
+| `backend/src/projects.rs` | Creating projects on a folder (existing or new) and deleting them; folder and corpus path rules |
 | `backend/src/project_settings.rs` | Per-project providers, verify, audit and pause, as the orchestrator asks for them |
 | `backend/src/login.rs` | Provider sign-in state from credential files, the helper login session, URL and code parsing |
-| `backend/src/repo.rs` | Bare repos written with git plumbing, imports (`clone --bare`), corpus export, the workspace checkout |
+| `backend/src/repo.rs` | The corpus repo written with git plumbing, corpus export, a read-only look at a project's folder |
 | `backend/src/reflex.rs` | One Reflex process per project: export the corpus, start, health-check, restart |
 | `backend/src/usage.rs` | Plan-usage readers (Claude endpoint, Codex logs), token scans, pace, the skip line |
 | `backend/src/decide.rs` | The decision gate (Reflex, threshold, fallback), answer parsing, threshold fitting |
@@ -134,6 +135,22 @@ cargo run --release -- serve -c ../map.toml
 # open http://127.0.0.1:4400
 ```
 
+## Install as a service
+
+On the machine whose projects the agents should work on (Linux or macOS), from a checkout:
+
+```sh
+deploy/install.sh                 # --port 4400 --bind 127.0.0.1 --prefix DIR --config FILE --no-service
+deploy/install.sh --uninstall     # removes the service; keeps the config and data
+```
+
+It builds the server and dashboard, installs them under `~/.local/share/map`, adds a pinned Reflex (checked by
+SHA256) unless one is on PATH, writes `~/.config/map/map.toml` once with a fresh `api_token` and your current PATH
+(so the service finds the same `claude`, `codex`, `agy`), and starts a systemd user service (`map.service`) or a
+launchd agent (`com.multi-agent-platform.map`). Restarting the service leaves agent sessions in tmux running.
+Requirements: Rust, Bun, tmux, git, curl, openssl. On Linux, `sudo loginctl enable-linger $USER` keeps it running
+after you log out.
+
 Development, with hot reload for the dashboard:
 
 ```sh
@@ -149,7 +166,7 @@ token refresh on one side never logs out the other). It publishes on `127.0.0.1`
 authenticating proxy in front to reach it from elsewhere.
 
 ```sh
-cp .env.example .env                        # your uid/gid, user, home, Node dir, MAP_DIR, port
+cp .env.example .env                        # your uid/gid, user, home, Node dir, MAP_DIR, projects dir, port
 mkdir -p ~/map-deploy/data/map && git init ~/map-deploy/data/workspace
 cp deploy/map.docker.toml ~/map-deploy/map.toml
 #   set api_token (openssl rand -hex 32), the PATH in [workspace.env], and allowed_hosts for your tunnel's name
@@ -164,7 +181,10 @@ docker compose logs -f map                  # open http://127.0.0.1:4400 and pas
   (the host rewrites `~/.claude.json` by renaming over it, which a single-file mount cannot follow). Set
   `"hasCompletedOnboarding": true` in that file once, or the first interactive session stops at the setup screens.
   Each new folder still asks "trust this folder?" once; answer it in the session console.
-- State lives in `MAP_DIR/data` (database, run files, project repos, workspaces); config in `MAP_DIR/map.toml`.
+- Projects are folders under `MAP_PROJECTS_DIR`, mounted at the same path, so a project's path is the same in the
+  container and on the host. State lives in `MAP_DIR/data` (database, run files, corpus repos); config in
+  `MAP_DIR/map.toml`.
+- On macOS, use `deploy/install.sh` instead: a Linux container cannot run the Mac's agent CLIs.
 - Agent sessions are tmux sessions inside the container, so `docker compose restart` ends them (the watcher marks
   them exited and the orchestrator retries their tasks).
 - **Cloudflare tunnel**: point it at `http://127.0.0.1:4400`, add the public host name to `allowed_hosts`, keep
@@ -249,7 +269,7 @@ one of the task's last two is not logged again, so a task parked at a branch doe
 | `decision.ready.go` | ready → pick | `tick`: dependencies done, slot free |
 | `decision.ready.blocked` | ready → blocked | `tick`: a dependency failed or was cancelled |
 | `decision.pick.chosen` / `.none` | pick → launch / stays | `start` (`pick_provider`); `none` while no provider is available |
-| `decision.launch.started` / `.error` | launch → watch / retry | `start` (`hub.launch`, project workspace sync) |
+| `decision.launch.started` / `.error` | launch → watch / retry | `start` (`hub.launch`) |
 | `decision.watch.done` | watch → verify | `check_running`: result file says done |
 | `decision.watch.failed` / `.exited` / `.auth` / `.timeout` / `.lost` | watch → retry | `check_running` |
 | `decision.verify.cmd_start` / `.cmd_pass` | stays (progress) | `finish`: each `verify` command, `` `cmd` · 2 of 4 `` |
@@ -285,9 +305,9 @@ All routes are under `/api`. When `server.api_token` is set, send `Authorization
 | GET/POST | `/projects` | List, or create (`name`, `slug`, `description`, `fallback`, `model`, `settings`); returns the project and `checks` |
 | GET/PATCH/DELETE | `/projects/{slug}` | Info (settings, Reflex status, decision counts), change (`threshold`, `fallback`, `model`, `questions`, `settings`, `paused`…), delete |
 | GET | `/projects/defaults` | The `map.toml` values projects inherit (provider order, verify, audit, max_parallel, post_done) |
-| POST | `/projects/inspect` | `{"kind": "git"\|"local", "location", "branch"}`: branches, commits and top-level files before an import |
+| POST | `/projects/inspect` | `{"kind": "local"\|"empty", "location"}`: the folder's git branch, branches, commits and top-level entries, or whether a new folder can go there |
 | GET/POST | `/providers/{name}/login` | Sign-in state (parsed URL, one-time code, credential check), or start the helper login session |
-| GET | `/projects/{slug}/repos/{code\|corpus}` | Files and recent commits |
+| GET | `/projects/{slug}/repos/corpus` | Files and recent commits |
 | GET/PUT | `/projects/{slug}/repos/{repo}/file` | `?path=` read; `{"path", "content", "message"}` commit (`content: null` deletes) |
 | POST | `/projects/{slug}/decide` | `{"state", "questions", "route": "auto"\|"reflex"\|"llm"}`; each answer has `lane` |
 | POST | `/projects/{slug}/feedback` | `{"p": <Reflex's confidence>, "outcome": bool}` for Reflex's calibrator |
@@ -312,8 +332,8 @@ All routes are under `/api`. When `server.api_token` is set, send `Authorization
 | POST | `/usage/refresh` | `{}`: read every provider now and return the report |
 | GET | `/ws` | Pushes `ServerMessage` JSON (see `frontend/lib/generated/ServerMessage.ts`) |
 
-Git: `git clone http://127.0.0.1:4400/git/<slug>/code.git` (or `corpus.git`). With `api_token` set, git asks for a
-password: use the token (any user name).
+Git: `git clone http://127.0.0.1:4400/git/<slug>/corpus.git`. With `api_token` set, git asks for a password: use the
+token (any user name). Only corpus repos are served; a project's code stays in its folder.
 
 ## Security
 

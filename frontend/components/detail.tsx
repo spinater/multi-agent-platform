@@ -59,7 +59,7 @@ export function DetailCard({
   onOpenConsole: (name: string) => void;
   onToggleRun: () => void;
 }) {
-  const { now, toast, openAuth, setProject, setScope, server } = useApp();
+  const { now, toast, openAuth, setProject, setScope, server, projects } = useApp();
   const ty = id.split(":")[0];
   const key = id.slice(ty.length + 1);
   const session = ty === "s" ? cmd.sessions.find((s) => s.name === key) : undefined;
@@ -109,7 +109,7 @@ export function DetailCard({
           ["Tasks", ["running", "verifying", "auditing", "pending", "done", "failed"].filter((x) => s.counts[x]).map((x) => `${s.counts[x]} ${x}`).join(" · ") || "none"],
           ["Live", `${s.live} sessions`],
           ["Needs you", s.need || ""],
-          ["Workspace", slug === null ? server?.workspace_dir : `/git/${slug}/code.git`],
+          ["Folder", slug === null ? server?.workspace_dir : projects.find((x) => x.project.slug === slug)?.workspace],
         ],
         blocks: [],
         actions: [flyBtn],
