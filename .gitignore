@@ -1,0 +1,15 @@
+# Rust
+backend/target/
+
+# Frontend
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+frontend/next-env.d.ts
+frontend/tsconfig.tsbuildinfo
+
+# Local config and runtime data
+map.toml
+.map/
+*.log
+.DS_Store

@@ -1,0 +1,3 @@
+[env]
+# `cargo test` writes the ts-rs bindings straight into the dashboard.
+TS_RS_EXPORT_DIR = { value = "../frontend/lib/generated", relative = true }

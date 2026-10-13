@@ -1,0 +1,79 @@
+# Copy to map.toml and edit. Relative paths resolve against this file's directory.
+
+[server]
+# Loopback only. To reach it from elsewhere, put an authenticating proxy (e.g. Cloudflare Access) in front,
+# add the proxy's host name to allowed_hosts, and set api_token.
+bind = "127.0.0.1:4400"
+# api_token = "change-me"
+static_dir = "frontend/out"
+data_dir = ".map"
+# allowed_hosts = ["agents.example.com"]
+# Origins allowed to open the WebSocket besides the dashboard itself (the `next dev` server by default).
+# allowed_origins = ["http://localhost:3000", "http://127.0.0.1:3000"]
+
+[workspace]
+# The repository the agents work in.
+dir = "../my-repo"
+# Only tmux sessions with this prefix are managed; nothing else is ever touched.
+session_prefix = "map-"
+
+# Exported in each agent's launch script and in verify/post_done commands.
+[workspace.env]
+PATH = "/opt/homebrew/bin:/usr/local/bin:/Users/you/.local/bin:/Users/you/.bun/bin:/usr/bin:/bin"
+
+[watcher]
+interval_secs = 5
+# A worker whose pane has not changed for this long is flagged as stalled.
+stall_minutes = 45
+wake_cooldown_secs = 60
+# Used when a rate-limit message carries no reset time.
+default_rate_limit_wait_secs = 300
+wake_prompt = "The rate limit has reset. Check where you stopped and continue the task."
+
+[orchestrator]
+# Start running ready tasks as soon as the server starts (otherwise press Run in the dashboard).
+autostart = false
+max_parallel = 1
+max_attempts = 2
+task_timeout_minutes = 240
+provider_order = ["claude", "codex", "gemini"]
+provider_cooldown_minutes = 30
+# All must exit 0 after the agent reports done, or the task is retried with the output in its prompt.
+verify = ["bun test", "bun run typecheck", "bun run lint", "bun run build"]
+# Run after a task passes. {id} and {title} are substituted (title is shell-quoted).
+# post_done = ["git add -A && git commit -m \"Task {id}: \"{title}", "git push"]
+
+[orchestrator.audit]
+# A second agent reviews the change and must answer VERDICT: PASS before the task counts as done.
+enabled = true
+# false: accept on verification alone when every auditor is out of quota; true: fail the task.
+required = false
+chain = ["gemini", "claude", "codex"]
+timeout_secs = 600
+
+# Built-in providers: claude, codex, gemini (the `agy` CLI). Any field below overrides the built-in value.
+# Templates substitute {binary}, {model}, {session} and, for headless, {prompt}.
+
+[providers.claude]
+# Unattended workers need this, or they stop at every permission prompt (the watcher shows them as waiting).
+# extra_args = ["--dangerously-skip-permissions"]
+# models = ["opus", "sonnet", "haiku", "fable"]
+# default_model = "sonnet"
+
+[providers.codex]
+# extra_args = ["--dangerously-bypass-approvals-and-sandbox"]
+# default_model = "gpt-6-sol"
+
+[providers.gemini]
+# binary = "agy"
+# default_model = "gemini-3.8-flash-high"
+
+# A provider that is not built in needs at least binary and interactive:
+# [providers.aider]
+# binary = "aider"
+# interactive = ["{binary}", "--model", "{model}"]
+# models = ["sonnet"]
+# default_model = "sonnet"
+# prompt_mode = "send"          # "arg": prompt as last argument; "send": typed in after startup_secs
+# idle_markers = ["> "]
+# auth_markers = ["API key"]
