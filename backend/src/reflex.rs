@@ -96,6 +96,11 @@ impl Manager {
         if domains.len() > MAX_DOMAINS {
             return Ok(status(ReflexState::Error, format!("Reflex takes 1–{MAX_DOMAINS} domains; the corpus has {}", domains.len()), domains));
         }
+        // Something else on the port (often a Reflex left behind by a server that was killed) would answer /healthz
+        // for us with another corpus, while ours fails to bind and exits.
+        if std::net::TcpListener::bind(("127.0.0.1", port)).is_err() {
+            return Ok(status(ReflexState::Error, format!("port {port} is already in use by another process (a Reflex left over from an earlier run?); stop it, then restart"), domains));
+        }
         let log = std::fs::File::create(paths.log)?;
         let mut child = Command::new(binary)
             .env("RIIR_REFLEX_CORPUS", paths.corpus_live)
@@ -110,7 +115,7 @@ impl Manager {
             if let Some(code) = child.try_wait()? {
                 return Ok(status(ReflexState::Error, format!("reflex exited ({code}):\n{}", tail(paths.log, 20).await), domains));
             }
-            if self.http.get(url(port, "/healthz")).timeout(Duration::from_secs(1)).send().await.is_ok_and(|r| r.status().is_success()) {
+            if self.http.get(url(port, "/healthz")).timeout(Duration::from_secs(1)).send().await.is_ok_and(|r| r.status().is_success()) && child.try_wait()?.is_none() {
                 self.children.lock().await.insert(slug.to_string(), child);
                 return Ok(status(ReflexState::Running, format!("listening on 127.0.0.1:{port}"), domains));
             }

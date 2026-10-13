@@ -102,10 +102,23 @@ async fn serve(config: Config) -> Result<()> {
     let listener = tokio::net::TcpListener::bind(addr).await.with_context(|| format!("binding {addr}"))?;
     tracing::info!("multi-agent platform on http://{addr}");
     axum::serve(listener, api::router(hub.clone()))
-        .with_graceful_shutdown(async {
-            let _ = tokio::signal::ctrl_c().await;
-        })
+        .with_graceful_shutdown(shutdown_signal())
         .await?;
     hub.reflex.stop_all().await;
     Ok(())
+}
+
+/// Ctrl-C, or SIGTERM from `kill` or a service manager: either way the Reflex engines are stopped on the way out,
+/// so none is left holding its port.
+async fn shutdown_signal() {
+    #[cfg(unix)]
+    {
+        let mut term = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()).expect("installing the SIGTERM handler");
+        tokio::select! {
+            _ = tokio::signal::ctrl_c() => {}
+            _ = term.recv() => {}
+        }
+    }
+    #[cfg(not(unix))]
+    let _ = tokio::signal::ctrl_c().await;
 }
