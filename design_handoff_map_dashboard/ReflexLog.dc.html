@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<div style="display:flex;flex-direction:column;gap:16px;font-family:'Geist Mono',ui-monospace,monospace;color:var(--text)">
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:8px">
+    <sc-for list="{{ vm.tiles }}" as="t" hint-placeholder-count="5">
+      <div style="display:flex;flex-direction:column;gap:7px;padding:10px 12px;border:1px solid var(--line);border-radius:8px">
+        <span style="display:flex;align-items:center;gap:6px;font:500 9.5px/1.2 'Geist Mono',monospace;letter-spacing:.14em;text-transform:uppercase;color:var(--muted)"><span style="width:6px;height:6px;border-radius:50%;background:{{ t.color }}"></span>{{ t.k }}</span>
+        <span style="font:600 22px/1 'Geist Mono',monospace;color:{{ t.vcolor }}">{{ t.v }}</span>
+        <span style="font:400 10px/1.3 'Geist Mono',monospace;color:var(--faint)">{{ t.sub }}</span>
+      </div>
+    </sc-for>
+  </div>
+  <div style="display:flex;flex-direction:column;gap:8px">
+    <div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;font:500 10px/1.3 'Geist Mono',monospace;letter-spacing:.12em;text-transform:uppercase;color:var(--muted)">
+      <span>decisions per hour · last 24 h</span>
+      <span style="display:flex;gap:12px;letter-spacing:.08em"><span style="display:flex;align-items:center;gap:5px"><span style="width:8px;height:8px;border-radius:2px;background:var(--reflex)"></span>reflex</span><span style="display:flex;align-items:center;gap:5px"><span style="width:8px;height:8px;border-radius:2px;background:var(--llm)"></span>llm</span><span style="display:flex;align-items:center;gap:5px"><span style="width:8px;height:8px;border-radius:2px;background:var(--abstain)"></span>abstain</span></span>
+    </div>
+    <div style="display:flex;align-items:flex-end;gap:3px;height:110px;padding:8px;border:1px solid var(--line);border-radius:8px">
+      <sc-for list="{{ vm.bars }}" as="b" hint-placeholder-count="24">
+        <div title="{{ b.title }}" style="flex:1;min-width:3px;height:100%;display:flex;flex-direction:column-reverse;gap:1px">
+          <span style="height:{{ b.r }};background:var(--reflex);border-radius:1px"></span>
+          <span style="height:{{ b.l }};background:var(--llm);border-radius:1px"></span>
+          <span style="height:{{ b.a }};background:var(--abstain);border-radius:1px"></span>
+        </div>
+      </sc-for>
+    </div>
+    <div style="display:flex;justify-content:space-between;font:400 9.5px/1 'Geist Mono',monospace;color:var(--faint)"><span>-24 h</span><span>-12 h</span><span>now</span></div>
+  </div>
+  <div style="display:flex;flex-direction:column;gap:8px">
+    <div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;align-items:center">
+      <span style="font:500 10px/1 'Geist Mono',monospace;letter-spacing:.12em;text-transform:uppercase;color:var(--muted)">decision log</span>
+      <div style="display:flex;gap:4px;flex-wrap:wrap">
+        <sc-for list="{{ vm.filters }}" as="f" hint-placeholder-count="4"><button onClick="{{ f.onClick }}" style="height:24px;padding:0 9px;border-radius:5px;border:1px solid {{ f.border }};background:{{ f.bg }};color:{{ f.color }};font:500 10.5px/1 'Geist Mono',monospace;cursor:pointer;white-space:nowrap">{{ f.label }}</button></sc-for>
+      </div>
+    </div>
+    <div style="display:flex;flex-direction:column;border:1px solid var(--line);border-radius:8px;overflow:hidden">
+      <sc-for list="{{ vm.rows }}" as="r" hint-placeholder-count="8">
+        <div style="display:grid;grid-template-columns:58px 82px minmax(0,1fr) auto;gap:4px 10px;align-items:baseline;padding:9px 12px;border-bottom:1px solid var(--line)">
+          <span style="font:400 10.5px/1.4 'Geist Mono',monospace;color:var(--faint)">{{ r.time }}</span>
+          <span style="display:inline-flex;align-items:center;gap:6px;font:600 9.5px/1.4 'Geist Mono',monospace;letter-spacing:.12em;text-transform:uppercase;color:{{ r.color }}"><span style="width:6px;height:6px;border-radius:50%;background:{{ r.color }}"></span>{{ r.lane }}</span>
+          <span style="display:flex;flex-direction:column;gap:3px;min-width:0">
+            <span style="font:500 11.5px/1.35 'Geist Mono',monospace;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ r.answer }} <span style="color:var(--faint);font-weight:400">· {{ r.q }}</span></span>
+            <span style="font:400 10.5px/1.35 'Geist Mono',monospace;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ r.input }}</span>
+          </span>
+          <span style="display:flex;flex-direction:column;align-items:flex-end;gap:3px;font:400 10.5px/1.35 'Geist Mono',monospace;color:var(--muted);white-space:nowrap"><span>{{ r.conf }}</span><span>{{ r.ms }} {{ r.fb }}</span></span>
+        </div>
+      </sc-for>
+      <sc-if value="{{ vm.empty }}" hint-placeholder-val="{{ false }}"><div style="padding:18px 12px;font:400 11.5px/1.5 'Geist Mono',monospace;color:var(--muted);text-align:center">{{ vm.emptyText }}</div></sc-if>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:800,&quot;height&quot;:620},&quot;vm&quot;:{&quot;editor&quot;:null,&quot;tsType&quot;:&quot;object&quot;}}"></script>
+</body>
+</html>

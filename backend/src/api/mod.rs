@@ -133,6 +133,7 @@ async fn overview(State(hub): State<Arc<Hub>>) -> ApiResult<Overview> {
         providers: hub.providers(),
         orchestrator: hub.orchestrator_status().await,
         projects: hub.projects().await?,
+        server: hub.server_info(),
     }))
 }
 

@@ -1,0 +1,481 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+html,body{margin:0;background:#07080a;color:#e6e9ef;font-family:Geist,ui-sans-serif,system-ui,sans-serif;-webkit-font-smoothing:antialiased}
+*{box-sizing:border-box}
+a{color:#ff9a4d;text-decoration:none}a:hover{color:#ffbd8a}
+button,input,textarea{font-family:inherit}
+::-webkit-scrollbar{width:8px;height:8px}::-webkit-scrollbar-thumb{background:#1b1f27;border-radius:4px}::-webkit-scrollbar-track{background:transparent}
+input::placeholder,textarea::placeholder{color:#5d6673}
+</style>
+</helmet>
+<div style="min-height:100vh;background:radial-gradient(1400px 800px at 50% 0%, #10131b 0%, #07080a 60%);color:#e6e9ef">
+
+  <nav style="position:sticky;top:0;z-index:20;display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px 20px;padding:8px 20px;min-height:44px;border-bottom:1px solid rgba(255,255,255,.07);background:rgba(7,8,10,.97)">
+    <div style="display:flex;align-items:center;gap:8px 16px;flex-wrap:wrap">
+      <a href="Projects.dc.html" style="display:flex;align-items:center;gap:7px;font:700 14px/1 Geist,sans-serif;letter-spacing:.08em;color:#e6e9ef;white-space:nowrap"><span style="color:#FF7A1A">⬡</span>MAP</a>
+      <div style="position:relative;letter-spacing:0;text-transform:none">
+        <button onClick="{{ toggleProjMenu }}" style="display:flex;align-items:center;gap:8px;height:28px;padding:0 10px;border-radius:7px;border:1px solid rgba(255,255,255,.12);background:transparent;font:500 11.5px/1 'JetBrains Mono',ui-monospace,monospace;color:#e6e9ef;white-space:nowrap;cursor:pointer"><span style="width:6px;height:6px;border-radius:50%;background:#FF7A1A"></span>{{ projectName }}<span style="color:#7a8494">▾</span></button>
+        <sc-if value="{{ projMenu }}" hint-placeholder-val="{{ false }}">
+          <div onClick="{{ closeProjMenu }}" style="position:fixed;inset:0;z-index:60"></div>
+          <div style="position:absolute;top:34px;left:0;z-index:61;width:290px;padding:6px;border-radius:10px;border:1px solid rgba(255,255,255,.12);background:#0c0e13;box-shadow:0 20px 50px rgba(0,0,0,.6);display:flex;flex-direction:column;gap:2px">
+            <span style="padding:8px 10px 6px;font:500 10px/1 'JetBrains Mono',ui-monospace,monospace;letter-spacing:.14em;text-transform:uppercase;color:#7a8494">Switch project</span>
+            <sc-for list="{{ projItems }}" as="pi" hint-placeholder-count="5">
+              <button onClick="{{ pi.onClick }}" style="display:flex;align-items:center;gap:10px;padding:9px 10px;border-radius:7px;border:0;background:{{ pi.bg }};color:#e6e9ef;text-align:left;cursor:pointer;font:500 12.5px/1.2 'JetBrains Mono',ui-monospace,monospace" style-hover="background:rgba(255,255,255,.05)"><span style="flex:none;width:6px;height:6px;border-radius:50%;background:{{ pi.dot }}"></span><span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ pi.name }}</span><span style="color:#FF7A1A">{{ pi.mark }}</span></button>
+            </sc-for>
+            <div style="height:1px;background:rgba(255,255,255,.08);margin:4px 0"></div>
+            <a href="Projects.dc.html" style="padding:9px 10px;border-radius:7px;font:500 12.5px/1 Geist,sans-serif;color:#c5ccd6" style-hover="background:rgba(255,255,255,.05);color:#e6e9ef">All projects</a>
+            <a href="Projects.dc.html?new=1" style="padding:9px 10px;border-radius:7px;font:500 12.5px/1 Geist,sans-serif;color:#ffb37a" style-hover="background:rgba(255,122,26,.1)">+ New project</a>
+          </div>
+        </sc-if>
+      </div>
+      <div style="display:flex;gap:2px;flex-wrap:nowrap;flex:none">
+        <a href="Projects.dc.html" style="height:28px;display:flex;align-items:center;padding:0 10px;border-radius:6px;background:rgba(255,122,26,.12);color:#ffb37a;font:500 12px/1 Geist,sans-serif;white-space:nowrap">Projects</a>
+        <a href="Agent%20Command%20Centre.dc.html" style="height:28px;display:flex;align-items:center;padding:0 10px;border-radius:6px;color:#c5ccd6;font:500 12px/1 Geist,sans-serif;white-space:nowrap" style-hover="background:rgba(255,255,255,.05);color:#e6e9ef">Command centre</a>
+        <a href="Skills.dc.html" style="height:28px;display:flex;align-items:center;padding:0 10px;border-radius:6px;color:#c5ccd6;font:500 12px/1 Geist,sans-serif;white-space:nowrap" style-hover="background:rgba(255,255,255,.05);color:#e6e9ef">Skills</a>
+        <a href="Decisions.dc.html" style="height:28px;display:flex;align-items:center;padding:0 10px;border-radius:6px;color:#c5ccd6;font:500 12px/1 Geist,sans-serif;white-space:nowrap" style-hover="background:rgba(255,255,255,.05);color:#e6e9ef">Decisions</a>
+        <a href="Reflex.dc.html" style="height:28px;display:flex;align-items:center;padding:0 10px;border-radius:6px;color:#c5ccd6;font:500 12px/1 Geist,sans-serif;white-space:nowrap" style-hover="background:rgba(255,255,255,.05);color:#e6e9ef">Reflex</a>
+        <a href="Usage.dc.html" style="height:28px;display:flex;align-items:center;padding:0 10px;border-radius:6px;color:#c5ccd6;font:500 12px/1 Geist,sans-serif;white-space:nowrap" style-hover="background:rgba(255,255,255,.05);color:#e6e9ef">Usage</a>
+      </div>
+    </div>
+    <div style="display:flex;align-items:center;gap:14px">
+      <dc-import name="UsageMini" hint-size="200px,28px"></dc-import>
+      <span style="font:500 10px/1 'JetBrains Mono',ui-monospace,monospace;letter-spacing:.12em;text-transform:uppercase;color:#7a8494;white-space:nowrap">{{ clock }}</span>
+    </div>
+  </nav>
+
+  <main style="max-width:1400px;margin:0 auto;padding:36px 24px 60px;display:flex;flex-direction:column;gap:28px">
+    <div style="display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:20px">
+      <div style="display:flex;flex-direction:column;gap:10px;max-width:640px">
+        <span style="font:500 10px/1 'JetBrains Mono',ui-monospace,monospace;letter-spacing:.2em;text-transform:uppercase;color:#7a8494">Workspaces</span>
+        <h1 style="margin:0;font:600 38px/1.05 Geist,sans-serif;letter-spacing:-.02em">Projects</h1>
+        <p style="margin:0;font:400 14px/1.55 Geist,sans-serif;color:#a3acb9;text-wrap:pretty">Each project is one workspace directory with its own map.toml, tmux session prefix and task history. Pick one to open its command centre.</p>
+      </div>
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+        <div style="height:36px;display:flex;align-items:center;gap:8px;padding:0 12px;border-radius:8px;border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.02)">
+          <span style="font:500 12px/1 'JetBrains Mono',ui-monospace,monospace;color:#7a8494">⌕</span>
+          <input value="{{ query }}" onChange="{{ onQuery }}" placeholder="filter projects" style="width:160px;background:transparent;border:0;outline:none;color:#e6e9ef;font:400 12.5px/1 'JetBrains Mono',ui-monospace,monospace">
+        </div>
+        <button onClick="{{ openWizard }}" style="height:36px;padding:0 16px;border-radius:8px;border:1px solid #FF7A1A;background:#FF7A1A;color:#0b0c10;font:600 13px/1 Geist,sans-serif;cursor:pointer;white-space:nowrap">+ New project</button>
+      </div>
+    </div>
+
+    <div style="display:flex;flex-wrap:wrap;gap:6px 22px;font:400 11px/1.4 'JetBrains Mono',ui-monospace,monospace;color:#7a8494;letter-spacing:.04em">
+      <span>{{ summary.projects }}</span><span>{{ summary.live }}</span><span>{{ summary.running }}</span><span>{{ summary.attention }}</span>
+    </div>
+
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(330px,1fr));gap:16px">
+      <sc-for list="{{ cards }}" as="p" hint-placeholder-count="5">
+        <div style="display:flex;flex-direction:column;gap:16px;padding:18px 18px 16px;border-radius:14px;border:1px solid {{ p.border }};background:{{ p.bg }};min-width:0">
+          <div style="display:flex;align-items:flex-start;gap:10px">
+            <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:6px">
+              <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+                <span style="width:8px;height:8px;border-radius:50%;background:{{ p.dot }};flex:none"></span>
+                <span style="font:600 17px/1.2 Geist,sans-serif;letter-spacing:-.01em;word-break:break-word">{{ p.name }}</span>
+                <sc-if value="{{ p.isCurrent }}" hint-placeholder-val="{{ false }}"><span style="font:600 9px/1 'JetBrains Mono',ui-monospace,monospace;letter-spacing:.14em;color:#FF7A1A;white-space:nowrap">CURRENT</span></sc-if>
+              </div>
+              <span style="font:400 11px/1.4 'JetBrains Mono',ui-monospace,monospace;color:#a3acb9;word-break:break-all">{{ p.path }}</span>
+              <span style="font:400 11px/1.4 'JetBrains Mono',ui-monospace,monospace;color:#7a8494;word-break:break-all">{{ p.repo }}</span>
+            </div>
+            <span style="flex:none;display:inline-flex;align-items:center;height:20px;padding:0 7px;border-radius:4px;font:500 9.5px/1 'JetBrains Mono',ui-monospace,monospace;letter-spacing:.08em;text-transform:uppercase;white-space:nowrap;color:{{ p.tc }};background:{{ p.tb }};border:1px solid {{ p.td }}">{{ p.state }}</span>
+          </div>
+
+          <sc-if value="{{ p.initializing }}" hint-placeholder-val="{{ false }}">
+            <div style="display:flex;flex-direction:column;gap:4px;padding:10px 12px;border-radius:8px;background:#05060a;border:1px solid rgba(255,255,255,.06);font:400 11px/1.6 'JetBrains Mono',ui-monospace,monospace">
+              <span style="color:#7a8494">$ map check -c map.toml</span>
+              <sc-for list="{{ p.checks }}" as="c" hint-placeholder-count="3"><span style="color:{{ c.color }}">{{ c.text }}</span></sc-for>
+            </div>
+          </sc-if>
+
+          <sc-if value="{{ p.ready }}" hint-placeholder-val="{{ true }}">
+            <div style="display:flex;flex-direction:column;gap:8px">
+              <div style="display:flex;justify-content:space-between;gap:10px;font:400 10.5px/1 'JetBrains Mono',ui-monospace,monospace;color:#7a8494">
+                <span style="white-space:nowrap">TASKS</span><span style="white-space:nowrap;color:#c5ccd6">{{ p.taskLine }}</span>
+              </div>
+              <div style="display:flex;height:6px;border-radius:3px;overflow:hidden;background:rgba(255,255,255,.05);gap:2px">
+                <sc-for list="{{ p.segs }}" as="s" hint-placeholder-count="4"><span style="flex:{{ s.n }} 1 0;background:{{ s.color }}"></span></sc-for>
+              </div>
+              <div style="display:flex;flex-wrap:wrap;gap:4px 12px;font:400 10.5px/1.3 'JetBrains Mono',ui-monospace,monospace;color:#7a8494">
+                <sc-for list="{{ p.segs }}" as="s" hint-placeholder-count="4"><span style="display:flex;align-items:center;gap:5px;white-space:nowrap"><span style="width:6px;height:6px;border-radius:2px;background:{{ s.color }}"></span>{{ s.n }} {{ s.label }}</span></sc-for>
+              </div>
+            </div>
+          </sc-if>
+
+          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+            <sc-for list="{{ p.provs }}" as="v" hint-placeholder-count="3">
+              <button onClick="{{ v.onClick }}" title="{{ v.title }}" style="display:flex;align-items:center;gap:6px;height:22px;padding:0 8px;border-radius:5px;border:1px solid {{ v.border }};background:transparent;font:500 10.5px/1 'JetBrains Mono',ui-monospace,monospace;color:{{ v.text }};white-space:nowrap;cursor:{{ v.cursor }}"><span style="width:6px;height:6px;border-radius:50%;background:{{ v.color }}"></span>{{ v.name }}{{ v.suffix }}</button>
+            </sc-for>
+            <span style="font:400 10.5px/1 'JetBrains Mono',ui-monospace,monospace;color:#7a8494;white-space:nowrap">prefix {{ p.prefix }}</span>
+          </div>
+
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;padding-top:12px;border-top:1px solid rgba(255,255,255,.06)">
+            <span style="font:400 11px/1.3 'JetBrains Mono',ui-monospace,monospace;color:#7a8494">{{ p.meta }}</span>
+            <div style="display:flex;gap:6px">
+              <button onClick="{{ p.onSkills }}" style="height:28px;padding:0 10px;border-radius:6px;border:1px solid rgba(255,255,255,.12);background:transparent;color:#c5ccd6;font:500 11.5px/1 Geist,sans-serif;cursor:pointer;white-space:nowrap">Skills</button>
+              <button onClick="{{ p.onDecisions }}" style="height:28px;padding:0 10px;border-radius:6px;border:1px solid rgba(255,255,255,.12);background:transparent;color:#c5ccd6;font:500 11.5px/1 Geist,sans-serif;cursor:pointer;white-space:nowrap">Decisions</button>
+              <button onClick="{{ p.onOpen }}" style="height:28px;padding:0 12px;border-radius:6px;border:1px solid #FF7A1A;background:{{ p.openBg }};color:{{ p.openColor }};font:600 11.5px/1 Geist,sans-serif;cursor:pointer;white-space:nowrap">Open →</button>
+            </div>
+          </div>
+        </div>
+      </sc-for>
+      <button onClick="{{ openWizard }}" style="min-height:240px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;border-radius:14px;border:1px dashed rgba(255,255,255,.16);background:transparent;color:#a3acb9;cursor:pointer" style-hover="border-color:#FF7A1A;color:#ffb37a">
+        <span style="font:300 30px/1 Geist,sans-serif">+</span>
+        <span style="font:600 13px/1 Geist,sans-serif">New project</span>
+        <span style="font:400 11px/1.4 'JetBrains Mono',ui-monospace,monospace;color:#7a8494">local folder or git repository</span>
+      </button>
+    </div>
+  </main>
+
+  <sc-if value="{{ authOpen }}" hint-placeholder-val="{{ false }}">
+    <div onClick="{{ closeAuth }}" style="position:fixed;inset:0;z-index:70;background:rgba(3,4,6,.72);backdrop-filter:blur(4px);display:flex;align-items:center;justify-content:center;padding:20px">
+      <div onClick="{{ stop }}" style="width:min(480px,100%);max-height:calc(100vh - 40px);overflow:auto;background:#0c0e13;border:1px solid rgba(255,255,255,.1);border-radius:14px;box-shadow:0 30px 80px rgba(0,0,0,.6);display:flex;flex-direction:column">
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:16px 18px;border-bottom:1px solid rgba(255,255,255,.07)">
+          <span style="display:flex;align-items:center;gap:9px;font:600 15px/1 Geist,sans-serif;white-space:nowrap"><span style="width:9px;height:9px;border-radius:50%;background:{{ auth.color }}"></span>Sign in to {{ auth.name }}</span>
+          <button onClick="{{ closeAuth }}" style="width:26px;height:26px;border-radius:6px;border:1px solid rgba(255,255,255,.1);background:transparent;color:#c5ccd6;cursor:pointer">×</button>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:14px;padding:18px">
+          <sc-if value="{{ auth.isStart }}" hint-placeholder-val="{{ true }}">
+            <p style="margin:0;font:400 13px/1.55 Geist,sans-serif;color:#a3acb9;text-wrap:pretty">{{ auth.why }}</p>
+            <div style="display:flex;border:1px solid rgba(255,255,255,.12);border-radius:8px;overflow:hidden;align-self:flex-start">
+              <sc-for list="{{ auth.methods }}" as="am" hint-placeholder-count="2"><button onClick="{{ am.onClick }}" style="height:32px;padding:0 14px;border:0;background:{{ am.bg }};color:{{ am.color }};font:600 12px/1 Geist,sans-serif;cursor:pointer;white-space:nowrap">{{ am.label }}</button></sc-for>
+            </div>
+            <sc-if value="{{ auth.isBrowser }}" hint-placeholder-val="{{ true }}">
+              <div style="display:flex;flex-direction:column;gap:12px">
+                <div style="display:grid;grid-template-columns:22px minmax(0,1fr);gap:10px;align-items:start"><span style="width:22px;height:22px;border-radius:50%;border:1px solid #FF7A1A;color:#ffb37a;font:600 10px/20px 'JetBrains Mono',ui-monospace,monospace;text-align:center">1</span><span style="font:400 13px/1.5 Geist,sans-serif;color:#d6dde6">The dashboard runs <span style="font-family:'JetBrains Mono',ui-monospace,monospace;color:#ffb37a">{{ auth.cmd }}</span> in a helper tmux session.</span></div>
+                <div style="display:grid;grid-template-columns:22px minmax(0,1fr);gap:10px;align-items:start"><span style="width:22px;height:22px;border-radius:50%;border:1px solid #FF7A1A;color:#ffb37a;font:600 10px/20px 'JetBrains Mono',ui-monospace,monospace;text-align:center">2</span><span style="font:400 13px/1.5 Geist,sans-serif;color:#d6dde6">Approve the request in your browser with a one-time code. The CLI keeps the token in <span style="font-family:'JetBrains Mono',ui-monospace,monospace;color:#a3acb9">{{ auth.store }}</span>; the dashboard never sees it.</span></div>
+              </div>
+            </sc-if>
+            <sc-if value="{{ auth.isKey }}" hint-placeholder-val="{{ false }}">
+              <label style="display:flex;flex-direction:column;gap:6px;font:500 10.5px/1 'JetBrains Mono',ui-monospace,monospace;letter-spacing:.1em;color:#7a8494">{{ auth.keyName }}
+                <input type="password" value="{{ auth.key }}" onChange="{{ auth.onKey }}" placeholder="{{ auth.ph }}" style="height:38px;background:#07080b;border:1px solid rgba(255,255,255,.12);border-radius:7px;color:#e6e9ef;padding:0 12px;font:400 13px/1 'JetBrains Mono',ui-monospace,monospace;letter-spacing:0;outline:none">
+              </label>
+              <span style="font:400 11px/1.5 'JetBrains Mono',ui-monospace,monospace;color:#7a8494">Exported only into {{ auth.name }} sessions through the workspace env.</span>
+            </sc-if>
+          </sc-if>
+          <sc-if value="{{ auth.isWaiting }}" hint-placeholder-val="{{ false }}">
+            <div style="display:flex;flex-direction:column;align-items:center;gap:10px;padding:16px;border-radius:10px;border:1px solid rgba(255,122,26,.35);background:rgba(255,122,26,.06)">
+              <span style="font:400 11px/1 'JetBrains Mono',ui-monospace,monospace;letter-spacing:.14em;text-transform:uppercase;color:#7a8494">one-time code</span>
+              <span style="font:600 30px/1 'JetBrains Mono',ui-monospace,monospace;letter-spacing:.12em;color:#ffb37a">{{ auth.code }}</span>
+              <span style="font:400 11.5px/1.4 'JetBrains Mono',ui-monospace,monospace;color:#a3acb9;word-break:break-all;text-align:center">{{ auth.url }}</span>
+            </div>
+          </sc-if>
+          <sc-if value="{{ auth.isDone }}" hint-placeholder-val="{{ false }}">
+            <div style="display:flex;align-items:center;gap:12px;padding:14px 16px;border-radius:10px;border:1px solid rgba(74,222,128,.35);background:rgba(74,222,128,.07)">
+              <span style="flex:none;width:28px;height:28px;border-radius:50%;background:#4ade80;color:#0b0c10;font:700 15px/28px Geist,sans-serif;text-align:center">✓</span>
+              <span style="display:flex;flex-direction:column;gap:3px"><span style="font:600 14px/1.2 Geist,sans-serif">Signed in</span><span style="font:400 12px/1.4 Geist,sans-serif;color:#a3acb9">{{ auth.doneLine }}</span></span>
+            </div>
+          </sc-if>
+          <sc-if value="{{ auth.hasLines }}" hint-placeholder-val="{{ false }}">
+            <div style="background:#05060a;border:1px solid rgba(255,255,255,.06);border-radius:8px;padding:10px 12px;font:400 11.5px/1.6 'JetBrains Mono',ui-monospace,monospace;display:flex;flex-direction:column">
+              <sc-for list="{{ auth.lines }}" as="al" hint-placeholder-count="3"><span style="color:{{ al.color }};white-space:pre-wrap;word-break:break-all">{{ al.text }}</span></sc-for>
+            </div>
+          </sc-if>
+        </div>
+        <div style="display:flex;justify-content:flex-end;gap:8px;padding:14px 18px;border-top:1px solid rgba(255,255,255,.07)">
+          <sc-for list="{{ auth.actions }}" as="aa" hint-placeholder-count="2"><button onClick="{{ aa.onClick }}" style="height:34px;padding:0 14px;border-radius:7px;border:1px solid {{ aa.border }};background:{{ aa.bg }};color:{{ aa.color }};font:600 12.5px/1 Geist,sans-serif;cursor:pointer;white-space:nowrap;opacity:{{ aa.opacity }}">{{ aa.label }}</button></sc-for>
+        </div>
+      </div>
+    </div>
+  </sc-if>
+  <sc-if value="{{ toastOn }}" hint-placeholder-val="{{ false }}">
+    <div style="position:fixed;right:20px;bottom:20px;z-index:80;max-width:min(440px,calc(100vw - 40px));display:flex;align-items:center;gap:10px;padding:12px 14px;border-radius:10px;border:1px solid rgba(255,255,255,.12);background:#0c0e13;box-shadow:0 16px 40px rgba(0,0,0,.5);font:400 12.5px/1.45 Geist,sans-serif;color:#e6e9ef"><span style="flex:none;width:8px;height:8px;border-radius:50%;background:{{ toastColor }}"></span><span>{{ toastMsg }}</span></div>
+  </sc-if>
+
+  <sc-if value="{{ wizardOpen }}" hint-placeholder-val="{{ false }}">
+    <div onClick="{{ closeWizard }}" style="position:fixed;inset:0;z-index:50;background:rgba(3,4,6,.72);backdrop-filter:blur(4px);display:flex;align-items:center;justify-content:center;padding:20px">
+      <div onClick="{{ stop }}" style="width:min(860px,100%);max-height:calc(100vh - 40px);display:flex;flex-wrap:wrap;background:#0c0e13;border:1px solid rgba(255,255,255,.1);border-radius:16px;box-shadow:0 30px 80px rgba(0,0,0,.6);overflow:hidden">
+        <div style="flex:1 1 200px;max-width:100%;padding:22px 18px;border-right:1px solid rgba(255,255,255,.07);background:rgba(255,255,255,.015);display:flex;flex-direction:column;gap:18px">
+          <span style="display:flex;align-items:center;gap:8px;font:600 11px/1 'JetBrains Mono',ui-monospace,monospace;letter-spacing:.14em;text-transform:uppercase;white-space:nowrap"><span style="color:#FF7A1A">⬡</span>New project</span>
+          <div style="display:flex;flex-direction:column;gap:2px">
+            <sc-for list="{{ steps }}" as="st" hint-placeholder-count="5">
+              <button onClick="{{ st.onClick }}" style="display:flex;align-items:center;gap:10px;padding:9px 10px;border-radius:8px;border:0;background:{{ st.bg }};color:{{ st.color }};text-align:left;cursor:pointer">
+                <span style="flex:none;width:20px;height:20px;border-radius:50%;display:flex;align-items:center;justify-content:center;border:1px solid {{ st.ring }};background:{{ st.fill }};color:{{ st.numColor }};font:600 10px/1 'JetBrains Mono',ui-monospace,monospace">{{ st.num }}</span>
+                <span style="display:flex;flex-direction:column;gap:3px;min-width:0"><span style="font:500 13px/1.1 Geist,sans-serif">{{ st.label }}</span><span style="font:400 10px/1.2 'JetBrains Mono',ui-monospace,monospace;color:#7a8494">{{ st.sub }}</span></span>
+              </button>
+            </sc-for>
+          </div>
+        </div>
+        <div style="flex:3 1 420px;min-width:0;display:flex;flex-direction:column;max-height:calc(100vh - 40px)">
+          <div style="flex:1;overflow:auto;padding:24px 26px;display:flex;flex-direction:column;gap:18px">
+
+            <sc-if value="{{ step0 }}" hint-placeholder-val="{{ true }}">
+              <div style="display:flex;flex-direction:column;gap:6px"><h2 style="margin:0;font:600 20px/1.2 Geist,sans-serif">Where does the code live?</h2><p style="margin:0;font:400 13px/1.5 Geist,sans-serif;color:#a3acb9">Agents work inside this directory. Every session runs here and every verify command runs from here.</p></div>
+              <div style="display:flex;border:1px solid rgba(255,255,255,.12);border-radius:8px;overflow:hidden;align-self:flex-start">
+                <sc-for list="{{ sourceTabs }}" as="sx" hint-placeholder-count="2"><button onClick="{{ sx.onClick }}" style="height:32px;padding:0 14px;border:0;background:{{ sx.bg }};color:{{ sx.color }};font:600 12px/1 Geist,sans-serif;cursor:pointer;white-space:nowrap">{{ sx.label }}</button></sc-for>
+              </div>
+              <sc-if value="{{ isGit }}" hint-placeholder-val="{{ false }}">
+                <label style="display:flex;flex-direction:column;gap:6px;font:500 10.5px/1 'JetBrains Mono',ui-monospace,monospace;letter-spacing:.1em;text-transform:uppercase;color:#7a8494">Repository URL
+                  <input value="{{ w.repo }}" onChange="{{ onRepo }}" placeholder="git@github.com:you/your-repo.git" style="height:38px;background:#07080b;border:1px solid rgba(255,255,255,.12);border-radius:7px;color:#e6e9ef;padding:0 12px;font:400 13px/1 'JetBrains Mono',ui-monospace,monospace;letter-spacing:0;text-transform:none;outline:none">
+                </label>
+                <label style="display:flex;flex-direction:column;gap:6px;font:500 10.5px/1 'JetBrains Mono',ui-monospace,monospace;letter-spacing:.1em;text-transform:uppercase;color:#7a8494">Branch
+                  <input value="{{ w.branch }}" onChange="{{ onBranch }}" placeholder="main" style="height:38px;background:#07080b;border:1px solid rgba(255,255,255,.12);border-radius:7px;color:#e6e9ef;padding:0 12px;font:400 13px/1 'JetBrains Mono',ui-monospace,monospace;letter-spacing:0;text-transform:none;outline:none">
+                </label>
+              </sc-if>
+              <label style="display:flex;flex-direction:column;gap:6px;font:500 10.5px/1 'JetBrains Mono',ui-monospace,monospace;letter-spacing:.1em;text-transform:uppercase;color:#7a8494">{{ pathLabel }}
+                <input value="{{ w.path }}" onChange="{{ onPath }}" placeholder="~/code/my-repo" style="height:38px;background:#07080b;border:1px solid rgba(255,255,255,.12);border-radius:7px;color:#e6e9ef;padding:0 12px;font:400 13px/1 'JetBrains Mono',ui-monospace,monospace;letter-spacing:0;text-transform:none;outline:none">
+              </label>
+              <sc-if value="{{ hasDetect }}" hint-placeholder-val="{{ false }}">
+                <div style="display:flex;flex-direction:column;gap:4px;padding:12px 14px;border-radius:8px;background:#05060a;border:1px solid rgba(255,255,255,.06);font:400 11.5px/1.6 'JetBrains Mono',ui-monospace,monospace">
+                  <span style="color:#7a8494">detected in {{ w.path }}</span>
+                  <sc-for list="{{ detect }}" as="d" hint-placeholder-count="3"><span style="color:{{ d.color }}">{{ d.text }}</span></sc-for>
+                </div>
+              </sc-if>
+            </sc-if>
+
+            <sc-if value="{{ step1 }}" hint-placeholder-val="{{ false }}">
+              <div style="display:flex;flex-direction:column;gap:6px"><h2 style="margin:0;font:600 20px/1.2 Geist,sans-serif">Name it</h2><p style="margin:0;font:400 13px/1.5 Geist,sans-serif;color:#a3acb9">The platform only manages tmux sessions that start with the prefix. Anything else on the machine is never listed, typed into or closed.</p></div>
+              <label style="display:flex;flex-direction:column;gap:6px;font:500 10.5px/1 'JetBrains Mono',ui-monospace,monospace;letter-spacing:.1em;text-transform:uppercase;color:#7a8494">Project name
+                <input value="{{ w.name }}" onChange="{{ onName }}" placeholder="my-repo" style="height:38px;background:#07080b;border:1px solid rgba(255,255,255,.12);border-radius:7px;color:#e6e9ef;padding:0 12px;font:400 14px/1 Geist,sans-serif;letter-spacing:0;text-transform:none;outline:none">
+              </label>
+              <label style="display:flex;flex-direction:column;gap:6px;font:500 10.5px/1 'JetBrains Mono',ui-monospace,monospace;letter-spacing:.1em;text-transform:uppercase;color:#7a8494">Session prefix
+                <input value="{{ w.prefix }}" onChange="{{ onPrefix }}" placeholder="map-" style="height:38px;background:#07080b;border:1px solid rgba(255,255,255,.12);border-radius:7px;color:#e6e9ef;padding:0 12px;font:400 13px/1 'JetBrains Mono',ui-monospace,monospace;letter-spacing:0;text-transform:none;outline:none">
+              </label>
+              <div style="font:400 11.5px/1.6 'JetBrains Mono',ui-monospace,monospace;color:#7a8494">sessions will be named <span style="color:#ffb37a">{{ prefixExample }}</span></div>
+            </sc-if>
+
+            <sc-if value="{{ step2 }}" hint-placeholder-val="{{ false }}">
+              <div style="display:flex;flex-direction:column;gap:6px"><h2 style="margin:0;font:600 20px/1.2 Geist,sans-serif">Which agents can work here?</h2><p style="margin:0;font:400 13px/1.5 Geist,sans-serif;color:#a3acb9">The orchestrator tries providers top to bottom and skips any that are missing, rate limited or signed out.</p></div>
+              <div style="display:flex;flex-direction:column;border:1px solid rgba(255,255,255,.08);border-radius:10px;overflow:hidden">
+                <sc-for list="{{ provRows }}" as="r" hint-placeholder-count="4">
+                  <div style="display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:12px;padding:12px 14px;border-bottom:1px solid rgba(255,255,255,.05);opacity:{{ r.opacity }}">
+                    <button onClick="{{ r.onToggle }}" style="width:34px;height:20px;border-radius:10px;border:1px solid {{ r.trackBorder }};background:{{ r.track }};position:relative;cursor:pointer;padding:0"><span style="position:absolute;top:2px;left:{{ r.knob }};width:14px;height:14px;border-radius:50%;background:{{ r.knobColor }}"></span></button>
+                    <span style="display:flex;flex-direction:column;gap:4px;min-width:0">
+                      <span style="display:flex;align-items:center;gap:8px"><span style="width:7px;height:7px;border-radius:50%;background:{{ r.color }}"></span><span style="font:600 13.5px/1 Geist,sans-serif">{{ r.name }}</span><span style="font:400 10.5px/1 'JetBrains Mono',ui-monospace,monospace;color:{{ r.foundColor }}">{{ r.found }}</span></span>
+                      <span style="font:400 10.5px/1.3 'JetBrains Mono',ui-monospace,monospace;color:#7a8494">default {{ r.model }}</span>
+                    </span>
+                    <div style="display:flex;align-items:center;gap:4px">
+                      <sc-if value="{{ r.needsAuth }}" hint-placeholder-val="{{ false }}"><button onClick="{{ r.onSignIn }}" style="height:24px;padding:0 9px;margin-right:4px;border-radius:5px;border:1px solid #FF7A1A;background:rgba(255,122,26,.12);color:#ffb37a;font:600 11px/1 Geist,sans-serif;cursor:pointer;white-space:nowrap">Sign in</button></sc-if>
+                      <span style="font:500 10.5px/1 'JetBrains Mono',ui-monospace,monospace;color:#ffb37a;min-width:22px;text-align:right">{{ r.rank }}</span>
+                      <button onClick="{{ r.onUp }}" style="width:24px;height:24px;border-radius:5px;border:1px solid rgba(255,255,255,.1);background:transparent;color:#c5ccd6;cursor:pointer">↑</button>
+                      <button onClick="{{ r.onDown }}" style="width:24px;height:24px;border-radius:5px;border:1px solid rgba(255,255,255,.1);background:transparent;color:#c5ccd6;cursor:pointer">↓</button>
+                    </div>
+                  </div>
+                </sc-for>
+              </div>
+              <div style="display:flex;flex-wrap:wrap;gap:12px 28px;align-items:center">
+                <div style="display:flex;align-items:center;gap:10px"><span style="font:500 10.5px/1 'JetBrains Mono',ui-monospace,monospace;letter-spacing:.1em;text-transform:uppercase;color:#7a8494;white-space:nowrap">max_parallel</span>
+                  <button onClick="{{ parDown }}" style="width:28px;height:28px;border-radius:6px;border:1px solid rgba(255,255,255,.12);background:transparent;color:#e6e9ef;cursor:pointer">−</button>
+                  <span style="font:600 15px/1 'JetBrains Mono',ui-monospace,monospace;min-width:18px;text-align:center">{{ w.maxPar }}</span>
+                  <button onClick="{{ parUp }}" style="width:28px;height:28px;border-radius:6px;border:1px solid rgba(255,255,255,.12);background:transparent;color:#e6e9ef;cursor:pointer">+</button>
+                </div>
+                <button onClick="{{ toggleAutostart }}" style="display:flex;align-items:center;gap:8px;border:0;background:transparent;color:#c5ccd6;cursor:pointer;font:400 12.5px/1 Geist,sans-serif;padding:0"><span style="width:16px;height:16px;border-radius:4px;border:1px solid {{ autoBox.border }};background:{{ autoBox.bg }};color:#0b0c10;font:700 11px/16px Geist,sans-serif;text-align:center">{{ autoBox.mark }}</span>Start the orchestrator with the server</button>
+              </div>
+            </sc-if>
+
+            <sc-if value="{{ step3 }}" hint-placeholder-val="{{ false }}">
+              <div style="display:flex;flex-direction:column;gap:6px"><h2 style="margin:0;font:600 20px/1.2 Geist,sans-serif">How is a task proven done?</h2><p style="margin:0;font:400 13px/1.5 Geist,sans-serif;color:#a3acb9">Every command must exit 0 after the agent reports done, or the task is retried with the failing output in its prompt.</p></div>
+              <div style="display:flex;flex-direction:column;gap:6px">
+                <span style="font:500 10.5px/1 'JetBrains Mono',ui-monospace,monospace;letter-spacing:.1em;text-transform:uppercase;color:#7a8494">verify</span>
+                <sc-for list="{{ verifyRows }}" as="v" hint-placeholder-count="4">
+                  <div style="display:flex;align-items:center;gap:8px;height:34px;padding:0 6px 0 12px;border-radius:7px;background:#07080b;border:1px solid rgba(255,255,255,.08)">
+                    <span style="font:400 10.5px/1 'JetBrains Mono',ui-monospace,monospace;color:#5d6673">{{ v.n }}</span>
+                    <span style="flex:1;min-width:0;font:400 12.5px/1 'JetBrains Mono',ui-monospace,monospace;color:#e6e9ef;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ v.cmd }}</span>
+                    <button onClick="{{ v.onRemove }}" style="width:24px;height:24px;border-radius:5px;border:0;background:transparent;color:#7a8494;cursor:pointer">×</button>
+                  </div>
+                </sc-for>
+                <div style="display:flex;gap:6px">
+                  <input value="{{ verifyDraft }}" onChange="{{ onVerifyDraft }}" onKeyDown="{{ onVerifyKey }}" placeholder="add a command, Enter to add" style="flex:1;min-width:0;height:34px;background:#07080b;border:1px dashed rgba(255,255,255,.16);border-radius:7px;color:#e6e9ef;padding:0 12px;font:400 12.5px/1 'JetBrains Mono',ui-monospace,monospace;outline:none">
+                </div>
+                <div style="display:flex;flex-wrap:wrap;gap:6px">
+                  <sc-for list="{{ suggestions }}" as="sg" hint-placeholder-count="3"><button onClick="{{ sg.onClick }}" style="height:24px;padding:0 9px;border-radius:5px;border:1px solid rgba(255,255,255,.1);background:transparent;color:#a3acb9;font:400 11px/1 'JetBrains Mono',ui-monospace,monospace;cursor:pointer;white-space:nowrap">+ {{ sg.cmd }}</button></sc-for>
+                </div>
+              </div>
+              <div style="display:flex;flex-direction:column;gap:10px;padding-top:6px">
+                <span style="font:500 10.5px/1 'JetBrains Mono',ui-monospace,monospace;letter-spacing:.1em;text-transform:uppercase;color:#7a8494">audit &amp; hooks</span>
+                <sc-for list="{{ checkToggles }}" as="ct" hint-placeholder-count="4">
+                  <button onClick="{{ ct.onClick }}" style="display:flex;align-items:flex-start;gap:10px;border:0;background:transparent;color:#e6e9ef;cursor:pointer;text-align:left;padding:0">
+                    <span style="flex:none;margin-top:1px;width:16px;height:16px;border-radius:4px;border:1px solid {{ ct.border }};background:{{ ct.bg }};color:#0b0c10;font:700 11px/16px Geist,sans-serif;text-align:center">{{ ct.mark }}</span>
+                    <span style="display:flex;flex-direction:column;gap:3px"><span style="font:500 13px/1.2 Geist,sans-serif">{{ ct.label }}</span><span style="font:400 11px/1.4 'JetBrains Mono',ui-monospace,monospace;color:#7a8494">{{ ct.sub }}</span></span>
+                  </button>
+                </sc-for>
+              </div>
+            </sc-if>
+
+            <sc-if value="{{ step4 }}" hint-placeholder-val="{{ false }}">
+              <div style="display:flex;flex-direction:column;gap:6px"><h2 style="margin:0;font:600 20px/1.2 Geist,sans-serif">Review map.toml</h2><p style="margin:0;font:400 13px/1.5 Geist,sans-serif;color:#a3acb9">This is written to the workspace. You can edit it by hand later; the dashboard reads it on start.</p></div>
+              <div style="background:#05060a;border:1px solid rgba(255,255,255,.07);border-radius:10px;padding:14px 16px;font:400 12px/1.65 'JetBrains Mono',ui-monospace,monospace;max-height:380px;overflow:auto;display:flex;flex-direction:column">
+                <sc-for list="{{ toml }}" as="tl" hint-placeholder-count="12"><span style="color:{{ tl.color }};white-space:pre-wrap;word-break:break-all">{{ tl.text }}</span></sc-for>
+              </div>
+            </sc-if>
+          </div>
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:14px 22px;border-top:1px solid rgba(255,255,255,.07)">
+            <button onClick="{{ closeWizard }}" style="height:34px;padding:0 12px;border-radius:7px;border:0;background:transparent;color:#a3acb9;font:500 12.5px/1 Geist,sans-serif;cursor:pointer">Cancel</button>
+            <div style="display:flex;gap:8px">
+              <button onClick="{{ back }}" style="height:34px;padding:0 14px;border-radius:7px;border:1px solid rgba(255,255,255,.14);background:transparent;color:#e6e9ef;font:600 12.5px/1 Geist,sans-serif;cursor:pointer;opacity:{{ backOpacity }}">Back</button>
+              <button onClick="{{ next }}" style="height:34px;padding:0 16px;border-radius:7px;border:1px solid #FF7A1A;background:#FF7A1A;color:#0b0c10;font:600 12.5px/1 Geist,sans-serif;cursor:pointer;white-space:nowrap;opacity:{{ nextOpacity }}">{{ nextLabel }}</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </sc-if>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script>
+class Component extends DCLogic {
+  A = '#FF7A1A';
+  T = { ok:'#4ade80', warn:'#fbbf24', bad:'#f87171', info:'#38bdf8', idle:'#94a3b8' };
+  PROV = { claude:{color:'#F2A65A',model:'sonnet',found:true}, codex:{color:'#5EA8F2',model:'gpt-6-sol',found:true}, gemini:{color:'#B48CF2',model:'gemini-3.8-flash-high',found:true}, aider:{color:'#4FD1B5',model:'sonnet',found:false} };
+  STEPS = [['Source','folder or repo'],['Identity','name · prefix'],['Providers','order · parallel'],['Checks','verify · audit'],['Review','map.toml']];
+  state = this.init();
+
+  init() {
+    const now = Date.now(), m = 60000;
+    let current = 'acme-api'; try { current = localStorage.getItem('map.project') || current; } catch(_){}
+    let custom = []; try { custom = JSON.parse(localStorage.getItem('map.projects.custom')||'[]'); } catch(_){}
+    const P = (id,path,repo,branch,providers,tasks,live,state,lastMin,attention) => ({id,name:id,path,repo,branch,prefix:'map-',providers,tasks,live,state,last:now-lastMin*m,attention:attention||0});
+    const projects = [
+      P('acme-api','~/code/acme-api','github.com/acme/acme-api','main',['claude','codex','gemini'],{done:3,running:5,verifying:1,auditing:1,pending:4,failed:1},11,'running',0.3,4),
+      P('mcp-generator','~/code/mcp-generator','github.com/spinater/mcp-generator','main',['claude','codex','gemini'],{done:5,running:2,verifying:1,pending:3},3,'running',1),
+      P('daily-news','~/code/daily-news','github.com/spinater/daily-news','main',['claude','gemini'],{done:22,running:1,pending:2},2,'running',4),
+      P('trading-telegram-executor','~/code/trading-telegram-executor','github.com/spinater/trading-telegram-executor','develop',['codex','claude'],{done:9,pending:6,failed:2},0,'paused',190,2),
+      P('franchise-management','~/code/franchise-management','github.com/spinater/franchise-management','feat/i18n-th-en',['claude'],{done:31},0,'idle',2880),
+    ].concat(custom.map(c => Object.assign(c,{state:'idle',tasks:{},live:0,last:c.last||now})));
+    projects.forEach(p => { try { const d=JSON.parse(localStorage.getItem('map.cc.'+p.id)||'null'); if(d&&d.v===1){ const c={}; d.tasks.forEach(t=>{ if(t.status!=='cancelled') c[t.status]=(c[t.status]||0)+1; }); p.tasks=c; p.live=d.sessions.filter(s=>s.state!=='exited').length; const busy=p.live>0||c.running||c.verifying||c.auditing; p.state=!d.tasks.length&&!p.live?'idle':!d.running?'paused':busy?'running':'idle'; p.attention=d.sessions.filter(s=>['waiting_input','needs_auth','stalled','error'].includes(s.state)).length+(c.failed||0); if(d.events&&d.events[0]) p.last=d.events[0].at; } } catch(_){} });
+    return { auth:this.loadAuth(), authM:null, toast:null, projMenu:false, projects, current, query:'', wizard:false, step:0, w:this.blank(), verifyDraft:'', now };
+  }
+  blank() { return { source:'folder', path:'', repo:'', branch:'main', name:'', prefix:'', nameTouched:false, prefixTouched:false, enabled:{claude:true,codex:true,gemini:true,aider:false}, order:['claude','codex','gemini','aider'], maxPar:2, autostart:false, verify:[], audit:true, auditRequired:false, commit:true, push:false }; }
+
+  componentDidMount() { this.clk = setInterval(()=>this.setState({now:Date.now()}),1000); if(/[?&]new=1/.test(window.location.search)) this.setState({wizard:true,step:0,w:this.blank(),verifyDraft:''}); this.onKey = e => { if(e.key==='Escape'){ if(this.state.authM) this.closeAuth(); else this.setState({wizard:false,projMenu:false}); } }; window.addEventListener('keydown',this.onKey); }
+  componentWillUnmount() { clearInterval(this.clk); window.removeEventListener('keydown',this.onKey); (this.timers||[]).forEach(clearTimeout); }
+
+
+  AUTHC = {claude:{cmd:'claude setup-token',url:'https://claude.ai/oauth/authorize?code=…',key:'ANTHROPIC_API_KEY',ph:'sk-ant-…',store:'~/.claude/.credentials.json'},codex:{cmd:'codex login',url:'https://auth.openai.com/device',key:'OPENAI_API_KEY',ph:'sk-…',store:'~/.codex/auth.json'},gemini:{cmd:'agy auth login',url:'https://accounts.google.com/device',key:'GEMINI_API_KEY',ph:'AIza…',store:'~/.gemini/oauth_creds.json'},aider:{cmd:'aider --api-key',url:'',key:'AIDER_API_KEY',ph:'…',store:'~/.aider.conf.yml'}};
+  PCOL = {claude:'#F2A65A',codex:'#5EA8F2',gemini:'#B48CF2',aider:'#4FD1B5'};
+  loadAuth() { try { const a=JSON.parse(localStorage.getItem('map.auth')||'null'); if(a) return a; } catch(_){} return {claude:true,codex:false,gemini:true,aider:false}; }
+  saveAuth(a) { try { localStorage.setItem('map.auth',JSON.stringify(a)); } catch(_){} }
+  openAuth(p) { const c=()=>Math.random().toString(36).slice(2,6).toUpperCase().padEnd(4,'X'); this.setState({authM:{p,method:'browser',phase:'start',key:'',code:c()+'-'+c()}}); }
+  closeAuth = () => { clearTimeout(this.authT); this.setState({authM:null}); };
+  authPrimary = () => { const m=this.state.authM; if(!m) return; if(m.phase==='done') return this.closeAuth(); if(m.phase==='waiting') return this.authDone(); if(m.method==='browser'){ this.setState({authM:Object.assign({},m,{phase:'waiting'})}); clearTimeout(this.authT); this.authT=setTimeout(()=>this.authDone(),5000); } else if(m.key.trim().length>6) this.authDone(); };
+  authDone() { clearTimeout(this.authT); const m=this.state.authM; if(!m||m.phase==='done') return; const p=m.p; const auth=Object.assign({},this.state.auth,{[p]:true}); this.saveAuth(auth); this.setState({auth,authM:Object.assign({},m,{phase:'done'})}); this.showToast(p+' signed in · every project can use it now','success'); }
+  signOut(p) { const auth=Object.assign({},this.state.auth,{[p]:false}); this.saveAuth(auth); this.setState({auth}); this.showToast(p+' signed out · new tasks skip it until you sign in','warn'); }
+  showToast(msg,level) { clearTimeout(this.toastT); this.setState({toast:{msg,level:level||'info'}}); this.toastT=setTimeout(()=>this.setState({toast:null}),3800); }
+  authView() {
+    const m=this.state.authM, A='#FF7A1A'; if(!m) return {name:'',color:'transparent',actions:[],methods:[],lines:[],isStart:false,isWaiting:false,isDone:false,isBrowser:false,isKey:false,hasLines:false};
+    const a=this.AUTHC[m.p]; const dots='.'.repeat(1+Math.floor((this.state.now||Date.now())/1000)%3);
+    const methods=[['browser','Browser sign-in'],['key','API key']].map(x=>({label:x[1],onClick:()=>this.setState({authM:Object.assign({},this.state.authM,{method:x[0]})}),bg:m.method===x[0]?A:'transparent',color:m.method===x[0]?'#0b0c10':'#c5ccd6'}));
+    const lines = m.phase==='start' ? [] : m.method==='key' ? [{text:'✓ '+a.key+' saved for '+m.p+' sessions',color:'#4ade80'}] : [{text:'$ '+a.cmd,color:'#7a8494'},{text:'Open '+a.url,color:'#d6dde6'},{text:'Enter code '+m.code+' to continue',color:'#ffb37a'}].concat(m.phase==='waiting'?[{text:'Waiting for approval'+dots,color:'#38bdf8'}]:[{text:'✓ Authorized · credentials saved to '+a.store,color:'#4ade80'}]);
+    const btn=(label,onClick,primary,dim)=>({label,onClick,bg:primary?A:'transparent',color:primary?'#0b0c10':'#e6e9ef',border:primary?A:'rgba(255,255,255,.14)',opacity:dim?'.45':'1'});
+    const actions = m.phase==='done' ? [btn('Done',this.closeAuth,true)] : m.phase==='waiting' ? [btn('Cancel',this.closeAuth),btn("I've approved it",this.authPrimary,true)] : [btn('Cancel',this.closeAuth),btn(m.method==='browser'?'Start sign-in':'Save key',this.authPrimary,true,m.method==='key'&&m.key.trim().length<7)];
+    return {name:m.p,color:this.PCOL[m.p],why:m.p+' is signed out. The orchestrator skips it for new tasks, and its sessions stop at a sign-in prompt, until you sign in.',isStart:m.phase==='start',isWaiting:m.phase==='waiting',isDone:m.phase==='done',isBrowser:m.method==='browser',isKey:m.method==='key',methods,cmd:a.cmd,url:a.url,code:m.code,keyName:a.key,ph:a.ph,store:a.store,key:m.key,onKey:e=>this.setState({authM:Object.assign({},this.state.authM,{key:e.target.value})}),lines,hasLines:lines.length>0,actions,doneLine:m.p+' is ready'+(m.fixed?' · '+m.fixed+' waiting session resumed':' · new tasks can use it again')};
+  }
+  authVals() { const st=this.state; const lv={info:'#38bdf8',success:'#4ade80',warn:'#fbbf24',error:'#f87171'}; return { authOpen:!!st.authM, closeAuth:this.closeAuth, auth:this.authView(), toastOn:!!st.toast, toastMsg:st.toast?st.toast.msg:'', toastColor:st.toast?(lv[st.toast.level]||lv.info):lv.info }; }
+
+  projList() { let c=[]; try{ c=JSON.parse(localStorage.getItem('map.projects.custom')||'[]'); }catch(_){} const base=[['acme-api','#4ade80'],['mcp-generator','#4ade80'],['daily-news','#4ade80'],['trading-telegram-executor','#fbbf24'],['franchise-management','#5d6673']]; return base.concat(c.filter(x=>!base.some(b=>b[0]===x.name)).map(x=>[x.name,'#5d6673'])); }
+  dropVals(cur, onPick) { const st=this.state; return { projectName:cur, projMenu:!!st.projMenu, toggleProjMenu:()=>this.setState({projMenu:!st.projMenu}), closeProjMenu:()=>this.setState({projMenu:false}), projItems:this.projList().map(x=>({name:x[0],dot:x[1],mark:x[0]===cur?'✓':'',bg:x[0]===cur?'rgba(255,122,26,.1)':'transparent',onClick:()=>{ try{ localStorage.setItem('map.project',x[0]); }catch(_){} if(onPick) onPick(x[0]); else window.location.reload(); }})) }; }
+
+  rgba(hex,a) { const v=parseInt(hex.slice(1),16); return 'rgba('+((v>>16)&255)+','+((v>>8)&255)+','+(v&255)+','+a+')'; }
+  ago(t,now) { const s=Math.max(0,Math.round((now-t)/1000)); return s<60?s+'s ago':s<3600?Math.floor(s/60)+'m ago':s<86400?Math.floor(s/3600)+'h ago':Math.floor(s/86400)+'d ago'; }
+  base(p) { return (p||'').replace(/\/+$/,'').split('/').pop().replace(/\.git$/,''); }
+  setW(patch) { this.setState(s => { const w=Object.assign({},s.w,patch); const src = w.source==='git' ? (this.base(w.repo)||this.base(w.path)) : this.base(w.path); if(!w.nameTouched) w.name=src; if(!w.prefixTouched) w.prefix = w.name ? 'map-'+w.name.split(/[-_]/).map(x=>x[0]).join('').slice(0,4)+'-' : ''; return {w}; }); }
+  detected(w) { const p=(w.source==='git'?w.repo:'')+w.path; if(p.length<3) return []; const rust=/api|rs|rust|backend|executor/.test(p); const out=[{t:'.git · branch '+(w.branch||'main'),k:'git'},{t:'package.json · bun.lock',k:'bun'}]; if(rust) out.push({t:'Cargo.toml',k:'cargo'}); out.push({t:'CLAUDE.md · AGENTS.md',k:'ctx'}); return out; }
+  suggest(w) { const k=this.detected(w).map(d=>d.k); const s=[]; if(k.includes('bun')) s.push('bun test','bun run typecheck','bun run lint','bun run build'); if(k.includes('cargo')) s.push('cargo test','cargo clippy --all-targets'); return s.filter(x=>!w.verify.includes(x)); }
+  canNext() { const w=this.state.w; if(this.state.step===0) return (w.source==='git'?w.repo.trim():true) && w.path.trim().length>1; if(this.state.step===1) return w.name.trim() && w.prefix.trim(); if(this.state.step===2) return w.order.some(p=>w.enabled[p]); return true; }
+
+  toml(w) {
+    const c='#7a8494', k='#c5ccd6', v='#ffb37a', h='#e6e9ef'; const L=[];
+    const sec = t => L.push({text:t,color:h}); const kv = (a,b) => L.push({text:a+' = '+b,color:k}); const blank = () => L.push({text:' ',color:c});
+    const q = x => '"'+x+'"'; const arr = a => '['+a.map(q).join(', ')+']';
+    const order = w.order.filter(p=>w.enabled[p]);
+    L.push({text:'# '+w.name+' · generated by the dashboard',color:c});
+    sec('[server]'); kv('bind',q('127.0.0.1:4400')); kv('data_dir',q('.map')); blank();
+    sec('[workspace]'); kv('dir',q(w.path)); kv('session_prefix',q(w.prefix)); if(w.source==='git') L.push({text:'# cloned from '+w.repo+' @ '+(w.branch||'main'),color:c}); blank();
+    sec('[orchestrator]'); kv('autostart',String(w.autostart)); kv('max_parallel',String(w.maxPar)); kv('max_attempts','2'); kv('provider_order',arr(order)); kv('verify',arr(w.verify));
+    const post=[]; if(w.commit) post.push('git add -A && git commit -m "Task {id}: "{title}'); if(w.push) post.push('git push'); if(post.length) kv('post_done',arr(post)); blank();
+    sec('[orchestrator.audit]'); kv('enabled',String(w.audit)); kv('required',String(w.auditRequired)); kv('chain',arr(order.slice(1).concat(order.slice(0,1)))); blank();
+    order.forEach(p => { sec('[providers.'+p+']'); kv('default_model',q(this.PROV[p].model)); });
+    L.forEach(l => { if(/ = /.test(l.text)) l.color=k; }); return L;
+  }
+
+  create() {
+    const w=this.state.w; const id=w.name.trim();
+    const proj={id,name:id,path:w.path,repo:w.source==='git'?w.repo.replace(/^git@|\.git$/g,'').replace(':','/'):'local folder · no remote',branch:w.branch||'main',prefix:w.prefix,providers:w.order.filter(p=>w.enabled[p]),tasks:{},live:0,state:'initializing',last:Date.now(),checks:[]};
+    this.setState(s=>({projects:[...s.projects.filter(p=>p.id!==id),proj],wizard:false})); this.showToast(id+' created · running map check','success');
+    try { const c=JSON.parse(localStorage.getItem('map.projects.custom')||'[]').filter(p=>p.id!==id); c.push(Object.assign({},proj,{state:'idle',checks:undefined})); localStorage.setItem('map.projects.custom',JSON.stringify(c)); } catch(_){}
+    const lines = [{text:'✓ workspace '+w.path,color:this.T.ok},{text:'✓ tmux 3.5a',color:this.T.ok}].concat(proj.providers.map(p=>({text:'✓ '+p+' · '+this.PROV[p].model,color:this.T.ok}))).concat([{text:'✓ sqlite .map/map.db created',color:this.T.ok}]);
+    this.timers = this.timers || [];
+    lines.forEach((l,i) => this.timers.push(setTimeout(()=>this.setState(s=>({projects:s.projects.map(p=>p.id===id?Object.assign({},p,{checks:[...(p.checks||[]),l]}):p)})), 450*(i+1))));
+    this.timers.push(setTimeout(()=>this.setState(s=>({projects:s.projects.map(p=>p.id===id?Object.assign({},p,{state:'idle'}):p)})), 450*(lines.length+2)));
+  }
+  go(id,page) { try { localStorage.setItem('map.project',id); } catch(_){} this.setState({current:id}); window.location.href = page; }
+
+  renderVals() {
+    const st=this.state, now=st.now, A=this.A, T=this.T, w=st.w;
+    const tone = k => { const c=T[k]||T.idle; return {tc:c,tb:this.rgba(c,.1),td:this.rgba(c,.35)}; };
+    const stTone = {running:'ok',paused:'warn',idle:'idle',initializing:'info'};
+    const segDef = [['done',A,'done'],['running',T.ok,'running'],['verifying',T.info,'verifying'],['auditing','#7dd3fc','auditing'],['pending','#5d6673','pending'],['failed',T.bad,'failed']];
+    const q = st.query.trim().toLowerCase();
+    const cards = st.projects.filter(p=>!q||p.name.toLowerCase().includes(q)||p.path.toLowerCase().includes(q)).map(p => {
+      const total = Object.values(p.tasks).reduce((a,b)=>a+b,0);
+      const segs = segDef.filter(s=>p.tasks[s[0]]).map(s=>({n:p.tasks[s[0]],color:s[1],label:s[2]}));
+      const cur = p.id===st.current;
+      return Object.assign({
+        name:p.name, path:p.path, repo:p.repo+(p.branch?' @ '+p.branch:''), prefix:p.prefix, state:p.state,
+        dot: p.state==='running'?T.ok:p.state==='paused'?T.warn:p.state==='initializing'?T.info:'#5d6673',
+        isCurrent:cur, border:cur?'rgba(255,122,26,.55)':'rgba(255,255,255,.08)', bg:cur?'linear-gradient(180deg, rgba(255,122,26,.06), rgba(255,255,255,.015))':'rgba(255,255,255,.02)',
+        initializing:p.state==='initializing', checks:p.checks||[], ready:p.state!=='initializing',
+        taskLine: total ? (p.tasks.done||0)+' / '+total+' done' : 'no tasks yet',
+        segs: segs.length?segs:[{n:1,color:'rgba(255,255,255,.06)',label:'empty'}],
+        provs: p.providers.map(x=>{ const so=!st.auth[x]; return {name:x,color:this.PROV[x].color,suffix:so?' · sign in':'',border:so?'rgba(248,113,113,.45)':'rgba(255,255,255,.08)',text:so?'#f87171':'#c5ccd6',cursor:so?'pointer':'default',title:so?x+' is signed out':x+' signed in',onClick:()=>{ if(so) this.openAuth(x); }}; }),
+        meta: p.live+' live · '+this.ago(p.last,now)+(p.attention?' · '+p.attention+' need you':''),
+        onOpen:()=>this.go(p.id,'Agent%20Command%20Centre.dc.html'), onSkills:()=>this.go(p.id,'Skills.dc.html'), onDecisions:()=>this.go(p.id,'Decisions.dc.html'),
+        openBg:cur?A:'transparent', openColor:cur?'#0b0c10':'#ffb37a',
+      }, tone(stTone[p.state]));
+    });
+    const live = st.projects.reduce((a,p)=>a+p.live,0), runningP = st.projects.filter(p=>p.state==='running').length, att = st.projects.reduce((a,p)=>a+(p.attention||0),0);
+    const steps = this.STEPS.map((s,i) => ({num:i<st.step?'✓':String(i+1),label:s[0],sub:s[1],onClick:()=>{ if(i<=st.step) this.setState({step:i}); },bg:i===st.step?'rgba(255,122,26,.1)':'transparent',color:i<=st.step?'#e6e9ef':'#7a8494',ring:i<=st.step?A:'rgba(255,255,255,.18)',fill:i<st.step?A:'transparent',numColor:i<st.step?'#0b0c10':i===st.step?'#ffb37a':'#7a8494'}));
+    const sourceTabs = [['folder','Local folder'],['git','Git repository']].map(x=>({label:x[1],onClick:()=>this.setW({source:x[0]}),bg:w.source===x[0]?A:'transparent',color:w.source===x[0]?'#0b0c10':'#c5ccd6'}));
+    const det = this.detected(w);
+    const provRows = w.order.map((p,i) => { const on=w.enabled[p], info=this.PROV[p], rank=w.order.filter(x=>w.enabled[x]).indexOf(p);
+      return {name:p,color:info.color,model:info.model,found:!info.found?'not found on PATH':st.auth[p]?'found · signed in':'found · signed out',foundColor:!info.found?T.bad:st.auth[p]?T.ok:T.warn,needsAuth:info.found&&!st.auth[p],onSignIn:()=>this.openAuth(p),opacity:on?'1':'.55',rank:on?'#'+(rank+1):'',
+        track:on?A:'rgba(255,255,255,.08)',trackBorder:on?A:'rgba(255,255,255,.14)',knob:on?'17px':'2px',knobColor:on?'#0b0c10':'#7a8494',
+        onToggle:()=>{ if(!info.found) return; this.setW({enabled:Object.assign({},w.enabled,{[p]:!on})}); },
+        onUp:()=>{ if(i===0) return; const o=w.order.slice(); [o[i-1],o[i]]=[o[i],o[i-1]]; this.setW({order:o}); },
+        onDown:()=>{ if(i===w.order.length-1) return; const o=w.order.slice(); [o[i+1],o[i]]=[o[i],o[i+1]]; this.setW({order:o}); }}; });
+    const box = on => ({border:on?A:'rgba(255,255,255,.25)',bg:on?A:'transparent',mark:on?'✓':''});
+    const order = w.order.filter(p=>w.enabled[p]);
+    const checkToggles = [
+      ['audit','Audit by a second agent','must answer VERDICT: PASS · chain '+order.slice(1).concat(order.slice(0,1)).join(' → ')],
+      ['auditRequired','Fail the task when no auditor is available','off: accept on verification alone when every auditor is out of quota'],
+      ['commit','Commit after a task passes','git add -A && git commit -m "Task {id}: {title}"'],
+      ['push','Push after commit','git push'],
+    ].map(x => Object.assign({label:x[1],sub:x[2],onClick:()=>this.setW({[x[0]]:!w[x[0]]})},box(w[x[0]])));
+    const ok = this.canNext();
+    const d = new Date(now);
+    return {
+      current: st.current, ...this.authVals(), ...this.dropVals(st.current, n => this.setState({current:n,projMenu:false})), clock: String(d.getDate()).padStart(2,'0')+'.'+String(d.getMonth()+1).padStart(2,'0')+' '+d.toTimeString().slice(0,8),
+      query: st.query, onQuery: e => this.setState({query:e.target.value}),
+      summary: {projects:st.projects.length+' projects',live:live+' live sessions',running:runningP+' orchestrators running',attention:att+' items need you'},
+      cards, openWizard: () => this.setState({wizard:true,step:0,w:this.blank(),verifyDraft:''}), closeWizard: () => this.setState({wizard:false}), stop: e => e.stopPropagation(),
+      wizardOpen: st.wizard, steps, step0:st.step===0, step1:st.step===1, step2:st.step===2, step3:st.step===3, step4:st.step===4,
+      sourceTabs, isGit: w.source==='git', pathLabel: w.source==='git'?'Clone into':'Workspace directory', w,
+      onRepo: e => this.setW({repo:e.target.value}), onBranch: e => this.setW({branch:e.target.value}), onPath: e => this.setW({path:e.target.value}),
+      onName: e => this.setW({name:e.target.value,nameTouched:true}), onPrefix: e => this.setW({prefix:e.target.value,prefixTouched:true}),
+      prefixExample: (w.prefix||'map-')+'task-12-1 · '+(w.prefix||'map-')+'plan',
+      hasDetect: det.length>0, detect: det.map(x=>({text:'✓ '+x.t,color:T.ok})),
+      provRows, parDown: () => this.setW({maxPar:Math.max(1,w.maxPar-1)}), parUp: () => this.setW({maxPar:Math.min(8,w.maxPar+1)}),
+      toggleAutostart: () => this.setW({autostart:!w.autostart}), autoBox: box(w.autostart),
+      verifyRows: w.verify.map((c,i)=>({n:String(i+1),cmd:c,onRemove:()=>this.setW({verify:w.verify.filter((_,j)=>j!==i)})})),
+      verifyDraft: st.verifyDraft, onVerifyDraft: e => this.setState({verifyDraft:e.target.value}),
+      onVerifyKey: e => { if(e.key==='Enter' && st.verifyDraft.trim()){ this.setW({verify:[...w.verify,st.verifyDraft.trim()]}); this.setState({verifyDraft:''}); } },
+      suggestions: this.suggest(w).map(c=>({cmd:c,onClick:()=>this.setW({verify:[...w.verify,c]})})),
+      checkToggles, toml: this.toml(w),
+      back: () => this.setState({step:Math.max(0,st.step-1)}), backOpacity: st.step===0?'.35':'1',
+      next: () => { if(!ok) return; if(st.step===4) this.create(); else this.setState({step:st.step+1}); },
+      nextLabel: st.step===4?'Create project':'Continue', nextOpacity: ok?'1':'.45',
+    };
+  }
+}
+</script>
+</body>
+</html>

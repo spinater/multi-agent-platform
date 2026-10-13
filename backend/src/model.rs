@@ -176,6 +176,21 @@ pub struct Overview {
     pub providers: Vec<ProviderInfo>,
     pub orchestrator: OrchestratorStatus,
     pub projects: Vec<ProjectInfo>,
+    pub server: ServerInfo,
+}
+
+/// Facts about this server for the dashboard's status bar; all of them come from `map.toml`.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct ServerInfo {
+    pub version: String,
+    /// `workspace.dir`: where tasks and sessions without a project run.
+    pub workspace_dir: String,
+    pub session_prefix: String,
+    /// The SQLite database file.
+    pub database: String,
+    #[ts(type = "number")]
+    pub watcher_interval_secs: u64,
 }
 
 /// Messages pushed to dashboard clients over `/api/ws`.

@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<div style="position:relative;letter-spacing:0;text-transform:none;font-family:Geist,ui-sans-serif,system-ui,sans-serif;color:var(--text,#e6e9ef)">
+  <button ref="{{ btnRef }}" onClick="{{ toggle }}" title="Usage across all providers" style="display:flex;align-items:center;gap:10px;height:28px;padding:0 10px;border-radius:7px;border:1px solid {{ pillBorder }};background:{{ pillBg }};color:var(--text,#e6e9ef);cursor:pointer;white-space:nowrap">
+    <span style="display:flex;align-items:flex-end;gap:5px;height:14px">
+      <sc-for list="{{ gauges }}" as="g" hint-placeholder-count="4">
+        <span title="{{ g.title }}" style="display:flex;align-items:flex-end;gap:1px;height:14px">
+          <span style="position:relative;width:3px;height:14px;border-radius:1px;background:var(--line,rgba(255,255,255,.1));overflow:hidden"><span style="position:absolute;left:0;right:0;bottom:0;height:{{ g.a }};background:{{ g.ca }}"></span></span>
+          <span style="position:relative;width:3px;height:14px;border-radius:1px;background:var(--line,rgba(255,255,255,.1));overflow:hidden"><span style="position:absolute;left:0;right:0;bottom:0;height:{{ g.b }};background:{{ g.cb }}"></span></span>
+        </span>
+      </sc-for>
+    </span>
+    <span style="font:500 11px/1 'JetBrains Mono','Geist Mono',ui-monospace,monospace;color:{{ pillTextColor }}">{{ pillText }}</span>
+    <span style="font:400 10px/1 'JetBrains Mono','Geist Mono',ui-monospace,monospace;color:var(--muted,#7a8494)">▾</span>
+  </button>
+
+  <sc-if value="{{ open }}" hint-placeholder-val="{{ false }}">
+    <div onClick="{{ close }}" style="position:fixed;inset:0;z-index:60"></div>
+    <div style="position:fixed;top:{{ popTop }};left:{{ popLeft }};z-index:61;width:360px;max-width:calc(100vw - 16px);max-height:calc(100vh - 80px);overflow:auto;padding:12px;border-radius:12px;border:1px solid var(--line2,rgba(255,255,255,.12));background:var(--panel,#0c0e13);box-shadow:0 20px 50px rgba(0,0,0,.5);display:flex;flex-direction:column;gap:12px">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:10px">
+        <span style="font:500 10px/1 'JetBrains Mono','Geist Mono',ui-monospace,monospace;letter-spacing:.14em;text-transform:uppercase;color:var(--muted,#7a8494)">Usage · all projects</span>
+        <button onClick="{{ togglePin }}" style="height:24px;padding:0 9px;border-radius:6px;border:1px solid {{ pinBorder }};background:transparent;color:{{ pinColor }};font:500 10.5px/1 'JetBrains Mono','Geist Mono',ui-monospace,monospace;cursor:pointer;white-space:nowrap">{{ pinLabel }}</button>
+      </div>
+      <sc-for list="{{ provs }}" as="p" hint-placeholder-count="4">
+        <div style="display:flex;flex-direction:column;gap:8px;padding-bottom:10px;border-bottom:1px solid var(--line,rgba(255,255,255,.07))">
+          <div style="display:flex;align-items:center;gap:8px">
+            <span style="width:7px;height:7px;border-radius:50%;background:{{ p.color }}"></span>
+            <span style="font:600 12.5px/1 Geist,'Geist Mono',sans-serif">{{ p.name }}</span>
+            <span style="font:400 10.5px/1 'JetBrains Mono','Geist Mono',ui-monospace,monospace;color:var(--muted,#7a8494)">{{ p.plan }}</span>
+            <span style="margin-left:auto;display:inline-flex;align-items:center;height:17px;padding:0 6px;border-radius:4px;font:500 9px/1 'JetBrains Mono','Geist Mono',ui-monospace,monospace;letter-spacing:.08em;text-transform:uppercase;color:{{ p.tc }};border:1px solid {{ p.td }}">{{ p.status }}</span>
+          </div>
+          <sc-for list="{{ p.meters }}" as="m" hint-placeholder-count="2">
+            <div style="display:grid;grid-template-columns:96px minmax(0,1fr) 62px;align-items:center;gap:8px">
+              <span style="font:400 10.5px/1.2 'JetBrains Mono','Geist Mono',ui-monospace,monospace;color:var(--muted,#a3acb9);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ m.label }}</span>
+              <span style="position:relative;height:6px;border-radius:3px;background:var(--line,rgba(255,255,255,.07));overflow:hidden">
+                <span style="position:absolute;left:0;top:0;bottom:0;width:{{ m.w }};background:{{ m.color }};border-radius:3px"></span>
+                <span style="position:absolute;top:0;bottom:0;left:{{ skipPct }};width:1px;background:var(--text,rgba(255,255,255,.6));opacity:.6"></span>
+              </span>
+              <span style="display:flex;flex-direction:column;align-items:flex-end;gap:3px"><span style="font:600 11.5px/1 'JetBrains Mono','Geist Mono',ui-monospace,monospace;color:{{ m.color }}">{{ m.value }}</span><span style="font:400 9.5px/1 'JetBrains Mono','Geist Mono',ui-monospace,monospace;color:var(--faint,#7a8494);white-space:nowrap">{{ m.reset }}</span></span>
+            </div>
+          </sc-for>
+        </div>
+      </sc-for>
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:10px">
+        <span style="font:400 10.5px/1 'JetBrains Mono','Geist Mono',ui-monospace,monospace;color:var(--muted,#7a8494)">read {{ readAgo }} ago · skip at {{ skipAt }}%</span>
+        <a href="Usage.dc.html" style="font:500 12px/1 Geist,'Geist Mono',sans-serif;color:var(--accent,#ff9a4d)">Open usage →</a>
+      </div>
+    </div>
+  </sc-if>
+
+  <sc-if value="{{ pinned }}" hint-placeholder-val="{{ false }}">
+    <div style="position:fixed;right:16px;bottom:16px;z-index:55;width:{{ dockW }};padding:10px 12px;border-radius:12px;border:1px solid var(--line2,rgba(255,255,255,.12));background:var(--panel,rgba(12,14,19,.96));box-shadow:0 12px 36px rgba(0,0,0,.45);display:flex;flex-direction:column;gap:8px">
+      <div style="display:flex;align-items:center;gap:8px">
+        <span style="font:500 9.5px/1 'JetBrains Mono','Geist Mono',ui-monospace,monospace;letter-spacing:.14em;text-transform:uppercase;color:var(--muted,#7a8494)">usage</span>
+        <span style="font:400 10px/1 'JetBrains Mono','Geist Mono',ui-monospace,monospace;color:{{ pillTextColor }};white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ pillText }}</span>
+        <span style="margin-left:auto;display:flex;gap:2px">
+          <button onClick="{{ toggleDock }}" title="Collapse" style="width:22px;height:22px;border-radius:5px;border:0;background:transparent;color:var(--muted,#7a8494);cursor:pointer;font:500 12px/1 'JetBrains Mono',monospace">{{ dockGlyph }}</button>
+          <button onClick="{{ togglePin }}" title="Unpin" style="width:22px;height:22px;border-radius:5px;border:0;background:transparent;color:var(--muted,#7a8494);cursor:pointer;font:500 12px/1 'JetBrains Mono',monospace">×</button>
+        </span>
+      </div>
+      <sc-if value="{{ dockOpen }}" hint-placeholder-val="{{ true }}">
+        <sc-for list="{{ dockRows }}" as="d" hint-placeholder-count="4">
+          <div title="{{ d.title }}" style="display:grid;grid-template-columns:8px 64px minmax(0,1fr) 34px 52px;align-items:center;gap:7px">
+            <span style="width:7px;height:7px;border-radius:50%;background:{{ d.color }}"></span>
+            <span style="font:500 11px/1 Geist,'Geist Mono',sans-serif;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ d.name }}</span>
+            <span style="position:relative;height:5px;border-radius:3px;background:var(--line,rgba(255,255,255,.07));overflow:hidden"><span style="position:absolute;left:0;top:0;bottom:0;width:{{ d.w }};background:{{ d.bar }};border-radius:3px"></span></span>
+            <span style="font:600 11px/1 'JetBrains Mono','Geist Mono',ui-monospace,monospace;color:{{ d.bar }};text-align:right">{{ d.pct }}</span>
+            <span style="font:400 9.5px/1 'JetBrains Mono','Geist Mono',ui-monospace,monospace;color:var(--faint,#7a8494);text-align:right;white-space:nowrap">{{ d.reset }}</span>
+          </div>
+        </sc-for>
+      </sc-if>
+    </div>
+  </sc-if>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:420,&quot;height&quot;:520},&quot;skipAt&quot;:{&quot;editor&quot;:&quot;range&quot;,&quot;min&quot;:50,&quot;max&quot;:100,&quot;step&quot;:5,&quot;default&quot;:90,&quot;unit&quot;:&quot;%&quot;,&quot;tsType&quot;:&quot;number&quot;}}">
+class Component extends DCLogic {
+  state = { now: Date.now(), open: false, pinned: this.ls('map.usage.pin') === '1', dockOpen: this.ls('map.usage.dock') !== '0' };
+  btnRef = React.createRef();
+  ls(k, v) { try { if (v === undefined) return localStorage.getItem(k); localStorage.setItem(k, v); } catch (_) { return null; } }
+  t0() { let t = +this.ls('map.usage.t0'); const n = Date.now(); if (!t || n - t > 3 * 3600000) { t = n; this.ls('map.usage.t0', String(t)); } return t; }
+  data(now) {
+    const m = 60000, H = 3600000, D = 86400000, t0 = this._t0 || (this._t0 = this.t0());
+    const mon = new Date(new Date(t0).getFullYear(), new Date(t0).getMonth() + 1, 1).getTime();
+    return [
+      { id: 'claude', name: 'Claude', plan: 'Max 5x', color: '#F2A65A', meters: [['5h session', .62, .11 / H, t0 + 2 * H + 12 * m], ['7d all', .41, .012 / H, t0 + 3 * D + 5 * H], ['7d Opus', .88, .009 / H, t0 + 3 * D + 5 * H]] },
+      { id: 'codex', name: 'Codex', plan: 'Plus', color: '#5EA8F2', meters: [['5h limit', .34, .07 / H, t0 + 3 * H + 40 * m], ['7d limit', .57, .008 / H, t0 + 5 * D + 2 * H]] },
+      { id: 'gemini', name: 'Gemini', plan: 'Free', color: '#B48CF2', meters: [['day requests', .412, .04 / H, t0 + 9 * H + 18 * m, 1000]] },
+      { id: 'copilot', name: 'Copilot', plan: 'Pro', color: '#4FD1B5', meters: [['premium / mo', 187 / 300, 2.4 / 300 / H, mon, 300]] },
+    ].map(p => Object.assign(p, { meters: p.meters.map(x => { const used = Math.min(1, x[1] + x[2] * (now - t0)); return { label: x[0], used, resetAt: x[3], cap: x[4] }; }) }));
+  }
+  componentDidMount() { this.iv = setInterval(() => this.setState({ now: Date.now() }), 1000); this.readAt = Date.now() - 42000; }
+  componentWillUnmount() { clearInterval(this.iv); }
+  dur(ms) { const s = Math.max(0, Math.round(ms / 1000)), d = Math.floor(s / 86400), h = Math.floor(s % 86400 / 3600), mi = Math.floor(s % 3600 / 60); return d ? d + 'd ' + h + 'h' : h ? h + 'h ' + String(mi).padStart(2, '0') + 'm' : mi ? mi + 'm' : s + 's'; }
+  renderVals() {
+    const st = this.state, now = st.now, skip = (this.props.skipAt ?? 90) / 100;
+    const tone = (u, c) => u >= 1 ? '#F26D6D' : u >= skip ? '#F2C14E' : c;
+    const P = this.data(now);
+    const provs = P.map(p => {
+      const worst = Math.max(...p.meters.map(m => m.used));
+      const status = worst >= 1 ? 'limited' : worst >= skip ? 'skipped' : worst >= skip - .15 ? 'high' : 'ok';
+      const T = { ok: ['#7ee2a8', 'rgba(74,222,128,.35)'], high: ['#F2C14E', 'rgba(242,193,78,.35)'], skipped: ['#F2C14E', 'rgba(242,193,78,.55)'], limited: ['#F26D6D', 'rgba(242,109,109,.5)'] }[status];
+      return { name: p.name, plan: p.plan, color: p.color, status, tc: T[0], td: T[1], worst,
+        meters: p.meters.map(m => ({ label: m.label, w: (m.used * 100).toFixed(1) + '%', color: tone(m.used, p.color), value: m.cap ? Math.round(m.used * m.cap) + '/' + m.cap : Math.round(m.used * 100) + '%', reset: '↻ ' + this.dur(m.resetAt - now) })) };
+    });
+    const gauges = P.map(p => { const a = p.meters[0], b = p.meters[1] || p.meters[0]; return { a: (a.used * 100) + '%', b: (b.used * 100) + '%', ca: tone(a.used, p.color), cb: tone(b.used, p.color), title: p.name + ' · ' + p.meters.map(m => m.label + ' ' + Math.round(m.used * 100) + '%').join(' · ') }; });
+    let tight = null; P.forEach(p => p.meters.forEach(m => { if (!tight || m.used > tight.m.used) tight = { p, m }; }));
+    const hot = provs.filter(p => p.status === 'skipped' || p.status === 'limited');
+    const pillText = hot.length ? hot.map(p => p.name).join(', ') + ' ' + (hot.length > 1 ? 'are' : 'is') + ' over ' + Math.round(skip * 100) + '%' : tight.p.name + ' ' + tight.m.label + ' ' + Math.round(tight.m.used * 100) + '%';
+    const dockRows = P.map(p => { const m = p.meters.reduce((a, x) => x.used > a.used ? x : a, p.meters[0]); return { name: p.name, color: p.color, w: (m.used * 100).toFixed(1) + '%', bar: tone(m.used, p.color), pct: Math.round(m.used * 100) + '%', reset: '↻ ' + this.dur(m.resetAt - now), title: p.name + ' · tightest: ' + m.label }; });
+    const set = (k, v, key, val) => { this.ls(key, val); this.setState({ [k]: v }); };
+    return { provs, gauges, dockRows, pillText, pillTextColor: hot.length ? '#F2C14E' : 'var(--muted,#a3acb9)',
+      pillBorder: hot.length ? 'rgba(242,193,78,.45)' : 'var(--line2,rgba(255,255,255,.12))', pillBg: st.open ? 'var(--panel2,rgba(255,255,255,.05))' : 'transparent',
+      btnRef: this.btnRef, popTop: (st.pos ? st.pos.top : 40) + 'px', popLeft: (st.pos ? st.pos.left : 8) + 'px',
+      open: st.open, toggle: () => { const el = this.btnRef.current; let pos = null; if (el) { const r = el.getBoundingClientRect(), W = Math.min(360, window.innerWidth - 16); const left = r.left + r.width / 2 < window.innerWidth / 2 ? r.left : r.right - W; pos = { top: r.bottom + 6, left: Math.max(8, Math.min(window.innerWidth - W - 8, left)) }; } this.setState({ open: !st.open, pos }); }, close: () => this.setState({ open: false }),
+      pinned: st.pinned, togglePin: () => set('pinned', !st.pinned, 'map.usage.pin', st.pinned ? '0' : '1'),
+      pinLabel: st.pinned ? '✓ pinned to corner' : 'pin to corner', pinBorder: st.pinned ? 'var(--accent,#FF7A1A)' : 'var(--line2,rgba(255,255,255,.14))', pinColor: st.pinned ? 'var(--accent,#ffb37a)' : 'var(--muted,#c5ccd6)',
+      dockOpen: st.dockOpen, toggleDock: () => set('dockOpen', !st.dockOpen, 'map.usage.dock', st.dockOpen ? '0' : '1'), dockGlyph: st.dockOpen ? '–' : '+', dockW: st.dockOpen ? '300px' : '230px',
+      skipAt: Math.round(skip * 100), skipPct: (skip * 100) + '%', readAgo: this.dur(now - (this.readAt || now)) };
+  }
+}
+</script>
+</body>
+</html>

@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import { Geist, Geist_Mono, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -12,18 +12,20 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
+const jetbrainsMono = JetBrains_Mono({
+  variable: "--font-jetbrains-mono",
+  subsets: ["latin"],
+});
+
 export const metadata: Metadata = {
-  title: "Multi-Agent Platform",
+  title: "MAP · Multi-Agent Platform",
   description: "Run, watch and orchestrate coding agents",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
-    <html
-      lang="en"
-      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
-    >
-      <body className="flex min-h-full flex-col font-mono text-[13px]">{children}</body>
+    <html lang="en" className={`${geistSans.variable} ${geistMono.variable} ${jetbrainsMono.variable} h-full antialiased`}>
+      <body className="flex min-h-full flex-col font-sans text-[13px]">{children}</body>
     </html>
   );
 }

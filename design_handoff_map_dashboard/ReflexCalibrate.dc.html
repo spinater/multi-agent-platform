@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<div style="display:flex;flex-direction:column;gap:14px;font-family:'Geist Mono',ui-monospace,monospace;color:var(--text)">
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:8px">
+    <sc-for list="{{ vm.tiles }}" as="t" hint-placeholder-count="4">
+      <div style="display:flex;flex-direction:column;gap:7px;padding:10px 12px;border:1px solid var(--line);border-radius:8px">
+        <span style="font:500 9.5px/1.2 'Geist Mono',monospace;letter-spacing:.14em;text-transform:uppercase;color:var(--muted)">{{ t.k }}</span>
+        <span style="font:600 20px/1 'Geist Mono',monospace;color:{{ t.color }}">{{ t.v }}</span>
+        <span style="font:400 10px/1.3 'Geist Mono',monospace;color:var(--faint)">{{ t.sub }}</span>
+      </div>
+    </sc-for>
+  </div>
+  <div style="display:flex;flex-direction:column;gap:6px">
+    <div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;font:500 10px/1.3 'Geist Mono',monospace;letter-spacing:.12em;text-transform:uppercase;color:var(--muted)"><span>confidence of each case · log scale</span><span style="letter-spacing:.02em;text-transform:none;color:{{ vm.draftColor }}">{{ vm.draft }}</span></div>
+    <div ref="{{ trackRef }}" onPointerDown="{{ onDown }}" style="position:relative;height:150px;border:1px solid var(--line);border-radius:8px;overflow:hidden;cursor:{{ vm.cursor }};touch-action:none;user-select:none">
+      <span style="position:absolute;top:0;bottom:0;left:0;width:{{ vm.thPct }};background:color-mix(in srgb, var(--llm) 9%, transparent)"></span>
+      <span style="position:absolute;top:0;bottom:0;right:0;left:{{ vm.thPct }};background:color-mix(in srgb, var(--reflex) 10%, transparent)"></span>
+      <span style="position:absolute;left:0;right:0;top:50%;height:1px;background:var(--line)"></span>
+      <span style="position:absolute;left:8px;top:8px;font:500 9.5px/1 'Geist Mono',monospace;letter-spacing:.14em;color:var(--muted)">CORRECT</span>
+      <span style="position:absolute;left:8px;bottom:8px;font:500 9.5px/1 'Geist Mono',monospace;letter-spacing:.14em;color:var(--muted)">WRONG</span>
+      <span style="position:absolute;right:8px;top:8px;font:600 9.5px/1 'Geist Mono',monospace;letter-spacing:.14em;color:var(--reflex)">→ REFLEX</span>
+      <span style="position:absolute;left:84px;top:8px;font:600 9.5px/1 'Geist Mono',monospace;letter-spacing:.14em;color:var(--llm)">LLM ←</span>
+      <sc-for list="{{ vm.dots }}" as="d" hint-placeholder-count="12">
+        <span title="{{ d.title }}" style="position:absolute;left:{{ d.x }};top:{{ d.y }};width:9px;height:9px;margin:-4px 0 0 -4px;border-radius:50%;background:{{ d.fill }};border:1.5px solid {{ d.ring }}"></span>
+      </sc-for>
+      <span style="position:absolute;top:0;bottom:0;left:{{ vm.thPct }};width:2px;margin-left:-1px;background:var(--accent)"></span>
+      <span style="position:absolute;top:50%;left:{{ vm.thPct }};transform:translate(-50%,-50%);height:22px;padding:0 8px;display:flex;align-items:center;border-radius:5px;background:var(--accent);color:var(--accent-ink);font:600 10.5px/1 'Geist Mono',monospace;white-space:nowrap">⇔ {{ vm.thLabel }}</span>
+    </div>
+    <div style="position:relative;height:12px;font:400 9.5px/1 'Geist Mono',monospace;color:var(--faint)">
+      <span style="position:absolute;left:0">1e-5</span><span style="position:absolute;left:23.9%;transform:translateX(-50%)">3e-5</span><span style="position:absolute;left:50%;transform:translateX(-50%)">1e-4</span><span style="position:absolute;left:73.9%;transform:translateX(-50%)">3e-4</span><span style="position:absolute;right:0">1e-3</span>
+    </div>
+  </div>
+  <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center">
+    <sc-for list="{{ vm.actions }}" as="a" hint-placeholder-count="2">
+      <button onClick="{{ a.onClick }}" style="height:30px;padding:0 12px;border-radius:6px;border:1px solid {{ a.border }};background:{{ a.bg }};color:{{ a.color }};font:600 11px/1 'Geist Mono',monospace;letter-spacing:.04em;cursor:pointer;white-space:nowrap;opacity:{{ a.opacity }}">{{ a.label }}</button>
+    </sc-for>
+    <span style="font:400 10.5px/1.4 'Geist Mono',monospace;color:var(--muted)">{{ vm.actionNote }}</span>
+  </div>
+  <div style="display:flex;flex-direction:column;gap:8px;padding-top:12px;border-top:1px solid var(--line)">
+    <div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;align-items:center">
+      <span style="font:500 10px/1 'Geist Mono',monospace;letter-spacing:.12em;text-transform:uppercase;color:var(--muted)">calibration cases · {{ vm.count }}</span>
+      <span style="font:400 10.5px/1 'Geist Mono',monospace;color:{{ vm.countColor }}">{{ vm.countNote }}</span>
+    </div>
+    <span style="display:flex;height:4px;border-radius:2px;background:var(--line);overflow:hidden"><span style="height:100%;width:{{ vm.countPct }};background:{{ vm.countColor }}"></span></span>
+    <textarea rows="3" value="{{ vm.paste }}" onChange="{{ vm.onPaste }}" placeholder="one case per line:  message | correct answer&#10;Replica lag 45s on db-2 | db-failover" style="width:100%;resize:vertical;background:var(--bg);border:1px solid var(--line2);border-radius:8px;color:var(--text);padding:10px 12px;font:400 12px/1.55 'Geist Mono',monospace;outline:none"></textarea>
+    <div style="display:flex;flex-wrap:wrap;gap:8px">
+      <sc-for list="{{ vm.caseActions }}" as="c" hint-placeholder-count="3">
+        <button onClick="{{ c.onClick }}" style="height:28px;padding:0 11px;border-radius:6px;border:1px solid {{ c.border }};background:{{ c.bg }};color:{{ c.color }};font:600 11px/1 'Geist Mono',monospace;cursor:pointer;white-space:nowrap;opacity:{{ c.opacity }}">{{ c.label }}</button>
+      </sc-for>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:560,&quot;height&quot;:560},&quot;vm&quot;:{&quot;editor&quot;:null,&quot;tsType&quot;:&quot;object&quot;}}">
+class Component extends DCLogic {
+  trackRef = React.createRef();
+  componentDidMount() {
+    this.mv = e => { if (this.drag) this.emit(e); };
+    this.up = () => { this.drag = false; };
+    window.addEventListener('pointermove', this.mv); window.addEventListener('pointerup', this.up);
+  }
+  componentWillUnmount() { window.removeEventListener('pointermove', this.mv); window.removeEventListener('pointerup', this.up); }
+  emit(e) { const el = this.trackRef.current; const vm = this.props.vm; if (!el || !vm || !vm.onThreshold) return; const r = el.getBoundingClientRect(); const f = Math.max(0, Math.min(1, (e.clientX - r.left) / r.width)); vm.onThreshold(-5 + 2 * f); }
+  renderVals() {
+    return { trackRef: this.trackRef, onDown: e => { const vm = this.props.vm; if (!vm || !vm.canDrag) return; this.drag = true; this.emit(e); } };
+  }
+}
+</script>
+</body>
+</html>

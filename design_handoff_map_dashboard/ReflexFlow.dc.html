@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<div style="display:flex;flex-direction:column;gap:14px;font-family:'Geist Mono',ui-monospace,monospace;color:var(--text)">
+  <div style="display:flex;flex-wrap:wrap;align-items:stretch;gap:8px">
+    <div style="flex:1 1 150px;min-width:140px;display:flex;flex-direction:column;gap:7px;padding:12px 14px;border:1px solid var(--line);border-radius:10px;background:var(--panel2)">
+      <span style="font:500 10px/1 'Geist Mono',monospace;letter-spacing:.16em;text-transform:uppercase;color:var(--muted)">01 · Question</span>
+      <span style="font:500 12.5px/1.4 'Geist Mono',monospace;text-wrap:pretty">{{ vm.question }}</span>
+      <span style="font:400 10.5px/1.3 'Geist Mono',monospace;color:var(--faint)">{{ vm.qType }}</span>
+    </div>
+    <span style="flex:none;align-self:center;font:400 16px/1 'Geist Mono',monospace;color:var(--faint)">→</span>
+    <div style="flex:1 1 150px;min-width:140px;display:flex;flex-direction:column;gap:7px;padding:12px 14px;border:1px solid {{ vm.reflexBorder }};border-radius:10px;background:var(--panel2)">
+      <span style="font:500 10px/1 'Geist Mono',monospace;letter-spacing:.16em;text-transform:uppercase;color:var(--muted)">02 · Reflex</span>
+      <span style="font:600 12.5px/1.4 'Geist Mono',monospace">local · no model</span>
+      <span style="font:400 10.5px/1.4 'Geist Mono',monospace;color:var(--faint)">{{ vm.corpus }}</span>
+      <span style="font:400 10.5px/1.4 'Geist Mono',monospace;color:var(--faint)">confidence 1e-5 … 1e-3</span>
+    </div>
+    <span style="flex:none;align-self:center;font:400 16px/1 'Geist Mono',monospace;color:var(--faint)">→</span>
+    <div style="flex:1 1 150px;min-width:140px;display:flex;flex-direction:column;gap:7px;padding:12px 14px;border:1px solid var(--line);border-radius:10px;background:var(--panel2)">
+      <span style="font:500 10px/1 'Geist Mono',monospace;letter-spacing:.16em;text-transform:uppercase;color:var(--muted)">03 · Gate</span>
+      <span style="font:600 12.5px/1.4 'Geist Mono',monospace">confidence ≥ <span style="color:var(--accent)">{{ vm.th }}</span> ?</span>
+      <span style="font:400 10.5px/1.4 'Geist Mono',monospace;color:var(--faint);text-wrap:pretty">{{ vm.thNote }}</span>
+    </div>
+    <span style="flex:none;align-self:center;font:400 16px/1 'Geist Mono',monospace;color:var(--faint)">→</span>
+    <div style="flex:2.2 1 300px;min-width:260px;display:flex;flex-direction:column;gap:6px">
+      <sc-for list="{{ vm.lanes }}" as="l" hint-placeholder-count="3">
+        <div style="display:grid;grid-template-columns:62px minmax(0,1fr) auto;align-items:center;gap:10px;padding:9px 12px;border:1px solid {{ l.border }};border-radius:8px;background:{{ l.bg }}">
+          <span style="font:500 9.5px/1.2 'Geist Mono',monospace;letter-spacing:.12em;text-transform:uppercase;color:var(--muted)">{{ l.when }}</span>
+          <span style="display:flex;flex-direction:column;gap:6px;min-width:0">
+            <span style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+              <span style="width:7px;height:7px;border-radius:50%;background:{{ l.color }}"></span>
+              <span style="font:600 11px/1 'Geist Mono',monospace;letter-spacing:.14em;text-transform:uppercase;color:{{ l.color }}">{{ l.name }}</span>
+              <span style="font:400 10.5px/1 'Geist Mono',monospace;color:var(--faint);white-space:nowrap">{{ l.note }}</span>
+            </span>
+            <span style="height:4px;border-radius:2px;background:var(--line);overflow:hidden;display:block"><span style="display:block;height:100%;width:{{ l.w }};background:{{ l.color }}"></span></span>
+          </span>
+          <span style="font:600 20px/1 'Geist Mono',monospace;color:{{ l.color }};white-space:nowrap">{{ l.pct }}</span>
+        </div>
+      </sc-for>
+    </div>
+  </div>
+  <span style="font:400 11px/1.5 'Geist Mono',monospace;color:var(--muted);text-wrap:pretty">{{ vm.footnote }}</span>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:900,&quot;height&quot;:260},&quot;vm&quot;:{&quot;editor&quot;:null,&quot;tsType&quot;:&quot;object&quot;}}"></script>
+</body>
+</html>

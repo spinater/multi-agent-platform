@@ -7,6 +7,7 @@ import type { Event } from "./generated/Event";
 import type { OrchestratorStatus } from "./generated/OrchestratorStatus";
 import type { ProjectInfo } from "./generated/ProjectInfo";
 import type { ProviderInfo } from "./generated/ProviderInfo";
+import type { ServerInfo } from "./generated/ServerInfo";
 import type { ServerMessage } from "./generated/ServerMessage";
 import type { Session } from "./generated/Session";
 import type { Task } from "./generated/Task";
@@ -20,6 +21,7 @@ export type DashboardState = {
   orchestrator: OrchestratorStatus | null;
   projects: ProjectInfo[];
   events: Event[];
+  server: ServerInfo | null;
   connection: Connection;
   reload: () => Promise<void>;
 };
@@ -42,6 +44,7 @@ export function useDashboard(): DashboardState {
   const [orchestrator, setOrchestrator] = useState<OrchestratorStatus | null>(null);
   const [projects, setProjects] = useState<ProjectInfo[]>([]);
   const [events, setEvents] = useState<Event[]>([]);
+  const [server, setServer] = useState<ServerInfo | null>(null);
   const [connection, setConnection] = useState<Connection>("connecting");
   const retry = useRef(0);
 
@@ -53,6 +56,7 @@ export function useDashboard(): DashboardState {
       setProviders(overview.providers);
       setOrchestrator(overview.orchestrator);
       setProjects(overview.projects);
+      setServer(overview.server);
       setEvents(recent);
     } catch (err) {
       setConnection(err instanceof ApiError && err.status === 401 ? "unauthorized" : "offline");
@@ -143,5 +147,5 @@ export function useDashboard(): DashboardState {
     };
   }, [reload]);
 
-  return { sessions, tasks, providers, orchestrator, projects, events, connection, reload };
+  return { sessions, tasks, providers, orchestrator, projects, events, server, connection, reload };
 }

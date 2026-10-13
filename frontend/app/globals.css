@@ -1,73 +1,152 @@
 @import "tailwindcss";
 
-/* Operator console in the "AI OS" style: near-black panels, hairline borders, small spaced capitals for labels,
-   one warm accent. Status hues are always paired with text labels, never color alone.
+/* MAP shell (design_handoff_map_dashboard/README.md, "Design tokens"): near-black background, hairline borders,
+   spaced capitals for labels, one warm accent. Status hues are always paired with a text label, never colour alone.
    Dark is the default; `data-theme="light"` on <html> switches to the light palette. */
 :root {
-  --bg: #0a0d12;
-  --panel: #0d1117;
-  --panel-2: #121821;
-  --line: #1f2733;
-  --text: #dfe5ee;
-  --muted: #7d8899;
-  --accent: #f08a3c;
-  --accent-text: #0a0d12;
+  --bg: #07080a;
+  --bg-glow: #10131b;
+  --panel: #0b0d11;
+  --panel-2: #11141a;
+  /* Surfaces from the design: card tint, inset wells (terminals, figures), floating menus. */
+  --surface: rgba(255, 255, 255, 0.02);
+  --inset: #05060a;
+  --menu: #0c0e13;
+  --line: rgba(255, 255, 255, 0.07);
+  --line-2: rgba(255, 255, 255, 0.12);
+  --line-3: rgba(255, 255, 255, 0.16);
+  --text: #e6e9ef;
+  --text-2: #a3acb9;
+  --nav: #c5ccd6;
+  --muted: #7a8494;
+  --accent: #ff7a1a;
+  --accent-soft: #ffb37a;
+  --accent-tint: rgba(255, 122, 26, 0.12);
+  --link: #ff9a4d;
+  --link-hover: #ffbd8a;
+  --accent-text: #0b0c0e;
   --ok: #4ade80;
-  --warn: #fbbf24;
-  --bad: #f87171;
-  --info: #60a5fa;
-  --idle: #8b95a5;
-  --term-bg: #06080b;
+  --warn: #f2c14e;
+  --bad: #f26d6d;
+  --info: #38bdf8;
+  --idle: #7a8494;
+  --term-bg: #05060a;
   --term-text: #d6dde6;
-  /* Graph areas, in order of first appearance. */
-  --area-1: #6c8cff;
-  --area-2: #f0a24a;
-  --area-3: #4fb88f;
-  --area-4: #8f7cff;
-  --area-5: #ef6f5e;
-  --area-6: #9ccc3c;
-  --area-7: #4cc3d9;
-  --area-8: #e46fb0;
-  --area-0: #9aa3b0;
+  /* Providers, then the all-projects palette. */
+  --p-claude: #f2a65a;
+  --p-codex: #5ea8f2;
+  --p-gemini: #b48cf2;
+  --p-other: #4fd1b5;
+  --area-1: #f2a65a;
+  --area-2: #5ea8f2;
+  --area-3: #b48cf2;
+  --area-4: #4fd1b5;
+  --area-5: #f27a9b;
+  --area-6: #c9d45c;
+  --area-7: #e6e9ef;
+  --area-8: #7dd3fc;
+  --area-0: #7a8494;
   color-scheme: dark;
 }
 
 :root[data-theme="light"] {
-  --bg: #f4f5f7;
+  --bg: #f4f4f1;
+  --bg-glow: #ffffff;
   --panel: #ffffff;
-  --panel-2: #f0f2f5;
-  --line: #dde1e7;
-  --text: #15181d;
-  --muted: #5d6673;
-  --accent: #c2621b;
+  --panel-2: #f0f0ec;
+  --surface: rgba(0, 0, 0, 0.015);
+  --inset: #f0f0ec;
+  --menu: #ffffff;
+  --line: rgba(0, 0, 0, 0.09);
+  --line-2: rgba(0, 0, 0, 0.14);
+  --line-3: rgba(0, 0, 0, 0.2);
+  --text: #15171a;
+  --text-2: #3f4650;
+  --nav: #3f4650;
+  --muted: #6b727c;
+  --accent: #c4621a;
+  --accent-soft: #a24f12;
+  --accent-tint: rgba(196, 98, 26, 0.1);
+  --link: #b4570f;
+  --link-hover: #8a420b;
   --accent-text: #ffffff;
   --ok: #15803d;
-  --warn: #b45309;
-  --bad: #b91c1c;
+  --warn: #a16207;
+  --bad: #c53030;
   --info: #0369a1;
   --idle: #64748b;
   --term-bg: #0d1117;
   --term-text: #d6dde6;
-  --area-1: #3d5bd9;
-  --area-2: #c46f12;
-  --area-3: #24855f;
-  --area-4: #6650d6;
-  --area-5: #c6402f;
-  --area-6: #6a9214;
-  --area-7: #1a8aa0;
-  --area-8: #b83f85;
+  --p-claude: #c46f12;
+  --p-codex: #2f6fb5;
+  --p-gemini: #7650c8;
+  --p-other: #1f8f78;
+  --area-1: #c46f12;
+  --area-2: #2f6fb5;
+  --area-3: #7650c8;
+  --area-4: #1f8f78;
+  --area-5: #c0406a;
+  --area-6: #7d8a12;
+  --area-7: #3f4650;
+  --area-8: #1a8aa0;
   --area-0: #6b7280;
   color-scheme: light;
+}
+
+/* The Reflex screen has its own tokens (README, "Reflex"): wrap it in `.reflex-theme`. Lane colours are fixed:
+   reflex green, llm yellow, abstain red. */
+.reflex-theme {
+  --r-bg: #0b0c0e;
+  --r-panel: #111317;
+  --r-panel2: #16191e;
+  --r-line: rgba(255, 255, 255, 0.09);
+  --r-line2: rgba(255, 255, 255, 0.17);
+  --r-text: #e7e9ec;
+  --r-muted: #98a0ab;
+  --r-faint: #68707c;
+  --r-accent: #f08a3c;
+  --r-accent-ink: #0b0c0e;
+  --lane-reflex: #4ade80;
+  --lane-llm: #f2c14e;
+  --lane-abstain: #f26d6d;
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+}
+
+:root[data-theme="light"] .reflex-theme {
+  --r-bg: #f4f4f1;
+  --r-panel: #ffffff;
+  --r-panel2: #f0f0ec;
+  --r-line: rgba(0, 0, 0, 0.1);
+  --r-line2: rgba(0, 0, 0, 0.2);
+  --r-text: #15171a;
+  --r-muted: #555c66;
+  --r-faint: #80868f;
+  --r-accent: #c4621a;
+  --r-accent-ink: #ffffff;
+  --lane-reflex: #15803d;
+  --lane-llm: #a16207;
+  --lane-abstain: #c53030;
 }
 
 @theme inline {
   --color-bg: var(--bg);
   --color-panel: var(--panel);
   --color-panel-2: var(--panel-2);
+  --color-surface: var(--surface);
+  --color-inset: var(--inset);
+  --color-menu: var(--menu);
   --color-line: var(--line);
+  --color-line-2: var(--line-2);
+  --color-line-3: var(--line-3);
   --color-text: var(--text);
+  --color-text-2: var(--text-2);
+  --color-nav: var(--nav);
   --color-muted: var(--muted);
   --color-accent: var(--accent);
+  --color-accent-soft: var(--accent-soft);
+  --color-accent-tint: var(--accent-tint);
+  --color-link: var(--link);
+  --color-link-hover: var(--link-hover);
   --color-accent-text: var(--accent-text);
   --color-ok: var(--ok);
   --color-warn: var(--warn);
@@ -76,29 +155,60 @@
   --color-idle: var(--idle);
   --color-term-bg: var(--term-bg);
   --color-term-text: var(--term-text);
-  --font-sans: var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo, monospace;
-  --font-mono: var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo, monospace;
+  --color-p-claude: var(--p-claude);
+  --color-p-codex: var(--p-codex);
+  --color-p-gemini: var(--p-gemini);
+  --color-p-other: var(--p-other);
+  --color-r-bg: var(--r-bg);
+  --color-r-panel: var(--r-panel);
+  --color-r-panel2: var(--r-panel2);
+  --color-r-line: var(--r-line);
+  --color-r-line2: var(--r-line2);
+  --color-r-text: var(--r-text);
+  --color-r-muted: var(--r-muted);
+  --color-r-faint: var(--r-faint);
+  --color-r-accent: var(--r-accent);
+  --color-r-accent-ink: var(--r-accent-ink);
+  --color-lane-reflex: var(--lane-reflex);
+  --color-lane-llm: var(--lane-llm);
+  --color-lane-abstain: var(--lane-abstain);
+  /* Geist for UI text, JetBrains Mono for data and labels, Geist Mono for the Reflex screen. */
+  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-jetbrains-mono), ui-monospace, SFMono-Regular, Menlo, monospace;
+  --font-reflex: var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 
 body {
-  background: var(--bg);
+  background: radial-gradient(1200px 420px at 50% -120px, var(--bg-glow), var(--bg)) no-repeat, var(--bg);
+  background-color: var(--bg);
   color: var(--text);
+}
+
+@layer base {
+  a {
+    color: var(--link);
+  }
+
+  a:hover {
+    color: var(--link-hover);
+  }
 }
 
 ::selection {
   background: color-mix(in srgb, var(--accent) 35%, transparent);
 }
 
-/* Small spaced capitals: section titles, chips, table heads. */
+/* Small spaced capitals (JetBrains Mono): section titles, chips, table heads, kickers. */
 .label {
-  font-size: 11px;
+  font-family: var(--font-jetbrains-mono), ui-monospace, monospace;
+  font-size: 10px;
   font-weight: 500;
-  letter-spacing: 0.14em;
+  letter-spacing: 0.16em;
   text-transform: uppercase;
   color: var(--muted);
 }
 
 * {
   scrollbar-width: thin;
-  scrollbar-color: var(--line) transparent;
+  scrollbar-color: var(--line-2) transparent;
 }

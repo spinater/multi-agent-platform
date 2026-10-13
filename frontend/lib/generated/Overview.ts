@@ -2,7 +2,8 @@
 import type { OrchestratorStatus } from "./OrchestratorStatus";
 import type { ProjectInfo } from "./ProjectInfo";
 import type { ProviderInfo } from "./ProviderInfo";
+import type { ServerInfo } from "./ServerInfo";
 import type { Session } from "./Session";
 import type { Task } from "./Task";
 
-export type Overview = { sessions: Array<Session>, tasks: Array<Task>, providers: Array<ProviderInfo>, orchestrator: OrchestratorStatus, projects: Array<ProjectInfo>, };
+export type Overview = { sessions: Array<Session>, tasks: Array<Task>, providers: Array<ProviderInfo>, orchestrator: OrchestratorStatus, projects: Array<ProjectInfo>, server: ServerInfo, };

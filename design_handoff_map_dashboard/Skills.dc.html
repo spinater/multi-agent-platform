@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+html,body{margin:0;background:#07080a;color:#e6e9ef;font-family:Geist,ui-sans-serif,system-ui,sans-serif;-webkit-font-smoothing:antialiased}
+*{box-sizing:border-box}
+a{color:#ff9a4d;text-decoration:none}a:hover{color:#ffbd8a}
+button,input{font-family:inherit}
+::-webkit-scrollbar{width:8px;height:8px}::-webkit-scrollbar-thumb{background:#1b1f27;border-radius:4px}::-webkit-scrollbar-track{background:transparent}
+input::placeholder{color:#5d6673}
+</style>
+</helmet>
+<div style="min-height:100vh;background:radial-gradient(1400px 800px at 50% 0%, #10131b 0%, #07080a 60%);color:#e6e9ef">
+
+  <nav style="position:sticky;top:0;z-index:20;display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px 20px;padding:8px 20px;min-height:44px;border-bottom:1px solid rgba(255,255,255,.07);background:rgba(7,8,10,.97)">
+    <div style="display:flex;align-items:center;gap:8px 16px;flex-wrap:wrap">
+      <a href="Projects.dc.html" style="display:flex;align-items:center;gap:7px;font:700 14px/1 Geist,sans-serif;letter-spacing:.08em;color:#e6e9ef;white-space:nowrap"><span style="color:#FF7A1A">⬡</span>MAP</a>
+      <div style="position:relative;letter-spacing:0;text-transform:none">
+        <button onClick="{{ toggleProjMenu }}" style="display:flex;align-items:center;gap:8px;height:28px;padding:0 10px;border-radius:7px;border:1px solid rgba(255,255,255,.12);background:transparent;font:500 11.5px/1 'JetBrains Mono',ui-monospace,monospace;color:#e6e9ef;white-space:nowrap;cursor:pointer"><span style="width:6px;height:6px;border-radius:50%;background:#FF7A1A"></span>{{ projectName }}<span style="color:#7a8494">▾</span></button>
+        <sc-if value="{{ projMenu }}" hint-placeholder-val="{{ false }}">
+          <div onClick="{{ closeProjMenu }}" style="position:fixed;inset:0;z-index:60"></div>
+          <div style="position:absolute;top:34px;left:0;z-index:61;width:290px;padding:6px;border-radius:10px;border:1px solid rgba(255,255,255,.12);background:#0c0e13;box-shadow:0 20px 50px rgba(0,0,0,.6);display:flex;flex-direction:column;gap:2px">
+            <span style="padding:8px 10px 6px;font:500 10px/1 'JetBrains Mono',ui-monospace,monospace;letter-spacing:.14em;text-transform:uppercase;color:#7a8494">Switch project</span>
+            <sc-for list="{{ projItems }}" as="pi" hint-placeholder-count="5">
+              <button onClick="{{ pi.onClick }}" style="display:flex;align-items:center;gap:10px;padding:9px 10px;border-radius:7px;border:0;background:{{ pi.bg }};color:#e6e9ef;text-align:left;cursor:pointer;font:500 12.5px/1.2 'JetBrains Mono',ui-monospace,monospace" style-hover="background:rgba(255,255,255,.05)"><span style="flex:none;width:6px;height:6px;border-radius:50%;background:{{ pi.dot }}"></span><span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ pi.name }}</span><span style="color:#FF7A1A">{{ pi.mark }}</span></button>
+            </sc-for>
+            <div style="height:1px;background:rgba(255,255,255,.08);margin:4px 0"></div>
+            <a href="Projects.dc.html" style="padding:9px 10px;border-radius:7px;font:500 12.5px/1 Geist,sans-serif;color:#c5ccd6" style-hover="background:rgba(255,255,255,.05);color:#e6e9ef">All projects</a>
+            <a href="Projects.dc.html?new=1" style="padding:9px 10px;border-radius:7px;font:500 12.5px/1 Geist,sans-serif;color:#ffb37a" style-hover="background:rgba(255,122,26,.1)">+ New project</a>
+          </div>
+        </sc-if>
+      </div>
+      <div style="display:flex;gap:2px;flex-wrap:nowrap;flex:none">
+        <a href="Projects.dc.html" style="height:28px;display:flex;align-items:center;padding:0 10px;border-radius:6px;color:#c5ccd6;font:500 12px/1 Geist,sans-serif;white-space:nowrap" style-hover="background:rgba(255,255,255,.05);color:#e6e9ef">Projects</a>
+        <a href="Agent%20Command%20Centre.dc.html" style="height:28px;display:flex;align-items:center;padding:0 10px;border-radius:6px;color:#c5ccd6;font:500 12px/1 Geist,sans-serif;white-space:nowrap" style-hover="background:rgba(255,255,255,.05);color:#e6e9ef">Command centre</a>
+        <a href="Skills.dc.html" style="height:28px;display:flex;align-items:center;padding:0 10px;border-radius:6px;background:rgba(255,122,26,.12);color:#ffb37a;font:500 12px/1 Geist,sans-serif;white-space:nowrap">Skills</a>
+        <a href="Decisions.dc.html" style="height:28px;display:flex;align-items:center;padding:0 10px;border-radius:6px;color:#c5ccd6;font:500 12px/1 Geist,sans-serif;white-space:nowrap" style-hover="background:rgba(255,255,255,.05);color:#e6e9ef">Decisions</a>
+        <a href="Reflex.dc.html" style="height:28px;display:flex;align-items:center;padding:0 10px;border-radius:6px;color:#c5ccd6;font:500 12px/1 Geist,sans-serif;white-space:nowrap" style-hover="background:rgba(255,255,255,.05);color:#e6e9ef">Reflex</a>
+        <a href="Usage.dc.html" style="height:28px;display:flex;align-items:center;padding:0 10px;border-radius:6px;color:#c5ccd6;font:500 12px/1 Geist,sans-serif;white-space:nowrap" style-hover="background:rgba(255,255,255,.05);color:#e6e9ef">Usage</a>
+      </div>
+    </div>
+    <div style="display:flex;align-items:center;gap:14px">
+      <dc-import name="UsageMini" hint-size="200px,28px"></dc-import>
+      <span style="font:500 10px/1 'JetBrains Mono',ui-monospace,monospace;letter-spacing:.12em;text-transform:uppercase;color:#7a8494;white-space:nowrap">{{ clock }}</span>
+    </div>
+  </nav>
+
+  <main style="max-width:1440px;margin:0 auto;padding:32px 24px 60px;display:flex;flex-direction:column;gap:26px">
+    <div style="display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:20px">
+      <div style="display:flex;flex-direction:column;gap:10px;max-width:680px">
+        <span style="font:500 10px/1 'JetBrains Mono',ui-monospace,monospace;letter-spacing:.2em;text-transform:uppercase;color:#7a8494">Project · {{ project }}</span>
+        <h1 style="margin:0;font:600 38px/1.05 Geist,sans-serif;letter-spacing:-.02em">Skills</h1>
+        <p style="margin:0;font:400 14px/1.55 Geist,sans-serif;color:#a3acb9;text-wrap:pretty">What each agent can load in this workspace, where it comes from, and which tasks used it.</p>
+      </div>
+      <div style="display:flex;flex-wrap:wrap;gap:6px 22px;font:400 11px/1.4 'JetBrains Mono',ui-monospace,monospace;color:#7a8494">
+        <span style="white-space:nowrap">{{ stats.total }}</span><span style="white-space:nowrap">{{ stats.enabled }}</span><span style="white-space:nowrap">{{ stats.runs }}</span>
+      </div>
+    </div>
+
+    <section style="display:flex;flex-direction:column;gap:12px">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;font:600 11px/1 'JetBrains Mono',ui-monospace,monospace;letter-spacing:.14em;text-transform:uppercase">
+        <span style="display:flex;align-items:center;gap:8px;white-space:nowrap"><span style="color:#FF7A1A">▤</span>Context files</span>
+        <span style="font-weight:400;letter-spacing:.06em;text-transform:none;color:#7a8494;white-space:nowrap">read at session start, by provider</span>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:10px">
+        <sc-for list="{{ contexts }}" as="c" hint-placeholder-count="3">
+          <div style="display:flex;flex-direction:column;gap:8px;padding:14px 16px;border-radius:12px;border:1px solid rgba(255,255,255,.08);background:rgba(255,255,255,.02)">
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:8px"><span style="font:600 13px/1 'JetBrains Mono',ui-monospace,monospace">{{ c.file }}</span><span style="display:flex;align-items:center;gap:6px;font:500 10.5px/1 'JetBrains Mono',ui-monospace,monospace;color:#c5ccd6;white-space:nowrap"><span style="width:6px;height:6px;border-radius:50%;background:{{ c.color }}"></span>{{ c.provider }}</span></div>
+            <span style="font:400 12px/1.45 Geist,sans-serif;color:#a3acb9;text-wrap:pretty">{{ c.note }}</span>
+            <span style="font:400 10.5px/1 'JetBrains Mono',ui-monospace,monospace;color:#7a8494">{{ c.meta }}</span>
+          </div>
+        </sc-for>
+      </div>
+    </section>
+
+    <div style="display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:10px">
+      <div style="display:flex;flex-wrap:wrap;gap:6px">
+        <sc-for list="{{ sources }}" as="s" hint-placeholder-count="4">
+          <button onClick="{{ s.onClick }}" style="height:28px;display:flex;align-items:center;gap:7px;padding:0 11px;border-radius:6px;border:1px solid {{ s.border }};background:{{ s.bg }};color:#e6e9ef;font:500 11.5px/1 'JetBrains Mono',ui-monospace,monospace;cursor:pointer;white-space:nowrap">{{ s.label }}<span style="color:#7a8494">{{ s.count }}</span></button>
+        </sc-for>
+        <span style="width:1px;height:20px;background:rgba(255,255,255,.1);margin:4px 6px"></span>
+        <sc-for list="{{ provFilters }}" as="pf" hint-placeholder-count="4">
+          <button onClick="{{ pf.onClick }}" style="height:28px;display:flex;align-items:center;gap:7px;padding:0 11px;border-radius:6px;border:1px solid {{ pf.border }};background:{{ pf.bg }};color:#e6e9ef;font:500 11.5px/1 'JetBrains Mono',ui-monospace,monospace;cursor:pointer;white-space:nowrap"><span style="width:6px;height:6px;border-radius:50%;background:{{ pf.color }}"></span>{{ pf.label }}</button>
+        </sc-for>
+      </div>
+      <div style="height:32px;display:flex;align-items:center;gap:8px;padding:0 12px;border-radius:8px;border:1px solid rgba(255,255,255,.12)">
+        <span style="font:500 12px/1 'JetBrains Mono',ui-monospace,monospace;color:#7a8494">⌕</span>
+        <input value="{{ query }}" onChange="{{ onQuery }}" placeholder="search skills" style="width:170px;background:transparent;border:0;outline:none;color:#e6e9ef;font:400 12px/1 'JetBrains Mono',ui-monospace,monospace">
+      </div>
+    </div>
+
+    <div style="display:flex;flex-wrap:wrap;gap:20px;align-items:flex-start">
+      <div style="flex:1 1 440px;min-width:0;display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:10px">
+        <sc-for list="{{ cards }}" as="k" hint-placeholder-count="8">
+          <button onClick="{{ k.onClick }}" style="display:flex;flex-direction:column;gap:10px;padding:14px 15px;border-radius:12px;border:1px solid {{ k.border }};background:{{ k.bg }};color:#e6e9ef;text-align:left;cursor:pointer;opacity:{{ k.opacity }};min-width:0">
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;width:100%">
+              <span style="font:600 13.5px/1.2 'JetBrains Mono',ui-monospace,monospace;color:#ffb37a;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ k.slash }}</span>
+              <span style="flex:none;display:inline-flex;align-items:center;height:18px;padding:0 6px;border-radius:4px;font:500 9px/1 'JetBrains Mono',ui-monospace,monospace;letter-spacing:.1em;text-transform:uppercase;white-space:nowrap;color:{{ k.tc }};background:{{ k.tb }};border:1px solid {{ k.td }}">{{ k.source }}</span>
+            </div>
+            <span style="font:400 12.5px/1.45 Geist,sans-serif;color:#c5ccd6;text-wrap:pretty">{{ k.desc }}</span>
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;width:100%;margin-top:auto">
+              <span style="display:flex;gap:4px">
+                <sc-for list="{{ k.loads }}" as="l" hint-placeholder-count="2"><span title="{{ l.name }}" style="width:8px;height:8px;border-radius:50%;background:{{ l.color }};border:1px solid {{ l.ring }}"></span></sc-for>
+              </span>
+              <span style="font:400 10.5px/1 'JetBrains Mono',ui-monospace,monospace;color:#7a8494;white-space:nowrap">{{ k.usage }}</span>
+            </div>
+          </button>
+        </sc-for>
+      </div>
+
+      <aside style="flex:1 1 380px;max-width:100%;position:sticky;top:64px;display:flex;flex-direction:column;border-radius:14px;border:1px solid rgba(255,255,255,.1);background:rgba(9,11,15,.92);overflow:hidden">
+        <div style="display:flex;align-items:flex-start;gap:10px;padding:16px 18px 14px;border-bottom:1px solid rgba(255,255,255,.07)">
+          <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:7px">
+            <span style="font:500 10px/1 'JetBrains Mono',ui-monospace,monospace;letter-spacing:.14em;text-transform:uppercase;color:#7a8494">{{ sel.kicker }}</span>
+            <span style="font:600 18px/1.2 'JetBrains Mono',ui-monospace,monospace;color:#ffb37a;word-break:break-word">{{ sel.slash }}</span>
+            <span style="font:400 13px/1.5 Geist,sans-serif;color:#c5ccd6;text-wrap:pretty">{{ sel.desc }}</span>
+          </div>
+          <button onClick="{{ toggleEnabled }}" style="flex:none;display:flex;align-items:center;gap:8px;height:28px;padding:0 10px;border-radius:7px;border:1px solid {{ sel.enBorder }};background:transparent;color:{{ sel.enColor }};font:500 11px/1 'JetBrains Mono',ui-monospace,monospace;cursor:pointer;white-space:nowrap"><span style="width:7px;height:7px;border-radius:50%;background:{{ sel.enColor }}"></span>{{ sel.enLabel }}</button>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:8px;padding:14px 18px">
+          <sc-for list="{{ sel.rows }}" as="r" hint-placeholder-count="4">
+            <div style="display:grid;grid-template-columns:96px minmax(0,1fr);gap:12px;align-items:baseline">
+              <span style="font:400 10px/1.5 'JetBrains Mono',ui-monospace,monospace;letter-spacing:.08em;text-transform:uppercase;color:#7a8494">{{ r.k }}</span>
+              <span style="font:400 12.5px/1.45 'JetBrains Mono',ui-monospace,monospace;color:#d6dde6;word-break:break-word">{{ r.v }}</span>
+            </div>
+          </sc-for>
+        </div>
+        <div style="padding:0 18px 14px;display:flex;flex-direction:column;gap:6px">
+          <span style="font:400 10px/1 'JetBrains Mono',ui-monospace,monospace;letter-spacing:.12em;text-transform:uppercase;color:#7a8494">SKILL.md</span>
+          <div style="background:#05060a;border:1px solid rgba(255,255,255,.06);border-radius:8px;padding:10px 12px;font:400 11.5px/1.6 'JetBrains Mono',ui-monospace,monospace;max-height:220px;overflow:auto;display:flex;flex-direction:column">
+            <sc-for list="{{ sel.md }}" as="ln" hint-placeholder-count="6"><span style="color:{{ ln.color }};white-space:pre-wrap;word-break:break-word">{{ ln.text }}</span></sc-for>
+          </div>
+        </div>
+        <div style="padding:0 18px 14px;display:flex;flex-direction:column;gap:6px">
+          <span style="font:400 10px/1 'JetBrains Mono',ui-monospace,monospace;letter-spacing:.12em;text-transform:uppercase;color:#7a8494">{{ sel.usedLabel }}</span>
+          <div style="display:flex;flex-direction:column">
+            <sc-for list="{{ sel.used }}" as="u" hint-placeholder-count="3">
+              <div style="display:grid;grid-template-columns:34px minmax(0,1fr) auto;gap:8px;align-items:center;padding:7px 0;border-top:1px solid rgba(255,255,255,.05)">
+                <span style="font:400 10.5px/1 'JetBrains Mono',ui-monospace,monospace;color:#7a8494">{{ u.id }}</span>
+                <span style="font:400 12.5px/1.3 Geist,sans-serif;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ u.title }}</span>
+                <span style="display:inline-flex;align-items:center;height:18px;padding:0 6px;border-radius:4px;font:500 9px/1 'JetBrains Mono',ui-monospace,monospace;letter-spacing:.08em;text-transform:uppercase;white-space:nowrap;color:{{ u.tc }};background:{{ u.tb }};border:1px solid {{ u.td }}">{{ u.status }}</span>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+        <div style="display:flex;flex-wrap:wrap;gap:8px;padding:14px 18px 16px;border-top:1px solid rgba(255,255,255,.07)">
+          <button onClick="{{ runAsTask }}" style="height:32px;padding:0 13px;border-radius:7px;border:1px solid #FF7A1A;background:#FF7A1A;color:#0b0c10;font:600 12px/1 Geist,sans-serif;cursor:pointer;white-space:nowrap">▶ Run as task</button>
+          <button onClick="{{ copyPath }}" style="height:32px;padding:0 13px;border-radius:7px;border:1px solid rgba(255,255,255,.14);background:transparent;color:#e6e9ef;font:600 12px/1 Geist,sans-serif;cursor:pointer;white-space:nowrap">{{ copyLabel }}</button>
+        </div>
+        <sc-if value="{{ hasToast }}" hint-placeholder-val="{{ false }}">
+          <div style="margin:0 18px 16px;padding:10px 12px;border-radius:8px;border:1px solid rgba(74,222,128,.35);background:rgba(74,222,128,.08);font:400 11.5px/1.5 'JetBrains Mono',ui-monospace,monospace;color:#4ade80">{{ toast }} <a href="Agent%20Command%20Centre.dc.html" style="color:#ffb37a;white-space:nowrap">Open command centre →</a></div>
+        </sc-if>
+      </aside>
+    </div>
+
+    <section style="display:flex;flex-direction:column;gap:12px">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;font:600 11px/1 'JetBrains Mono',ui-monospace,monospace;letter-spacing:.14em;text-transform:uppercase">
+        <span style="display:flex;align-items:center;gap:8px;white-space:nowrap"><span style="color:#FF7A1A">▦</span>Skill × task</span>
+        <span style="font-weight:400;letter-spacing:.06em;text-transform:none;color:#7a8494;white-space:nowrap">filled = loaded during that task · colour = task status</span>
+      </div>
+      <div style="overflow:auto;border:1px solid rgba(255,255,255,.07);border-radius:12px;background:rgba(255,255,255,.015)">
+        <div style="display:flex;flex-direction:column;min-width:max-content;padding:10px 12px">
+          <div style="display:flex;align-items:center;gap:0;height:24px">
+            <span style="width:190px;flex:none"></span>
+            <sc-for list="{{ matrixHead }}" as="mh" hint-placeholder-count="16"><span style="width:30px;flex:none;text-align:center;font:400 10px/1 'JetBrains Mono',ui-monospace,monospace;color:#7a8494">{{ mh.id }}</span></sc-for>
+          </div>
+          <sc-for list="{{ matrix }}" as="row" hint-placeholder-count="10">
+            <button onClick="{{ row.onClick }}" style="display:flex;align-items:center;height:28px;border:0;border-radius:6px;background:{{ row.bg }};color:#e6e9ef;cursor:pointer;padding:0">
+              <span style="width:190px;flex:none;text-align:left;padding:0 8px;font:500 11.5px/1 'JetBrains Mono',ui-monospace,monospace;color:{{ row.color }};overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ row.slash }}</span>
+              <sc-for list="{{ row.cells }}" as="cl" hint-placeholder-count="16"><span style="width:30px;flex:none;display:flex;align-items:center;justify-content:center"><span style="width:12px;height:12px;border-radius:3px;background:{{ cl.fill }};border:1px solid {{ cl.ring }}"></span></span></sc-for>
+            </button>
+          </sc-for>
+        </div>
+      </div>
+    </section>
+  </main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script>
+class Component extends DCLogic {
+  A = '#FF7A1A';
+  T = { ok:'#4ade80', warn:'#fbbf24', bad:'#f87171', info:'#38bdf8', idle:'#94a3b8' };
+  PROV = { claude:'#F2A65A', codex:'#5EA8F2', gemini:'#B48CF2' };
+  TASKS = [[1,'Scaffold auth module','done'],[2,'Add sessions table migration','done'],[3,'Rate limit the login endpoint','done'],[4,'Refresh token rotation','running'],[5,'Audit log writer','running'],[6,'Password reset flow','running'],[7,'Admin roles API','running'],[8,'Webhook delivery retries','running'],[9,'End-to-end auth tests','pending'],[10,'Write the auth guide','pending'],[11,'Billing usage meter','verifying'],[12,'Usage panel in dashboard','pending'],[13,'Git worktree per task','auditing'],[14,'Provider failover on long resets','pending'],[15,'Fix flaky ws reconnect','failed'],[16,'Remove legacy v1 routes','cancelled']];
+  TONE = {pending:'idle',running:'ok',verifying:'info',auditing:'info',done:'accent',failed:'bad',cancelled:'idle'};
+  SKILLS = [
+    {id:'verify-before-done',source:'project',desc:'Run the four verify commands yourself before writing $MAP_RESULT_FILE, and paste their output into the summary.',tools:'Bash(bun *), Read',loads:['claude','codex','gemini'],tasks:[1,2,3,4,5,6,7,8,11,13,15],runs:61,last:2},
+    {id:'rust-backend',source:'project',desc:'Conventions for axum handlers: all state changes go through Hub, errors map to ApiError, new types live in model.rs.',tools:'Read, Edit, Bash(cargo *)',loads:['claude','codex'],tasks:[1,3,4,5,6,8,13,14],runs:44,last:3},
+    {id:'ts-rs-sync',source:'project',desc:'After changing model.rs, run cargo test to regenerate frontend/lib/generated and commit both. Never hand-edit generated files.',tools:'Bash(cargo test), Read',loads:['claude','codex','gemini'],tasks:[2,7,11],runs:9,last:31},
+    {id:'sql-migrations',source:'project',desc:'Forward-only SQLite migrations in backend/migrations, numbered, with a matching store.rs change and a test.',tools:'Read, Edit, Write',loads:['claude','codex'],tasks:[2,7],runs:6,last:33},
+    {id:'tmux-safety',source:'project',desc:'Only touch sessions under session_prefix. Never end a session a person is attached to or typing in (detect::end_decision).',tools:'Read',loads:['claude','codex','gemini'],tasks:[13,14],runs:7,last:6},
+    {id:'nextjs-dashboard',source:'project',desc:'Next 16 + Bun static export. Read node_modules/next/dist/docs before using an unfamiliar API.',tools:'Read, Edit, Bash(bun *)',loads:['claude','gemini'],tasks:[12,15],runs:5,last:42},
+    {id:'code-review-strict',source:'user',desc:'Auditor prompt: inspect git diff and git log -5, check tests exist, end with VERDICT: PASS or VERDICT: FAIL: reason.',tools:'Bash(git *), Read',loads:['claude','codex','gemini'],tasks:[1,2,3,11,13],runs:12,last:4},
+    {id:'commit-message',source:'user',desc:'Write the post_done commit as "Task {id}: {title}" with a short body listing changed files.',tools:'Bash(git *)',loads:['claude','codex'],tasks:[1,2,3],runs:3,last:52},
+    {id:'playwright-e2e',source:'plugin',plugin:'testing-kit',desc:'Write Playwright specs against the running dev server with fixtures for signed-in users.',tools:'Bash(bunx playwright *), Write',loads:['claude'],tasks:[9],runs:0,last:null},
+    {id:'docs-writer',source:'plugin',plugin:'docs',desc:'Task-oriented docs: one page per job, commands first, no marketing copy.',tools:'Read, Write',loads:['claude','gemini'],tasks:[10],runs:0,last:null},
+    {id:'deploy-preview',source:'plugin',plugin:'vercel-kit',desc:'Create a preview deployment and post the URL. Disabled here: this workspace never deploys from agents.',tools:'Bash(vercel *)',loads:['claude'],tasks:[],runs:0,last:null,disabled:true},
+  ];
+  state = this.init();
+  init() { let project='acme-api'; try{ project=localStorage.getItem('map.project')||project; }catch(_){} const disabled={}; this.SKILLS.forEach(s=>{ if(s.disabled) disabled[s.id]=true; }); return {project,sel:'verify-before-done',source:'all',prov:'all',query:'',disabled,toast:'',copied:false,now:Date.now(),nextTask:17}; }
+  componentDidMount() { this.clk=setInterval(()=>this.setState({now:Date.now()}),1000); }
+  componentWillUnmount() { clearInterval(this.clk); clearTimeout(this.tt); }
+
+  projList() { let c=[]; try{ c=JSON.parse(localStorage.getItem('map.projects.custom')||'[]'); }catch(_){} const base=[['acme-api','#4ade80'],['mcp-generator','#4ade80'],['daily-news','#4ade80'],['trading-telegram-executor','#fbbf24'],['franchise-management','#5d6673']]; return base.concat(c.filter(x=>!base.some(b=>b[0]===x.name)).map(x=>[x.name,'#5d6673'])); }
+  dropVals(cur, onPick) { const st=this.state; return { projectName:cur, projMenu:!!st.projMenu, toggleProjMenu:()=>this.setState({projMenu:!st.projMenu}), closeProjMenu:()=>this.setState({projMenu:false}), projItems:this.projList().map(x=>({name:x[0],dot:x[1],mark:x[0]===cur?'✓':'',bg:x[0]===cur?'rgba(255,122,26,.1)':'transparent',onClick:()=>{ try{ localStorage.setItem('map.project',x[0]); }catch(_){} if(onPick) onPick(x[0]); else window.location.reload(); }})) }; }
+
+  rgba(hex,a) { const v=parseInt(hex.slice(1),16); return 'rgba('+((v>>16)&255)+','+((v>>8)&255)+','+(v&255)+','+a+')'; }
+  path(s) { return s.source==='project' ? '.claude/skills/'+s.id+'/SKILL.md' : s.source==='user' ? '~/.claude/skills/'+s.id+'/SKILL.md' : '~/.claude/plugins/'+s.plugin+'/skills/'+s.id+'/SKILL.md'; }
+
+  renderVals() {
+    const st=this.state, A=this.A, T=this.T;
+    const tone = c => ({tc:c,tb:this.rgba(c,.1),td:this.rgba(c,.35)});
+    const srcColor = {project:A,user:T.info,plugin:'#B48CF2'};
+    const q = st.query.trim().toLowerCase();
+    const vis = this.SKILLS.filter(s => (st.source==='all'||s.source===st.source) && (st.prov==='all'||s.loads.includes(st.prov)) && (!q||s.id.includes(q)||s.desc.toLowerCase().includes(q)));
+    const cards = vis.map(s => { const on=!st.disabled[s.id], seld=st.sel===s.id;
+      return Object.assign({slash:'/'+s.id,source:s.source==='plugin'?s.plugin:s.source,desc:s.desc,onClick:()=>this.setState({sel:s.id,toast:'',copied:false}),
+        border:seld?'rgba(255,122,26,.6)':'rgba(255,255,255,.08)',bg:seld?'rgba(255,122,26,.06)':'rgba(255,255,255,.02)',opacity:on?'1':'.45',
+        loads:['claude','codex','gemini'].map(p=>({name:p,color:s.loads.includes(p)?this.PROV[p]:'transparent',ring:s.loads.includes(p)?this.PROV[p]:'rgba(255,255,255,.2)'})),
+        usage:!on?'disabled':s.runs?s.runs+' runs · '+s.tasks.length+' tasks':'not used yet'},tone(srcColor[s.source])); });
+    const cnt = k => this.SKILLS.filter(s=>k==='all'||s.source===k).length;
+    const sources = [['all','all'],['project','project'],['user','user'],['plugin','plugin']].map(x=>({label:x[1],count:String(cnt(x[0])),onClick:()=>this.setState({source:x[0]}),border:st.source===x[0]?A:'rgba(255,255,255,.1)',bg:st.source===x[0]?this.rgba(A,.12):'transparent'}));
+    const provFilters = [['all','any agent','#e6e9ef'],['claude','claude',this.PROV.claude],['codex','codex',this.PROV.codex],['gemini','gemini',this.PROV.gemini]].map(x=>({label:x[1],color:x[2],onClick:()=>this.setState({prov:x[0]}),border:st.prov===x[0]?x[2]:'rgba(255,255,255,.1)',bg:st.prov===x[0]?this.rgba(x[2],.12):'transparent'}));
+    const s = this.SKILLS.find(x=>x.id===st.sel) || this.SKILLS[0]; const on=!st.disabled[s.id];
+    const loadNote = s.loads.map(p => p==='claude'?'claude (native)':p==='codex'?'codex (via AGENTS.md)':'gemini (via GEMINI.md)').join(' · ');
+    const md = [{text:'---',color:'#5d6673'},{text:'name: '+s.id,color:'#c5ccd6'},{text:'description: '+s.desc.split('.')[0]+'.',color:'#c5ccd6'},{text:'allowed-tools: '+s.tools,color:'#c5ccd6'},{text:'---',color:'#5d6673'},{text:' ',color:'#5d6673'},{text:'# '+s.id,color:'#e6e9ef'},{text:s.desc,color:'#a3acb9'}];
+    const used = s.tasks.map(id => { const t=this.TASKS.find(x=>x[0]===id); const c=t[2]==='done'?A:T[this.TONE[t[2]]]; return Object.assign({id:'#'+id,title:t[1],status:t[2]},tone(c)); });
+    const sel = {kicker:(s.source==='plugin'?'plugin · '+s.plugin:s.source+' skill'),slash:'/'+s.id,desc:s.desc,
+      rows:[{k:'Path',v:this.path(s)},{k:'Loads in',v:loadNote},{k:'Tools',v:s.tools},{k:'Last used',v:s.last==null?'never':s.last+'m ago · '+s.runs+' runs'}],
+      md,used,usedLabel:used.length?'Used by '+used.length+' tasks':'Not used by any task yet',
+      enLabel:on?'enabled':'disabled',enColor:on?T.ok:'#7a8494',enBorder:on?'rgba(74,222,128,.4)':'rgba(255,255,255,.14)'};
+    const contexts = [
+      {file:'CLAUDE.md',provider:'claude',color:this.PROV.claude,note:'Loaded by every Claude session. Points to AGENTS.md and the project skills folder.',meta:'1 line · imports AGENTS.md'},
+      {file:'AGENTS.md',provider:'codex',color:this.PROV.codex,note:'Commands and rules for every agent: model.rs is the API contract, all writes go through Hub.',meta:'14 lines · read by codex, imported by claude'},
+      {file:'GEMINI.md',provider:'gemini',color:this.PROV.gemini,note:'Gemini context file. Mirrors AGENTS.md so agy workers follow the same rules.',meta:'14 lines · generated from AGENTS.md'},
+    ];
+    const matrixHead = this.TASKS.map(t=>({id:'#'+t[0]}));
+    const matrix = vis.map(x => ({slash:'/'+x.id,color:st.disabled[x.id]?'#5d6673':(st.sel===x.id?'#ffb37a':'#c5ccd6'),bg:st.sel===x.id?'rgba(255,122,26,.08)':'transparent',onClick:()=>this.setState({sel:x.id,toast:'',copied:false}),
+      cells:this.TASKS.map(t => { const u=x.tasks.includes(t[0]); const c=t[2]==='done'?A:T[this.TONE[t[2]]]; return {fill:u?this.rgba(c,t[2]==='pending'||t[2]==='cancelled'?.25:.8):'transparent',ring:u?c:'rgba(255,255,255,.07)'}; })}));
+    const enabled = this.SKILLS.filter(x=>!st.disabled[x.id]).length;
+    const d=new Date(st.now);
+    return {
+      project:st.project, ...this.dropVals(st.project), clock:String(d.getDate()).padStart(2,'0')+'.'+String(d.getMonth()+1).padStart(2,'0')+' '+d.toTimeString().slice(0,8),
+      stats:{total:this.SKILLS.length+' skills',enabled:enabled+' enabled',runs:this.SKILLS.reduce((a,x)=>a+x.runs,0)+' loads this week'},
+      contexts, sources, provFilters, query:st.query, onQuery:e=>this.setState({query:e.target.value}), cards, sel,
+      toggleEnabled:()=>this.setState(p=>({disabled:Object.assign({},p.disabled,{[s.id]:!p.disabled[s.id]})})),
+      runAsTask:()=>{ if(st.disabled[s.id]){ this.setState({toast:'/'+s.id+' is disabled for this project. Enable it first.'}); return; } try{ const q=JSON.parse(localStorage.getItem('map.queued')||'[]'); q.push({project:st.project,title:'Run /'+s.id,prompt:'/'+s.id+'\n\n'+s.desc,skill:s.id}); localStorage.setItem('map.queued',JSON.stringify(q)); }catch(_){} this.setState({toast:'Queued "Run /'+s.id+'" for '+st.project+'. It joins the task queue when the command centre opens.'}); clearTimeout(this.tt); this.tt=setTimeout(()=>this.setState({toast:''}),8000); },
+      copyPath:()=>{ try{ navigator.clipboard.writeText(this.path(s)); }catch(_){} this.setState({copied:true}); },
+      copyLabel: st.copied?'✓ Path copied':'Copy path', hasToast:!!st.toast, toast:st.toast, matrixHead, matrix,
+    };
+  }
+}
+</script>
+</body>
+</html>

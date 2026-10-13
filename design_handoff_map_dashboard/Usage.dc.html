@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+html,body{margin:0;background:#07080a;color:#e6e9ef;font-family:Geist,ui-sans-serif,system-ui,sans-serif;-webkit-font-smoothing:antialiased}
+*{box-sizing:border-box}
+a{color:#ff9a4d;text-decoration:none}a:hover{color:#ffbd8a}
+button,input{font-family:inherit}
+</style>
+</helmet>
+<div style="min-height:100vh;background:radial-gradient(1400px 800px at 50% 0%, #10131b 0%, #07080a 60%);color:#e6e9ef">
+  <nav style="position:sticky;top:0;z-index:20;display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px 20px;padding:8px 20px;min-height:44px;border-bottom:1px solid rgba(255,255,255,.07);background:rgba(7,8,10,.97)">
+    <div style="display:flex;align-items:center;gap:8px 16px;flex-wrap:wrap">
+      <a href="Projects.dc.html" style="display:flex;align-items:center;gap:7px;font:700 14px/1 Geist,sans-serif;letter-spacing:.08em;color:#e6e9ef;white-space:nowrap"><span style="color:#FF7A1A">⬡</span>MAP</a>
+      <div style="display:flex;gap:2px;flex-wrap:wrap">
+        <a href="Projects.dc.html" style="height:28px;display:flex;align-items:center;padding:0 10px;border-radius:6px;color:#c5ccd6;font:500 12px/1 Geist,sans-serif;white-space:nowrap" style-hover="background:rgba(255,255,255,.05);color:#e6e9ef">Projects</a>
+        <a href="Agent%20Command%20Centre.dc.html" style="height:28px;display:flex;align-items:center;padding:0 10px;border-radius:6px;color:#c5ccd6;font:500 12px/1 Geist,sans-serif;white-space:nowrap" style-hover="background:rgba(255,255,255,.05);color:#e6e9ef">Command centre</a>
+        <a href="Skills.dc.html" style="height:28px;display:flex;align-items:center;padding:0 10px;border-radius:6px;color:#c5ccd6;font:500 12px/1 Geist,sans-serif;white-space:nowrap" style-hover="background:rgba(255,255,255,.05);color:#e6e9ef">Skills</a>
+        <a href="Decisions.dc.html" style="height:28px;display:flex;align-items:center;padding:0 10px;border-radius:6px;color:#c5ccd6;font:500 12px/1 Geist,sans-serif;white-space:nowrap" style-hover="background:rgba(255,255,255,.05);color:#e6e9ef">Decisions</a>
+        <a href="Reflex.dc.html" style="height:28px;display:flex;align-items:center;padding:0 10px;border-radius:6px;color:#c5ccd6;font:500 12px/1 Geist,sans-serif;white-space:nowrap" style-hover="background:rgba(255,255,255,.05);color:#e6e9ef">Reflex</a>
+        <a href="Usage.dc.html" style="height:28px;display:flex;align-items:center;padding:0 10px;border-radius:6px;background:rgba(255,122,26,.12);color:#ffb37a;font:500 12px/1 Geist,sans-serif;white-space:nowrap">Usage</a>
+      </div>
+    </div>
+    <div style="display:flex;align-items:center;gap:14px">
+      <dc-import name="UsageMini" hint-size="200px,28px"></dc-import>
+      <span style="font:500 10px/1 'JetBrains Mono',ui-monospace,monospace;letter-spacing:.12em;text-transform:uppercase;color:#7a8494;white-space:nowrap">{{ clock }}</span>
+    </div>
+  </nav>
+
+  <main style="max-width:1440px;margin:0 auto;padding:32px 24px 60px;display:flex;flex-direction:column;gap:22px">
+    <div style="display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:20px">
+      <div style="display:flex;flex-direction:column;gap:10px;max-width:720px">
+        <span style="font:500 10px/1 'JetBrains Mono',ui-monospace,monospace;letter-spacing:.2em;text-transform:uppercase;color:#7a8494">Accounts on this machine · shared by all projects</span>
+        <h1 style="margin:0;font:600 38px/1.05 Geist,sans-serif;letter-spacing:-.02em">Usage</h1>
+        <p style="margin:0;font:400 14px/1.55 Geist,sans-serif;color:#a3acb9;text-wrap:pretty">Plan limits for each agent account, read from each CLI's own usage command. The orchestrator stops giving new tasks to a provider once any of its windows passes {{ skipAt }}%.</p>
+      </div>
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+        <span style="font:400 11px/1 'JetBrains Mono',ui-monospace,monospace;color:#7a8494;white-space:nowrap">{{ readLabel }}</span>
+        <button onClick="{{ readNow }}" style="height:34px;padding:0 14px;border-radius:8px;border:1px solid #FF7A1A;background:#FF7A1A;color:#0b0c10;font:600 12.5px/1 Geist,sans-serif;cursor:pointer;white-space:nowrap">{{ readBtn }}</button>
+      </div>
+    </div>
+
+    <div style="display:flex;flex-wrap:wrap;gap:8px">
+      <sc-for list="{{ strip }}" as="s" hint-placeholder-count="4">
+        <div style="flex:1 1 200px;display:flex;align-items:center;gap:10px;padding:10px 12px;border:1px solid rgba(255,255,255,.07);border-radius:10px;background:rgba(255,255,255,.015);min-width:0">
+          <span style="width:8px;height:8px;border-radius:50%;background:{{ s.color }};flex:none"></span>
+          <span style="display:flex;flex-direction:column;gap:5px;min-width:0">
+            <span style="font:500 12.5px/1.1 Geist,sans-serif">{{ s.name }}</span>
+            <span style="font:400 10.5px/1.2 'JetBrains Mono',ui-monospace,monospace;color:{{ s.noteColor }};white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ s.note }}</span>
+          </span>
+          <span style="margin-left:auto;font:600 18px/1 'JetBrains Mono',ui-monospace,monospace;color:{{ s.pctColor }}">{{ s.pct }}</span>
+        </div>
+      </sc-for>
+    </div>
+
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:14px">
+      <sc-for list="{{ cards }}" as="c" hint-placeholder-count="4">
+        <div style="display:flex;flex-direction:column;gap:16px;padding:18px;border-radius:14px;border:1px solid {{ c.border }};background:rgba(255,255,255,.02);min-width:0">
+          <div style="display:flex;align-items:flex-start;gap:10px">
+            <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:6px">
+              <span style="display:flex;align-items:center;gap:8px"><span style="width:9px;height:9px;border-radius:50%;background:{{ c.color }}"></span><span style="font:600 16px/1.2 Geist,sans-serif">{{ c.name }}</span></span>
+              <span style="font:400 11px/1.3 'JetBrains Mono',ui-monospace,monospace;color:#7a8494">{{ c.plan }} · read via {{ c.src }}</span>
+            </div>
+            <span style="flex:none;display:inline-flex;align-items:center;height:20px;padding:0 7px;border-radius:4px;font:500 9.5px/1 'JetBrains Mono',ui-monospace,monospace;letter-spacing:.08em;text-transform:uppercase;white-space:nowrap;color:{{ c.tc }};background:{{ c.tb }};border:1px solid {{ c.td }}">{{ c.status }}</span>
+          </div>
+
+          <sc-for list="{{ c.meters }}" as="m" hint-placeholder-count="2">
+            <div style="display:flex;flex-direction:column;gap:7px">
+              <div style="display:flex;align-items:baseline;justify-content:space-between;gap:10px">
+                <span style="font:500 12.5px/1.2 Geist,sans-serif;color:#d6dde6">{{ m.label }}</span>
+                <span style="font:600 15px/1 'JetBrains Mono',ui-monospace,monospace;color:{{ m.color }};white-space:nowrap">{{ m.value }}</span>
+              </div>
+              <div style="position:relative;height:8px;border-radius:4px;background:rgba(255,255,255,.06);overflow:hidden">
+                <span style="position:absolute;left:0;top:0;bottom:0;width:{{ m.w }};background:{{ m.color }};border-radius:4px"></span>
+                <span style="position:absolute;top:0;bottom:0;left:{{ m.pw }};width:{{ m.pwidth }};background:repeating-linear-gradient(90deg,{{ m.color }} 0 2px,transparent 2px 4px);opacity:.45"></span>
+                <span style="position:absolute;top:0;bottom:0;left:{{ skipPct }};width:1px;background:rgba(255,255,255,.6)"></span>
+              </div>
+              <div style="display:flex;justify-content:space-between;gap:10px;font:400 10.5px/1.3 'JetBrains Mono',ui-monospace,monospace;color:#7a8494">
+                <span>{{ m.kind }}</span><span style="white-space:nowrap">{{ m.reset }}</span>
+              </div>
+              <sc-if value="{{ m.hasProj }}" hint-placeholder-val="{{ false }}">
+                <span style="font:400 10.5px/1.3 'JetBrains Mono',ui-monospace,monospace;color:{{ m.projColor }}">{{ m.proj }}</span>
+              </sc-if>
+            </div>
+          </sc-for>
+
+          <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;padding:10px 12px;border-radius:9px;background:#05060a;border:1px solid rgba(255,255,255,.06)">
+            <sc-for list="{{ c.tokens }}" as="tk" hint-placeholder-count="3">
+              <span style="display:flex;flex-direction:column;gap:5px;min-width:0"><span style="font:400 9.5px/1 'JetBrains Mono',ui-monospace,monospace;letter-spacing:.1em;text-transform:uppercase;color:#7a8494;white-space:nowrap">{{ tk.k }}</span><span style="font:600 14px/1 'JetBrains Mono',ui-monospace,monospace;color:#e6e9ef;white-space:nowrap">{{ tk.v }}</span></span>
+            </sc-for>
+          </div>
+
+          <sc-if value="{{ c.hasBreakdown }}" hint-placeholder-val="{{ false }}">
+            <div style="display:flex;flex-direction:column;gap:7px">
+              <div style="display:grid;grid-template-columns:minmax(0,1fr) 48px 64px;gap:10px;font:400 9.5px/1 'JetBrains Mono',ui-monospace,monospace;letter-spacing:.1em;text-transform:uppercase;color:#7a8494"><span>model</span><span style="text-align:right">× rate</span><span style="text-align:right">requests</span></div>
+              <sc-for list="{{ c.breakdown }}" as="b" hint-placeholder-count="4">
+                <div style="display:grid;grid-template-columns:minmax(0,1fr) 48px 64px;gap:10px;align-items:center;font:400 11.5px/1.2 'JetBrains Mono',ui-monospace,monospace">
+                  <span style="display:flex;flex-direction:column;gap:4px;min-width:0"><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ b.model }}</span><span style="height:3px;border-radius:2px;background:rgba(255,255,255,.06);overflow:hidden;display:block"><span style="display:block;height:100%;width:{{ b.w }};background:{{ c.color }}"></span></span></span>
+                  <span style="text-align:right;color:#7a8494">{{ b.mult }}</span>
+                  <span style="text-align:right">{{ b.req }}</span>
+                </div>
+              </sc-for>
+            </div>
+          </sc-if>
+
+          <div style="display:flex;flex-direction:column;gap:7px">
+            <span style="font:400 9.5px/1 'JetBrains Mono',ui-monospace,monospace;letter-spacing:.1em;text-transform:uppercase;color:#7a8494">by project · this window</span>
+            <div style="display:flex;height:6px;border-radius:3px;overflow:hidden;gap:2px">
+              <sc-for list="{{ c.projects }}" as="p" hint-placeholder-count="3"><span style="width:{{ p.w }};background:{{ p.color }}"></span></sc-for>
+            </div>
+            <div style="display:flex;flex-wrap:wrap;gap:4px 12px">
+              <sc-for list="{{ c.projects }}" as="p" hint-placeholder-count="3"><span style="display:flex;align-items:center;gap:5px;font:400 10.5px/1.2 'JetBrains Mono',ui-monospace,monospace;color:#a3acb9;white-space:nowrap"><span style="width:6px;height:6px;border-radius:2px;background:{{ p.color }}"></span>{{ p.name }} {{ p.pct }}</span></sc-for>
+            </div>
+          </div>
+        </div>
+      </sc-for>
+    </div>
+
+    <div style="display:flex;flex-wrap:wrap;gap:6px 18px;font:400 11px/1.5 'JetBrains Mono',ui-monospace,monospace;color:#7a8494">
+      <span style="display:flex;align-items:center;gap:6px"><span style="width:1px;height:10px;background:rgba(255,255,255,.6)"></span>skip line · {{ skipAt }}%</span>
+      <span style="display:flex;align-items:center;gap:6px"><span style="width:14px;height:6px;background:repeating-linear-gradient(90deg,#a3acb9 0 2px,transparent 2px 4px);opacity:.6"></span>projected use by reset, at the last hour's pace</span>
+    </div>
+  </main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;skipAt&quot;:{&quot;editor&quot;:&quot;range&quot;,&quot;min&quot;:50,&quot;max&quot;:100,&quot;step&quot;:5,&quot;unit&quot;:&quot;%&quot;,&quot;default&quot;:90,&quot;tsType&quot;:&quot;number&quot;,&quot;section&quot;:&quot;Orchestrator&quot;},&quot;showProjection&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Display&quot;}}">
+class Component extends DCLogic {
+  PCOL = {'acme-api':'#F2A65A','web-app':'#5EA8F2','infra':'#4FD1B5','docs':'#B48CF2'};
+  state = { now: Date.now(), readAt: Date.now() - 42000, reading: false, bump: 0 };
+  base() {
+    const m = 60000, H = 3600000, D = 86400000, t0 = this.t0 || (this.t0 = Date.now());
+    return [
+      { id:'claude', name:'Claude Code', color:'#F2A65A', plan:'Max 5x', src:'/usage',
+        meters:[
+          { label:'Current session', kind:'5-hour window', used:.62, rate:.11/H, resetAt:t0+2*H+12*m },
+          { label:'Weekly · all models', kind:'7-day window', used:.41, rate:.012/H, resetAt:t0+3*D+5*H },
+          { label:'Weekly · Opus', kind:'7-day window', used:.88, rate:.009/H, resetAt:t0+3*D+5*H } ],
+        tokens:[['input','1.84M'],['output','212k'],['cache read','14.6M']],
+        projects:[['acme-api',.54],['web-app',.31],['infra',.15]] },
+      { id:'codex', name:'Codex', color:'#5EA8F2', plan:'ChatGPT Plus', src:'/status',
+        meters:[
+          { label:'5-hour limit', kind:'5-hour window', used:.34, rate:.07/H, resetAt:t0+3*H+40*m },
+          { label:'Weekly limit', kind:'7-day window', used:.57, rate:.008/H, resetAt:t0+5*D+2*H } ],
+        tokens:[['input','962k'],['output','118k'],['cached','4.1M']],
+        projects:[['web-app',.61],['acme-api',.39]] },
+      { id:'gemini', name:'Gemini CLI', color:'#B48CF2', plan:'Free · Google login', src:'/stats',
+        meters:[
+          { label:'Requests today', kind:'daily · resets 00:00 PT', used:412/1000, cap:1000, rate:40/1000/H, resetAt:t0+9*H+18*m },
+          { label:'Requests this minute', kind:'per minute', used:(10+Math.floor(((Math.floor(this.state.now/60000)*2654435761)>>>0)%21))/60, cap:60, rate:0, resetAt:Math.ceil((this.state.now+1)/60000)*60000, noProj:true, live:true } ],
+        tokens:[['input','2.31M'],['output','96k'],['cached','880k']],
+        projects:[['docs',.58],['infra',.42]] },
+      { id:'copilot', name:'GitHub Copilot', color:'#4FD1B5', plan:'Copilot Pro', src:'GitHub billing API',
+        meters:[
+          { label:'Premium requests', kind:'monthly · resets on the 1st', used:187/300, cap:300, rate:2.4/300/H, resetAt:new Date(new Date(t0).getFullYear(), new Date(t0).getMonth()+1, 1).getTime() } ],
+        tokens:[['requests','187 / 300'],['included','gpt-4.1'],['overage','$0.00']],
+        breakdown:[['claude-sonnet-4.5','1×',92],['gpt-5','1×',61],['claude-opus-4.1','10×',30],['gemini-2.5-pro','1×',4]],
+        projects:[['web-app',.47],['acme-api',.33],['docs',.2]] },
+    ];
+  }
+  componentDidMount() { this.iv = setInterval(() => this.setState({ now: Date.now() }), 1000); }
+  componentWillUnmount() { clearInterval(this.iv); clearTimeout(this.rt); }
+  readNow = () => { if (this.state.reading) return; this.setState({ reading: true }); this.rt = setTimeout(() => this.setState(s => ({ reading: false, readAt: Date.now(), bump: s.bump + 1 })), 1200); };
+  dur(ms) { const s = Math.max(0, Math.round(ms / 1000)); const d = Math.floor(s / 86400), h = Math.floor(s % 86400 / 3600), m = Math.floor(s % 3600 / 60); return d ? d + 'd ' + h + 'h' : h ? h + 'h ' + String(m).padStart(2, '0') + 'm' : m ? m + 'm ' + (s % 60) + 's' : s + 's'; }
+  at(ms) { const d = new Date(ms), now = new Date(this.state.now); const same = d.toDateString() === now.toDateString(); return same ? d.toTimeString().slice(0, 5) : d.toLocaleDateString('en-GB', { weekday: 'short', day: '2-digit', month: 'short' }) + ' ' + d.toTimeString().slice(0, 5); }
+  renderVals() {
+    const st = this.state, now = st.now, skip = (this.props.skipAt ?? 90) / 100, showProj = this.props.showProjection ?? true;
+    const elapsed = now - (this.t0 || now) + st.bump * 60000;
+    const tone = u => u >= 1 ? '#F26D6D' : u >= skip ? '#F2C14E' : '#e6e9ef';
+    const cards = this.base().map(p => {
+      let worst = 0;
+      const meters = p.meters.map(m => {
+        const used = Math.min(1, m.used + m.rate * elapsed);
+        const left = m.resetAt - now;
+        const proj = Math.min(1, used + m.rate * Math.max(0, left));
+        worst = Math.max(worst, used);
+        const hitIn = m.rate > 0 ? (1 - used) / m.rate : Infinity;
+        const skipIn = m.rate > 0 && used < skip ? (skip - used) / m.rate : Infinity;
+        let projTxt = '', projColor = '#7a8494';
+        if (!m.noProj && m.rate > 0) {
+          if (used >= skip) { projTxt = 'over skip line · no new tasks until reset'; projColor = '#F2C14E'; }
+          else if (skipIn < left) { projTxt = 'at this pace: skip line at ' + this.at(now + skipIn) + ', limit at ' + (hitIn < left ? this.at(now + hitIn) : 'reset'); projColor = '#F2C14E'; }
+          else projTxt = 'at this pace: ~' + Math.round(proj * 100) + '% by reset';
+        }
+        return { label: m.label, kind: m.kind, value: m.cap ? Math.round(used * m.cap).toLocaleString('en-US') + ' / ' + m.cap.toLocaleString('en-US') : Math.round(used * 100) + '%',
+          color: tone(used) === '#e6e9ef' ? p.color : tone(used), w: (used * 100).toFixed(2) + '%', pw: (used * 100).toFixed(2) + '%', pwidth: showProj ? ((proj - used) * 100).toFixed(2) + '%' : '0%',
+          reset: 'resets in ' + this.dur(left) + ' · ' + this.at(m.resetAt), hasProj: showProj && !!projTxt, proj: projTxt, projColor, used };
+      });
+      const limited = worst >= 1, near = worst >= skip;
+      const status = limited ? 'limited' : near ? 'skipped' : worst >= skip - .15 ? 'high' : 'ok';
+      const T = { ok: ['#7ee2a8', 'rgba(74,222,128,.08)', 'rgba(74,222,128,.3)'], high: ['#F2C14E', 'rgba(242,193,78,.08)', 'rgba(242,193,78,.3)'], skipped: ['#F2C14E', 'rgba(242,193,78,.12)', 'rgba(242,193,78,.45)'], limited: ['#F26D6D', 'rgba(242,109,109,.1)', 'rgba(242,109,109,.4)'] }[status];
+      const bmax = p.breakdown ? Math.max(...p.breakdown.map(b => b[2])) : 1;
+      return { name: p.name, color: p.color, plan: p.plan, src: p.src, status, tc: T[0], tb: T[1], td: T[2], border: near ? T[2] : 'rgba(255,255,255,.08)', meters,
+        tokens: p.tokens.map(t => ({ k: t[0] + (p.id === 'copilot' ? '' : ' · today'), v: t[1] })),
+        hasBreakdown: !!p.breakdown, breakdown: (p.breakdown || []).map(b => ({ model: b[0], mult: b[1], req: String(b[2]), w: (b[2] / bmax * 100) + '%' })),
+        projects: p.projects.map(x => ({ name: x[0], pct: Math.round(x[1] * 100) + '%', w: (x[1] * 100) + '%', color: this.PCOL[x[0]] || '#8b95a5' })), worst, id: p.id };
+    });
+    const strip = cards.map(c => { const top = c.meters.reduce((a, m) => m.used > a.used ? m : a, c.meters[0]); return { name: c.name, color: c.color, pct: Math.round(top.used * 100) + '%', pctColor: tone(top.used), note: (c.status === 'skipped' ? 'skipped · ' : '') + top.label.toLowerCase(), noteColor: c.status === 'skipped' || c.status === 'limited' ? '#F2C14E' : '#7a8494' }; });
+    const d = new Date(now);
+    return { cards, strip, skipAt: Math.round(skip * 100), skipPct: (skip * 100) + '%',
+      readLabel: st.reading ? 'reading /usage, /status, /stats…' : 'read ' + this.dur(now - st.readAt) + ' ago', readBtn: st.reading ? 'Reading…' : '↻ Read now', readNow: this.readNow,
+      clock: String(d.getDate()).padStart(2, '0') + '.' + String(d.getMonth() + 1).padStart(2, '0') + ' ' + d.toTimeString().slice(0, 8) };
+  }
+}
+</script>
+</body>
+</html>

@@ -14,7 +14,7 @@ use tokio::sync::broadcast;
 
 use crate::config::{Config, PromptMode, ProviderSpec};
 use crate::detect::{EndDecision, end_decision};
-use crate::model::{Event, Level, OrchestratorStatus, Project, ProjectInfo, ProviderInfo, ReflexStatus, Role, ServerMessage, Session, SessionState, Task, TaskStatus};
+use crate::model::{Event, Level, OrchestratorStatus, Project, ProjectInfo, ProviderInfo, ReflexStatus, Role, ServerInfo, ServerMessage, Session, SessionState, Task, TaskStatus};
 use crate::reflex;
 use crate::store::Store;
 use crate::terminal::Terminal;
@@ -267,6 +267,16 @@ impl Hub {
         }
         let path = self.config.workspace.env.get("PATH").cloned().or_else(|| std::env::var("PATH").ok()).unwrap_or_default();
         std::env::split_paths(&path).any(|dir| dir.join(&spec.binary).is_file())
+    }
+
+    pub fn server_info(&self) -> ServerInfo {
+        ServerInfo {
+            version: env!("CARGO_PKG_VERSION").into(),
+            workspace_dir: self.config.workspace.dir.display().to_string(),
+            session_prefix: self.config.workspace.session_prefix.clone(),
+            database: self.config.server.data_dir.join("map.db").display().to_string(),
+            watcher_interval_secs: self.config.watcher.interval_secs,
+        }
     }
 
     pub fn providers(&self) -> Vec<ProviderInfo> {

@@ -1,0 +1,385 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Geist+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root,[data-theme="dark"]{--bg:#0b0c0e;--panel:#111317;--panel2:#16191e;--line:rgba(255,255,255,.09);--line2:rgba(255,255,255,.17);--text:#e7e9ec;--muted:#98a0ab;--faint:#68707c;--accent:#f08a3c;--accent-ink:#0b0c0e;--reflex:#4ade80;--llm:#f2c14e;--abstain:#f26d6d}
+[data-theme="light"]{--bg:#f4f4f1;--panel:#ffffff;--panel2:#f0f0ec;--line:rgba(0,0,0,.1);--line2:rgba(0,0,0,.2);--text:#15171a;--muted:#555c66;--faint:#80868f;--accent:#c4621a;--accent-ink:#ffffff;--reflex:#15803d;--llm:#a16207;--abstain:#c53030}
+html,body{margin:0;background:var(--bg);-webkit-font-smoothing:antialiased}
+*{box-sizing:border-box}
+a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
+button,input,textarea{font-family:inherit}
+textarea::placeholder,input::placeholder{color:var(--faint)}
+</style>
+</helmet>
+<div data-theme="{{ theme }}" style="min-height:100vh;background:var(--bg);color:var(--text);font-family:'Geist Mono',ui-monospace,monospace">
+  <nav style="position:sticky;top:0;z-index:20;display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px 20px;padding:8px 20px;min-height:44px;border-bottom:1px solid var(--line);background:var(--bg)">
+    <div style="display:flex;align-items:center;gap:8px 16px;flex-wrap:wrap">
+      <a href="Projects.dc.html" style="display:flex;align-items:center;gap:7px;font:700 13px/1 'Geist Mono',monospace;letter-spacing:.12em;color:var(--text);white-space:nowrap"><span style="color:var(--accent)">⬡</span>MAP</a>
+      <a href="Projects.dc.html" style="display:flex;align-items:center;gap:8px;height:28px;padding:0 10px;border-radius:7px;border:1px solid var(--line2);font:500 11.5px/1 'Geist Mono',monospace;color:var(--text);white-space:nowrap"><span style="width:6px;height:6px;border-radius:50%;background:var(--accent)"></span>{{ project }}<span style="color:var(--faint)">▾</span></a>
+      <div style="display:flex;gap:2px;flex-wrap:nowrap;flex:none">
+        <a href="Projects.dc.html" style="height:28px;display:flex;align-items:center;padding:0 10px;border-radius:6px;color:var(--muted);font:500 11.5px/1 'Geist Mono',monospace;white-space:nowrap">Projects</a>
+        <a href="Agent%20Command%20Centre.dc.html" style="height:28px;display:flex;align-items:center;padding:0 10px;border-radius:6px;color:var(--muted);font:500 11.5px/1 'Geist Mono',monospace;white-space:nowrap">Command centre</a>
+        <a href="Skills.dc.html" style="height:28px;display:flex;align-items:center;padding:0 10px;border-radius:6px;color:var(--muted);font:500 11.5px/1 'Geist Mono',monospace;white-space:nowrap">Skills</a>
+        <a href="Decisions.dc.html" style="height:28px;display:flex;align-items:center;padding:0 10px;border-radius:6px;color:var(--muted);font:500 11.5px/1 'Geist Mono',monospace;white-space:nowrap">Decisions</a>
+        <a href="Reflex.dc.html" style="height:28px;display:flex;align-items:center;padding:0 10px;border-radius:6px;border:1px solid var(--accent);color:var(--accent);font:600 11.5px/1 'Geist Mono',monospace;white-space:nowrap">Reflex</a>
+        <a href="Usage.dc.html" style="height:28px;display:flex;align-items:center;padding:0 10px;border-radius:6px;color:var(--muted);font:500 11.5px/1 'Geist Mono',monospace;white-space:nowrap">Usage</a>
+      </div>
+    </div>
+    <div style="display:flex;align-items:center;gap:14px">
+      <dc-import name="UsageMini" hint-size="200px,28px"></dc-import>
+      <span style="font:500 10px/1 'Geist Mono',monospace;letter-spacing:.14em;text-transform:uppercase;color:var(--faint);white-space:nowrap">{{ clock }}</span>
+    </div>
+  </nav>
+
+  <main style="max-width:1440px;margin:0 auto;padding:22px 20px 60px;display:flex;flex-direction:column;gap:18px">
+    <div style="display:flex;flex-wrap:wrap;align-items:center;gap:10px 22px;padding:10px 12px;border:1px dashed var(--line2);border-radius:10px">
+      <span style="font:600 9.5px/1 'Geist Mono',monospace;letter-spacing:.18em;text-transform:uppercase;color:var(--faint)">prototype</span>
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"><span style="font:500 9.5px/1 'Geist Mono',monospace;letter-spacing:.16em;text-transform:uppercase;color:var(--muted)">layout</span>
+        <div style="display:flex;border:1px solid var(--line2);border-radius:7px;overflow:hidden"><sc-for list="{{ layouts }}" as="o" hint-placeholder-count="3"><button onClick="{{ o.onClick }}" style="height:26px;padding:0 10px;border:0;background:{{ o.bg }};color:{{ o.color }};font:600 10.5px/1 'Geist Mono',monospace;cursor:pointer;white-space:nowrap">{{ o.label }}</button></sc-for></div>
+      </div>
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"><span style="font:500 9.5px/1 'Geist Mono',monospace;letter-spacing:.16em;text-transform:uppercase;color:var(--muted)">state</span>
+        <div style="display:flex;gap:4px;flex-wrap:wrap"><sc-for list="{{ presets }}" as="o" hint-placeholder-count="6"><button onClick="{{ o.onClick }}" style="height:26px;padding:0 9px;border-radius:6px;border:1px solid {{ o.border }};background:{{ o.bg }};color:{{ o.color }};font:500 10.5px/1 'Geist Mono',monospace;cursor:pointer;white-space:nowrap">{{ o.label }}</button></sc-for></div>
+      </div>
+      <div style="display:flex;align-items:center;gap:8px"><span style="font:500 9.5px/1 'Geist Mono',monospace;letter-spacing:.16em;text-transform:uppercase;color:var(--muted)">theme</span>
+        <div style="display:flex;border:1px solid var(--line2);border-radius:7px;overflow:hidden"><sc-for list="{{ themes }}" as="o" hint-placeholder-count="2"><button onClick="{{ o.onClick }}" style="height:26px;padding:0 10px;border:0;background:{{ o.bg }};color:{{ o.color }};font:600 10.5px/1 'Geist Mono',monospace;cursor:pointer;white-space:nowrap">{{ o.label }}</button></sc-for></div>
+      </div>
+    </div>
+
+    <div style="display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:16px">
+      <div style="display:flex;flex-direction:column;gap:10px;max-width:760px">
+        <span style="font:500 10px/1 'Geist Mono',monospace;letter-spacing:.2em;text-transform:uppercase;color:var(--muted)">project · {{ project }} · decision engine</span>
+        <h1 style="margin:0;font:600 32px/1.1 'Geist Mono',monospace;letter-spacing:-.01em">Reflex</h1>
+        <p style="margin:0;font:400 13px/1.65 'Geist Mono',monospace;color:var(--muted);text-wrap:pretty">Reflex answers choice, score and yes/no questions from this project's own docs in a few milliseconds, on this machine, without a model. When it is not confident enough, the question goes to an LLM. Every question Reflex answers is an LLM call you don't make.</p>
+      </div>
+      <span style="display:inline-flex;align-items:center;gap:8px;height:28px;padding:0 11px;border-radius:6px;border:1px solid {{ modeColor }};color:{{ modeColor }};font:600 10.5px/1 'Geist Mono',monospace;letter-spacing:.16em;text-transform:uppercase;white-space:nowrap"><span style="width:7px;height:7px;border-radius:50%;background:{{ modeColor }}"></span>{{ modeLabel }}</span>
+    </div>
+
+    <sc-if value="{{ hasBanner }}" hint-placeholder-val="{{ false }}">
+      <div style="display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:12px;padding:12px 14px;border:1px solid {{ bannerBorder }};border-radius:10px;background:{{ bannerBg }}">
+        <span style="display:flex;flex-direction:column;gap:5px;max-width:860px"><span style="font:600 12.5px/1.3 'Geist Mono',monospace">{{ bannerTitle }}</span><span style="font:400 11.5px/1.55 'Geist Mono',monospace;color:var(--muted);text-wrap:pretty">{{ bannerText }}</span></span>
+        <button onClick="{{ bannerCta }}" style="height:32px;padding:0 13px;border-radius:7px;border:1px solid var(--accent);background:var(--accent);color:var(--accent-ink);font:600 11.5px/1 'Geist Mono',monospace;cursor:pointer;white-space:nowrap">{{ bannerCtaLabel }}</button>
+      </div>
+    </sc-if>
+
+    <sc-if value="{{ isA }}" hint-placeholder-val="{{ true }}">
+      <section id="rx-how" style="display:flex;flex-direction:column;gap:14px;padding:18px;border:1px solid var(--line);border-radius:12px;background:var(--panel);min-width:0;">
+        <div style="display:flex;align-items:baseline;justify-content:space-between;gap:6px 12px;flex-wrap:wrap">
+          <span style="font:600 11px/1.2 'Geist Mono',monospace;letter-spacing:.16em;text-transform:uppercase;white-space:nowrap"><span style="color:var(--accent)">01</span>&nbsp;&nbsp;How it works</span>
+          <span style="font:400 10.5px/1.3 'Geist Mono',monospace;color:var(--muted)">{{ howMeta }}</span>
+        </div>
+        <dc-import name="ReflexFlow" vm="{{ flowVm }}" hint-size="100%,230px"></dc-import>
+      </section>
+      <section id="rx-setup" style="display:flex;flex-direction:column;gap:14px;padding:18px;border:1px solid var(--line);border-radius:12px;background:var(--panel);min-width:0;">
+        <div style="display:flex;align-items:baseline;justify-content:space-between;gap:6px 12px;flex-wrap:wrap">
+          <span style="font:600 11px/1.2 'Geist Mono',monospace;letter-spacing:.16em;text-transform:uppercase;white-space:nowrap"><span style="color:var(--accent)">02</span>&nbsp;&nbsp;Set up</span>
+          <span style="font:400 10.5px/1.3 'Geist Mono',monospace;color:var(--muted)">{{ setupMeta }}</span>
+        </div>
+        <dc-import name="ReflexSetup" vm="{{ setupVm }}" hint-size="100%,230px"></dc-import>
+      </section>
+      <div style="display:flex;flex-wrap:wrap;gap:18px;align-items:flex-start">
+        <section id="rx-play" style="display:flex;flex-direction:column;gap:14px;padding:18px;border:1px solid var(--line);border-radius:12px;background:var(--panel);min-width:0;flex:1 1 440px">
+        <div style="display:flex;align-items:baseline;justify-content:space-between;gap:6px 12px;flex-wrap:wrap">
+          <span style="font:600 11px/1.2 'Geist Mono',monospace;letter-spacing:.16em;text-transform:uppercase;white-space:nowrap"><span style="color:var(--accent)">03</span>&nbsp;&nbsp;Playground</span>
+          <span style="font:400 10.5px/1.3 'Geist Mono',monospace;color:var(--muted)">{{ playMeta }}</span>
+        </div>
+        <dc-import name="ReflexPlayground" vm="{{ playVm }}" hint-size="100%,460px"></dc-import>
+      </section>
+        <section id="rx-cal" style="display:flex;flex-direction:column;gap:14px;padding:18px;border:1px solid var(--line);border-radius:12px;background:var(--panel);min-width:0;flex:1 1 440px">
+        <div style="display:flex;align-items:baseline;justify-content:space-between;gap:6px 12px;flex-wrap:wrap">
+          <span style="font:600 11px/1.2 'Geist Mono',monospace;letter-spacing:.16em;text-transform:uppercase;white-space:nowrap"><span style="color:var(--accent)">04</span>&nbsp;&nbsp;Calibrate</span>
+          <span style="font:400 10.5px/1.3 'Geist Mono',monospace;color:var(--muted)">{{ calMeta }}</span>
+        </div>
+        <dc-import name="ReflexCalibrate" vm="{{ calVm }}" hint-size="100%,560px"></dc-import>
+      </section>
+      </div>
+      <section id="rx-log" style="display:flex;flex-direction:column;gap:14px;padding:18px;border:1px solid var(--line);border-radius:12px;background:var(--panel);min-width:0;">
+        <div style="display:flex;align-items:baseline;justify-content:space-between;gap:6px 12px;flex-wrap:wrap">
+          <span style="font:600 11px/1.2 'Geist Mono',monospace;letter-spacing:.16em;text-transform:uppercase;white-space:nowrap"><span style="color:var(--accent)">05</span>&nbsp;&nbsp;Results</span>
+          <span style="font:400 10.5px/1.3 'Geist Mono',monospace;color:var(--muted)">{{ logMeta }}</span>
+        </div>
+        <dc-import name="ReflexLog" vm="{{ logVm }}" hint-size="100%,620px"></dc-import>
+      </section>
+    </sc-if>
+    <sc-if value="{{ isB }}" hint-placeholder-val="{{ false }}">
+      <div style="display:flex;flex-wrap:wrap;gap:18px;align-items:flex-start">
+        <aside style="flex:1 1 300px;max-width:100%;display:flex;flex-direction:column;gap:14px;position:sticky;top:60px">
+          <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px">
+            <sc-for list="{{ mini }}" as="m" hint-placeholder-count="3"><div style="display:flex;flex-direction:column;gap:7px;padding:10px;border:1px solid var(--line);border-radius:8px;background:var(--panel)"><span style="display:flex;align-items:center;gap:6px;font:600 9.5px/1 'Geist Mono',monospace;letter-spacing:.14em;text-transform:uppercase;color:{{ m.color }}"><span style="width:6px;height:6px;border-radius:50%;background:{{ m.color }}"></span>{{ m.k }}</span><span style="font:600 20px/1 'Geist Mono',monospace">{{ m.v }}</span></div></sc-for>
+          </div>
+          <section id="rx-setup" style="display:flex;flex-direction:column;gap:14px;padding:18px;border:1px solid var(--line);border-radius:12px;background:var(--panel);min-width:0;">
+        <div style="display:flex;align-items:baseline;justify-content:space-between;gap:6px 12px;flex-wrap:wrap">
+          <span style="font:600 11px/1.2 'Geist Mono',monospace;letter-spacing:.16em;text-transform:uppercase;white-space:nowrap">Set up</span>
+          <span style="font:400 10.5px/1.3 'Geist Mono',monospace;color:var(--muted)">{{ setupMeta }}</span>
+        </div>
+        <dc-import name="ReflexSetup" vm="{{ setupVm }}" hint-size="100%,620px"></dc-import>
+      </section>
+        </aside>
+        <div style="flex:3 1 620px;min-width:0;display:flex;flex-direction:column;gap:14px">
+          <div style="display:flex;gap:2px;flex-wrap:wrap;border-bottom:1px solid var(--line)">
+            <sc-for list="{{ tabs }}" as="tb" hint-placeholder-count="4"><button onClick="{{ tb.onClick }}" style="height:36px;padding:0 14px;border:0;border-bottom:2px solid {{ tb.border }};background:transparent;color:{{ tb.color }};font:600 11px/1 'Geist Mono',monospace;letter-spacing:.12em;text-transform:uppercase;cursor:pointer;white-space:nowrap;margin-bottom:-1px">{{ tb.label }}</button></sc-for>
+          </div>
+          <sc-if value="{{ tabHow }}" hint-placeholder-val="{{ true }}"><section id="rx-how" style="display:flex;flex-direction:column;gap:14px;padding:18px;border:1px solid var(--line);border-radius:12px;background:var(--panel);min-width:0;">
+        <div style="display:flex;align-items:baseline;justify-content:space-between;gap:6px 12px;flex-wrap:wrap">
+          <span style="font:600 11px/1.2 'Geist Mono',monospace;letter-spacing:.16em;text-transform:uppercase;white-space:nowrap">How it works</span>
+          <span style="font:400 10.5px/1.3 'Geist Mono',monospace;color:var(--muted)">{{ howMeta }}</span>
+        </div>
+        <dc-import name="ReflexFlow" vm="{{ flowVm }}" hint-size="100%,230px"></dc-import>
+      </section></sc-if>
+          <sc-if value="{{ tabPlay }}" hint-placeholder-val="{{ false }}"><section id="rx-play" style="display:flex;flex-direction:column;gap:14px;padding:18px;border:1px solid var(--line);border-radius:12px;background:var(--panel);min-width:0;">
+        <div style="display:flex;align-items:baseline;justify-content:space-between;gap:6px 12px;flex-wrap:wrap">
+          <span style="font:600 11px/1.2 'Geist Mono',monospace;letter-spacing:.16em;text-transform:uppercase;white-space:nowrap">Playground</span>
+          <span style="font:400 10.5px/1.3 'Geist Mono',monospace;color:var(--muted)">{{ playMeta }}</span>
+        </div>
+        <dc-import name="ReflexPlayground" vm="{{ playVm }}" hint-size="100%,460px"></dc-import>
+      </section></sc-if>
+          <sc-if value="{{ tabCal }}" hint-placeholder-val="{{ false }}"><section id="rx-cal" style="display:flex;flex-direction:column;gap:14px;padding:18px;border:1px solid var(--line);border-radius:12px;background:var(--panel);min-width:0;">
+        <div style="display:flex;align-items:baseline;justify-content:space-between;gap:6px 12px;flex-wrap:wrap">
+          <span style="font:600 11px/1.2 'Geist Mono',monospace;letter-spacing:.16em;text-transform:uppercase;white-space:nowrap">Calibrate</span>
+          <span style="font:400 10.5px/1.3 'Geist Mono',monospace;color:var(--muted)">{{ calMeta }}</span>
+        </div>
+        <dc-import name="ReflexCalibrate" vm="{{ calVm }}" hint-size="100%,560px"></dc-import>
+      </section></sc-if>
+          <sc-if value="{{ tabLog }}" hint-placeholder-val="{{ false }}"><section id="rx-log" style="display:flex;flex-direction:column;gap:14px;padding:18px;border:1px solid var(--line);border-radius:12px;background:var(--panel);min-width:0;">
+        <div style="display:flex;align-items:baseline;justify-content:space-between;gap:6px 12px;flex-wrap:wrap">
+          <span style="font:600 11px/1.2 'Geist Mono',monospace;letter-spacing:.16em;text-transform:uppercase;white-space:nowrap">Decision log</span>
+          <span style="font:400 10.5px/1.3 'Geist Mono',monospace;color:var(--muted)">{{ logMeta }}</span>
+        </div>
+        <dc-import name="ReflexLog" vm="{{ logVm }}" hint-size="100%,620px"></dc-import>
+      </section></sc-if>
+        </div>
+      </div>
+    </sc-if>
+    <sc-if value="{{ isC }}" hint-placeholder-val="{{ false }}">
+      <section id="rx-how" style="display:flex;flex-direction:column;gap:14px;padding:18px;border:1px solid var(--line);border-radius:12px;background:var(--panel);min-width:0;">
+        <div style="display:flex;align-items:baseline;justify-content:space-between;gap:6px 12px;flex-wrap:wrap">
+          <span style="font:600 11px/1.2 'Geist Mono',monospace;letter-spacing:.16em;text-transform:uppercase;white-space:nowrap">Pipeline</span>
+          <span style="font:400 10.5px/1.3 'Geist Mono',monospace;color:var(--muted)">{{ howMeta }}</span>
+        </div>
+        <dc-import name="ReflexFlow" vm="{{ flowVm }}" hint-size="100%,230px"></dc-import>
+      </section>
+      <div style="display:flex;flex-wrap:wrap;gap:18px;align-items:flex-start">
+        <div style="flex:1 1 420px;min-width:0;display:flex;flex-direction:column;gap:18px">
+          <section id="rx-play" style="display:flex;flex-direction:column;gap:14px;padding:18px;border:1px solid var(--line);border-radius:12px;background:var(--panel);min-width:0;">
+        <div style="display:flex;align-items:baseline;justify-content:space-between;gap:6px 12px;flex-wrap:wrap">
+          <span style="font:600 11px/1.2 'Geist Mono',monospace;letter-spacing:.16em;text-transform:uppercase;white-space:nowrap">Ask</span>
+          <span style="font:400 10.5px/1.3 'Geist Mono',monospace;color:var(--muted)">{{ playMeta }}</span>
+        </div>
+        <dc-import name="ReflexPlayground" vm="{{ playVm }}" hint-size="100%,460px"></dc-import>
+      </section>
+          <section id="rx-setup" style="display:flex;flex-direction:column;gap:14px;padding:18px;border:1px solid var(--line);border-radius:12px;background:var(--panel);min-width:0;">
+        <div style="display:flex;align-items:baseline;justify-content:space-between;gap:6px 12px;flex-wrap:wrap">
+          <span style="font:600 11px/1.2 'Geist Mono',monospace;letter-spacing:.16em;text-transform:uppercase;white-space:nowrap">Setup</span>
+          <span style="font:400 10.5px/1.3 'Geist Mono',monospace;color:var(--muted)">{{ setupMeta }}</span>
+        </div>
+        <dc-import name="ReflexSetup" vm="{{ setupVm }}" hint-size="100%,420px"></dc-import>
+      </section>
+        </div>
+        <div style="flex:1.35 1 520px;min-width:0;display:flex;flex-direction:column;gap:18px">
+          <section id="rx-log" style="display:flex;flex-direction:column;gap:14px;padding:18px;border:1px solid var(--line);border-radius:12px;background:var(--panel);min-width:0;">
+        <div style="display:flex;align-items:baseline;justify-content:space-between;gap:6px 12px;flex-wrap:wrap">
+          <span style="font:600 11px/1.2 'Geist Mono',monospace;letter-spacing:.16em;text-transform:uppercase;white-space:nowrap">Decisions</span>
+          <span style="font:400 10.5px/1.3 'Geist Mono',monospace;color:var(--muted)">{{ logMeta }}</span>
+        </div>
+        <dc-import name="ReflexLog" vm="{{ logVm }}" hint-size="100%,620px"></dc-import>
+      </section>
+          <section id="rx-cal" style="display:flex;flex-direction:column;gap:14px;padding:18px;border:1px solid var(--line);border-radius:12px;background:var(--panel);min-width:0;">
+        <div style="display:flex;align-items:baseline;justify-content:space-between;gap:6px 12px;flex-wrap:wrap">
+          <span style="font:600 11px/1.2 'Geist Mono',monospace;letter-spacing:.16em;text-transform:uppercase;white-space:nowrap">Calibrate</span>
+          <span style="font:400 10.5px/1.3 'Geist Mono',monospace;color:var(--muted)">{{ calMeta }}</span>
+        </div>
+        <dc-import name="ReflexCalibrate" vm="{{ calVm }}" hint-size="100%,560px"></dc-import>
+      </section>
+        </div>
+      </div>
+    </sc-if>
+  </main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;variant&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;A&quot;,&quot;B&quot;,&quot;C&quot;],&quot;default&quot;:&quot;A&quot;,&quot;tsType&quot;:&quot;'A'|'B'|'C'&quot;},&quot;theme&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;dark&quot;,&quot;light&quot;],&quot;default&quot;:&quot;dark&quot;,&quot;tsType&quot;:&quot;'dark'|'light'&quot;}}">
+class Component extends DCLogic {
+  QUESTIONS = [
+    {id:'runbook',label:'runbook',type:'choice',text:'Which runbook applies to this alert?',options:['deploy-rollback','db-failover','cert-renewal','rate-limit','none']},
+    {id:'customer',label:'customer-facing',type:'yes-no',text:'Is this incident customer-facing?',options:['yes','no']},
+    {id:'severity',label:'severity',type:'score',text:'Severity score from 1 to 5',options:['1','2','3','4','5']},
+  ];
+  KW = {
+    runbook:{'deploy-rollback':['deploy','rollback','release','5xx','canary'],'db-failover':['replica','db-','database','lag','failover','primary'],'cert-renewal':['tls','certificate','cert','expire','ssl'],'rate-limit':['429','rate limit','throttl','quota','burst'],'none':[]},
+    customer:{'yes':['customer','users','login','checkout','5xx','latency','signup','payment'],'no':['internal','staging','batch','cron','replica','dashboard','runner']},
+    severity:{'1':['staging','cosmetic'],'2':['slow','warning','degraded'],'3':['latency','errors','5xx'],'4':['outage','checkout','payment','login'],'5':['data loss','all regions','for all']},
+  };
+  EX = {
+    runbook:['Deploy 4b1e9c2 raised 5xx to 3.1% on api; canary failing','Replica lag 45s on db-2, primary CPU at 95%','TLS certificate for api.acme.dev expires in 3 days','Clients get 429 from /v1/search after burst traffic','Disk usage on build runner at 81%'],
+    customer:['p99 latency on /login above 2s for 10 minutes','Nightly batch export failed on staging','Checkout returns 5xx for 2% of users'],
+    severity:['Checkout down for all regions since 14:02','Staging dashboard has a cosmetic chart glitch','API errors 5xx at 1.2%, latency degraded'],
+  };
+  THAI = 'ฐานข้อมูล db-2 ตอบช้ามาก ต้อง failover ไหม';
+  D5 = [['deploy',14],['incidents',22],['db-migrations',9],['auth',11],['billing',7]];
+  D11 = [['deploy',14],['incidents',22],['db-migrations',9],['auth',11],['billing',7],['payments',6],['search',5],['email',4],['cdn',3],['k8s',12],['observability',8]];
+  T0 = -3.68;
+  state = this.init();
+
+  h(s) { let x=2166136261; for (let i=0;i<s.length;i++){ x^=s.charCodeAt(i); x=Math.imul(x,16777619); } x^=x>>>13; x=Math.imul(x,0x5bd1e995); x^=x>>>15; return (x>>>0)/4294967296; }
+  fmt(l) { return l==null ? '—' : Math.pow(10,l).toExponential(1); }
+  pct(l) { return Math.max(0,Math.min(100,(l+5)/2*100)).toFixed(2)+'%'; }
+  pctS(f) { return Math.round(f*100)+'%'; }
+  msL(ms) { return ms<1000 ? ms.toFixed(1)+' ms' : (ms/1000).toFixed(2)+' s'; }
+  flatEx() { return this.QUESTIONS.flatMap(q=>this.EX[q.id].map(t=>({q:q.id,text:t}))); }
+  kwBest(q,low) { const kw=this.KW[q.id]; let best=null, bh=0; q.options.forEach(o=>{ const n=(kw[o]||[]).filter(k=>low.includes(k)).length; if(n>bh){ bh=n; best=o; } }); return best || (q.id==='runbook'?'none':q.id==='customer'?'no':'2'); }
+  modeOf(v) { if(!v.installed) return 'off'; if(!v.domains.length) return 'nocorpus'; if(v.domains.length>8) return 'blocked'; if(!v.hasQ) return 'noq'; if(!v.calibrated) return 'shadow'; return 'live'; }
+
+  init() {
+    let project='acme-api'; try{ project=localStorage.getItem('map.project')||project; }catch(_){}
+    this.CASES = this.genCases();
+    return Object.assign({project,variant:this.props.variant??'A',theme:this.props.theme??'dark',tab:'how',q:'runbook',input:'',result:null,fb:null,asks:3,logFilter:'all',paste:'',installing:false,now:Date.now()}, this.presetVals('ready'));
+  }
+  presetVals(p) {
+    const ready={preset:p,installed:true,domains:this.D5,hasQ:true,cases:this.CASES.slice(),calibrated:true,savedT:this.T0,t:this.T0};
+    const m = {
+      ready, thai:Object.assign({},ready),
+      not_installed:{preset:p,installed:false,domains:[],hasQ:false,cases:[],calibrated:false,savedT:null,t:-4},
+      no_corpus:{preset:p,installed:true,domains:[],hasQ:false,cases:[],calibrated:false,savedT:null,t:-4},
+      too_many:Object.assign({},ready,{domains:this.D11}),
+      uncalibrated:{preset:p,installed:true,domains:this.D5,hasQ:true,cases:this.CASES.slice(0,9),calibrated:false,savedT:null,t:-4},
+    }[p] || ready;
+    const v=Object.assign({},m,{preset:p}); v.log=this.genLog(this.modeOf(v),v.savedT); return v;
+  }
+  applyPreset(p) { const v=this.presetVals(p); Object.assign(v,{result:null,fb:null,input:p==='thai'?this.THAI:'',q:'runbook',asks:(p==='ready'||p==='too_many'||p==='thai')?3:0,installing:false}); this.setState(v,()=>{ if(p==='thai') this.doAsk(); }); }
+  withLog(patch) { this.setState(s=>{ const n=Object.assign({},s,patch); return Object.assign({},patch,{log:this.genLog(this.modeOf(n),n.savedT)}); }); }
+
+  genCases() {
+    const extra=['Canary for release 2.14 shows a 5xx spike','db-1 primary is not accepting writes',"Let's Encrypt renewal failed for cdn.acme.dev",'Partner API throttled us with 429 for 20 min','Build cache disk at 92% on runner-3','Rollback requested after deploy of 9c1f0aa','Read replica db-3 lag past 2 minutes','Cert for internal.acme.dev expires tomorrow','Burst of 429 on /v1/export from one tenant'];
+    const texts=this.flatEx().map(e=>e.text).concat(extra); const out=[];
+    for (let i=0;i<28;i++){ const h2=this.h('cb'+i); const ok=!(i%5===3||i===11); let l = ok ? -3.3+(h2-.5)*1.05 : (i===13||i===23 ? -3.42+(h2-.5)*.18 : -4.25+(h2-.5)*1.1); l=Math.max(-4.95,Math.min(-3.02,l)); out.push({text:texts[i%texts.length],ok,conf:l}); }
+    return out;
+  }
+  genLog(mode,T) {
+    if (mode==='noq') return [];
+    const flat=this.flatEx(), now=Date.now(), out=[], run=mode==='live'||mode==='shadow';
+    for (let i=0;i<150;i++){ const e=flat[i%flat.length]; const a=this.h('la'+i),b=this.h('lb'+i),c=this.h('lc'+i),d=this.h('ld'+i),f=this.h('lf'+i);
+      let l = a<.72 ? -3.2+(b-.5)*.8 : -4.3+(b-.5)*1.0; l=Math.max(-5,Math.min(-3,l));
+      const lane = mode==='live' ? (l>=T?'reflex':(l<-4.55&&d<.45?'abstain':'llm')) : (d<.04?'abstain':'llm');
+      const q=this.QUESTIONS.find(x=>x.id===e.q);
+      out.push({id:'g'+i,at:now-c*86400e3,q:e.q,input:e.text,answer:lane==='abstain'?'no answer':this.kwBest(q,e.text.toLowerCase()),conf:run?l:null,lane,ms:lane==='reflex'?1.6+f*5:(run?3:0)+950+f*2000,fb:f<.06?(f<.02?'wrong':'right'):null}); }
+    return out.sort((x,y)=>y.at-x.at);
+  }
+  evaluate(qid,text,v) {
+    v=v||this.state; const mode=this.modeOf(v); const q=this.QUESTIONS.find(x=>x.id===qid)||this.QUESTIONS[0];
+    const low=text.toLowerCase(), thai=/[\u0E00-\u0E7F]/.test(text), hh=this.h(text+qid);
+    const canRun=(mode==='live'||mode==='shadow')&&!thai; let opts=[], conf=null, best=null;
+    if (canRun) { const kw=this.KW[q.id]; opts=q.options.map(o=>{ const hits=(kw[o]||[]).filter(k=>low.includes(k)).length; let l = o==='none' ? -4.7+(this.h(text)-.5)*.2 : -4.95+0.62*hits+(this.h(text+o)-.5)*.2; return {o,hits,l:Math.max(-5,Math.min(-3,l))}; }).sort((a,b)=>b.l-a.l); best=opts[0]; conf=best.l; }
+    const T=v.savedT; let lane, reason;
+    if (thai) { lane='llm'; reason='Thai input. Reflex reads English only, so this went straight to the LLM. Add an English note to the corpus or translate the input first.'; }
+    else if (mode==='off') { lane='llm'; reason='Reflex is not installed. Every question goes to the LLM.'; }
+    else if (mode==='nocorpus') { lane='llm'; reason='No corpus yet. Reflex has nothing to answer from.'; }
+    else if (mode==='blocked') { lane='llm'; reason='Reflex is paused: '+v.domains.length+' domains, the limit is 8.'; }
+    else if (mode==='noq') { lane='llm'; reason='No questions are defined, so nothing is routed through Reflex.'; }
+    else if (mode==='shadow') { lane='llm'; reason='Not calibrated. Reflex scored '+this.fmt(conf)+' in shadow, but there is no threshold yet, so the LLM answered.'; }
+    else if (conf>=T) { lane='reflex'; reason='Confidence '+this.fmt(conf)+' is at or above the threshold '+this.fmt(T)+'. Answered locally, no LLM call.'; }
+    else if (conf<-4.55 && hh<.45) { lane='abstain'; reason='Confidence '+this.fmt(conf)+' is below '+this.fmt(T)+', and the LLM could not pick one of the options either.'; }
+    else { lane='llm'; reason='Confidence '+this.fmt(conf)+' is below the threshold '+this.fmt(T)+'. Sent to claude.'; }
+    const rms = canRun ? 1.6+hh*5.2 : 0; const ms = lane==='reflex' ? rms : rms+900+hh*1900;
+    const answer = lane==='reflex' ? best.o : lane==='abstain' ? 'no answer' : (thai ? (q.id==='runbook'?'db-failover':q.id==='customer'?'yes':'3') : this.kwBest(q,low));
+    return {qid:q.id,text,lane,answer,conf,reason,ms,opts,thai,T,at:Date.now()};
+  }
+  metrics(t,cases) { const ans=cases.filter(c=>c.conf>=t); const wrongN=ans.filter(c=>!c.ok).length; return {n:cases.length,answered:ans.length,wrongN,saved:cases.length?ans.length/cases.length:0,wrong:ans.length?wrongN/ans.length:0}; }
+  suggest(cases) { for (let t=-5;t<=-3.001;t+=.01){ const m=this.metrics(t,cases); if(m.answered>0&&m.wrong<=.05) return Math.round(t*100)/100; } return -3.2; }
+
+  doAsk = () => { const st=this.state; const text=st.input.trim(); if(!text) return; const r=this.evaluate(st.q,text); const row={id:'p'+Date.now(),at:r.at,q:r.qid,input:text,answer:r.answer,conf:r.conf,lane:r.lane,ms:r.ms,fb:null}; this.setState(s=>({result:r,fb:null,asks:s.asks+1,log:[row,...s.log]})); };
+  feedback(ok) {
+    const r=this.state.result; if(!r) return;
+    this.setState(s=>{ const log=s.log.map((x,i)=>i===0&&x.input===r.text?Object.assign({},x,{fb:ok?'right':'wrong'}):x); const cases = r.conf!=null ? [...s.cases,{text:r.text,ok,conf:r.conf}] : s.cases; return {fb:ok,log,cases}; });
+  }
+  goto(sec) { if (this.state.variant==='B' && sec!=='setup') this.setState({tab:sec}); setTimeout(()=>{ const el=document.getElementById('rx-'+sec); if(el){ const y=el.getBoundingClientRect().top+window.scrollY-64; window.scrollTo({top:y,behavior:'smooth'}); } },60); }
+  install = () => { if(this.state.installing) return; this.setState({installing:true}); clearTimeout(this.it); this.it=setTimeout(()=>this.withLog({installed:true,installing:false,preset:'no_corpus'}),1300); };
+  scanCorpus = () => this.withLog({domains:this.D5});
+  archive = () => this.withLog({domains:this.state.domains.slice().sort((a,b)=>b[1]-a[1]).slice(0,8)});
+  addQuestions = () => this.withLog({hasQ:true,cases:this.state.cases.length?this.state.cases:this.CASES.slice(0,9)});
+  runCal = () => { const st=this.state; if(st.cases.length<16) return; const t=this.suggest(st.cases); this.withLog({calibrated:true,t,savedT:t}); };
+  componentDidMount() { this.clk=setInterval(()=>this.setState({now:Date.now()}),1000); }
+  componentWillUnmount() { clearInterval(this.clk); clearTimeout(this.it); }
+
+  renderVals() {
+    const st=this.state, mode=this.modeOf(st), T=st.savedT, q=this.QUESTIONS.find(x=>x.id===st.q);
+    const LC={reflex:'var(--reflex)',llm:'var(--llm)',abstain:'var(--abstain)'};
+    const mix=(c,p)=>'color-mix(in srgb, '+c+' '+p+'%, transparent)';
+    const files=st.domains.reduce((a,d)=>a+d[1],0);
+    const lg=st.log, cnt={reflex:0,llm:0,abstain:0}; lg.forEach(r=>cnt[r.lane]++); const tot=lg.length||1;
+    const avg=l=>{ const xs=lg.filter(r=>r.lane===l); return xs.length?xs.reduce((a,r)=>a+r.ms,0)/xs.length:0; };
+    const share=l=>cnt[l]/tot;
+    const lanes=[['yes','reflex','free · ~'+avg('reflex').toFixed(1)+' ms'],['no','llm','claude · ~'+(avg('llm')/1000).toFixed(1)+' s'],['nobody','abstain','no answer']].map(x=>({when:x[0],name:x[1],note:x[2],color:LC[x[1]],pct:this.pctS(share(x[1])),w:this.pctS(share(x[1])),border:mix(LC[x[1]],35),bg:mix(LC[x[1]],6)}));
+    const thNotes={live:'set by calibration on '+st.cases.length+' cases',shadow:'not calibrated · every question goes to the LLM',off:'Reflex is not installed',nocorpus:'no corpus to answer from',blocked:'paused · '+st.domains.length+' domains, limit 8',noq:'no questions defined'};
+    const flowVm={question:q.text,qType:q.type+' · '+q.options.length+' options',corpus:st.domains.length?st.domains.length+' domains · '+files+' files':'no corpus',th:T==null?'not set':this.fmt(T),thNote:thNotes[mode],reflexBorder:mode==='live'?'var(--accent)':'var(--line)',lanes,
+      footnote:'Last 24 h · '+lg.length+' questions · '+this.pctS(share('reflex'))+' answered by Reflex, so '+cnt.reflex+' LLM calls were never made.'};
+    const step=(title,desc,done,status,statusColor,cta,on)=>({title,desc,done,status,statusColor,cta,on});
+    const steps=[
+      step('Install Reflex','Runs on this machine next to the agents. No model, no network calls.',st.installed,st.installing?'installing…':st.installed?'installed · reflex 0.4.2':'not installed',st.installed?'var(--reflex)':'var(--muted)',st.installed||st.installing?null:'$ map reflex install',this.install),
+      step('Write the corpus','docs/reflex/<domain>/*.md · one folder per domain, 1–8 domains, English runbook-style notes.',st.domains.length>=1&&st.domains.length<=8,!st.installed?'waiting for step 1':!st.domains.length?'no domains in docs/reflex/':st.domains.length>8?st.domains.length+' domains · limit is 8 · merge or archive '+(st.domains.length-8):st.domains.length+' domains · '+files+' files · '+st.domains.map(d=>d[0]).join(', '),st.domains.length>8?'var(--abstain)':st.domains.length?'var(--reflex)':'var(--muted)',!st.installed?null:!st.domains.length?'Scan docs/reflex/':st.domains.length>8?'Archive '+(st.domains.length-8)+' smallest':null,!st.domains.length?this.scanCorpus:this.archive),
+      step('Define questions','Each question has fixed answers: choice, score or yes-no. Reflex never writes free text.',st.hasQ,st.hasQ?this.QUESTIONS.length+' questions · '+this.QUESTIONS.map(x=>x.label).join(', '):'none yet',st.hasQ?'var(--reflex)':'var(--muted)',st.domains.length&&st.domains.length<=8&&!st.hasQ?'Add starter questions':null,this.addQuestions),
+      step('Calibrate','At least 16 cases of "message | correct answer". The threshold comes from them.',st.calibrated,st.calibrated?'threshold '+this.fmt(T)+' · '+st.cases.length+' cases':st.cases.length+' / 16 cases',st.calibrated?'var(--reflex)':st.cases.length>=16?'var(--llm)':'var(--muted)',st.hasQ&&!st.calibrated?'Open calibrate':null,()=>this.goto('cal')),
+      step('Try the playground','Ask a real question and check which lane it takes and why.',st.calibrated&&st.asks>0,st.asks?st.asks+' questions asked':'not tried yet',st.asks?'var(--reflex)':'var(--muted)',st.calibrated&&!st.asks?'Open playground':null,()=>this.goto('play')),
+    ];
+    const cur=steps.findIndex(s=>!s.done);
+    const setupVm={progress:steps.filter(s=>s.done).length+' of 5 done',steps:steps.map((s,i)=>({title:s.title,desc:s.desc,status:s.status,statusColor:s.statusColor,mark:s.done?'✓':String(i+1),ring:s.done?'var(--reflex)':i===cur?'var(--accent)':'var(--line2)',fill:s.done?'var(--reflex)':'transparent',markColor:s.done?'var(--bg)':i===cur?'var(--accent)':'var(--muted)',border:i===cur?'var(--accent)':'var(--line)',bg:i===cur?mix('var(--accent)',6):'transparent',seg:s.done?'var(--reflex)':i===cur?'var(--accent)':'var(--line)',hasCta:!!s.cta,cta:s.cta||'',onCta:s.on,ctaBg:i===cur?'var(--accent)':'transparent',ctaColor:i===cur?'var(--accent-ink)':'var(--text)',ctaBorder:i===cur?'var(--accent)':'var(--line2)'}))};
+    const thaiNow=/[\u0E00-\u0E7F]/.test(st.input);
+    const notices={off:'Reflex is not installed. You can still ask, and the LLM will answer.',nocorpus:'No corpus. Reflex has nothing to answer from, so every question goes to the LLM.',blocked:'Reflex is paused: '+st.domains.length+' domains, the limit is 8.',noq:'No questions defined yet.',shadow:'Not calibrated. Reflex scores every question in shadow, but the LLM answers until you calibrate.'};
+    const r=st.result; let rv={};
+    if (r) { const c=LC[r.lane]; rv={lane:r.lane,color:c,answer:r.answer,ms:r.lane==='reflex'?this.msL(r.ms):this.msL(r.ms)+(r.conf!=null?' · reflex '+this.msL(1.6+this.h(r.text+r.qid)*5.2):''),reason:r.reason,hasConf:r.conf!=null,confLine:r.T==null?this.fmt(r.conf)+' · no threshold':this.fmt(r.conf)+(r.conf>=r.T?' ≥ ':' < ')+this.fmt(r.T),thPct:r.T==null?'100%':this.pct(r.T),cPct:r.conf==null?'0%':this.pct(r.conf),hasOpts:r.opts.length>1,opts:r.opts.slice(0,4).map((o,i)=>({name:o.o,conf:this.fmt(o.l),w:this.pct(o.l),color:i===0?c:'var(--faint)'})),border:mix(c,40),bg:mix(c,5),fbQ:r.lane==='reflex'?'Was Reflex right?':'Was this answer right?',onRight:()=>this.feedback(true),onWrong:()=>this.feedback(false),rightBorder:st.fb===true?'var(--reflex)':'var(--line2)',wrongBorder:st.fb===false?'var(--abstain)':'var(--line2)',fbMsg:st.fb==null?'':r.conf==null?'Thanks, logged for review.':st.fb?'Saved as a correct calibration case.':'Saved as a wrong case. It will push the threshold up.'}; }
+    const playVm={hasNotice:mode!=='live',notice:notices[mode]||'',noticeBorder:mix('var(--llm)',40),noticeBg:mix('var(--llm)',6),
+      questions:this.QUESTIONS.map(x=>({label:x.label,type:x.type,onClick:()=>this.setState({q:x.id,result:null}),bg:x.id===st.q?mix('var(--accent)',12):'transparent',border:x.id===st.q?'var(--accent)':'var(--line)',color:x.id===st.q?'var(--text)':'var(--muted)'})),
+      qText:q.text,qOptions:q.options.join(' · '),input:st.input,onInput:e=>this.setState({input:e.target.value}),
+      examples:this.EX[q.id].concat([this.THAI]).map(t=>({label:'try: '+t,onClick:()=>this.setState({input:t})})),
+      onAsk:this.doAsk,askOpacity:st.input.trim()?'1':'.45',liveHint:thaiNow?'Thai detected · Reflex reads English only, this will go to the LLM':mode==='live'?'answers locally when confidence ≥ '+this.fmt(T):'the LLM will answer',liveHintColor:thaiNow?'var(--llm)':'var(--muted)',has:!!r,r:rv};
+    const can=st.installed&&st.domains.length>0&&st.domains.length<=8&&st.hasQ;
+    const M=this.metrics(st.t,st.cases), n=st.cases.length, unsaved=st.calibrated&&Math.abs(st.t-T)>.004;
+    const btn=(label,onClick,primary,dim)=>({label,onClick,bg:primary?'var(--accent)':'transparent',color:primary?'var(--accent-ink)':'var(--text)',border:primary?'var(--accent)':'var(--line2)',opacity:dim?'.4':'1'});
+    const calVm={tiles:[{k:'LLM calls saved',v:n?this.pctS(M.saved):'—',color:'var(--reflex)',sub:M.answered+' of '+n+' cases above threshold'},{k:'Reflex wrong',v:M.answered?this.pctS(M.wrong):'—',color:M.wrong>.05?'var(--abstain)':'var(--text)',sub:M.wrongN+' wrong answers would ship'},{k:'Still to LLM',v:n?this.pctS(1-M.saved):'—',color:'var(--llm)',sub:(n-M.answered)+' cases below threshold'},{k:'Threshold',v:this.fmt(st.t),color:'var(--accent)',sub:!st.calibrated?'not saved yet':unsaved?'draft · saved '+this.fmt(T):'saved'}],
+      draft:!can?'set up steps 1–3 first':!st.calibrated?'not calibrated · every question goes to the LLM':unsaved?'draft · drag, then save':'saved · live traffic uses this',draftColor:unsaved?'var(--accent)':!st.calibrated?'var(--llm)':'var(--muted)',
+      thPct:this.pct(st.t),thLabel:this.fmt(st.t),canDrag:can&&n>0,cursor:can&&n>0?'ew-resize':'not-allowed',onThreshold:l=>this.setState({t:Math.round(l*100)/100}),
+      dots:st.cases.map((c,i)=>({x:this.pct(c.conf),y:(c.ok?18+this.h('y'+i)*48:94+this.h('y'+i)*40)+'px',fill:c.ok?'var(--text)':'transparent',ring:c.ok?'var(--text)':'var(--abstain)',title:c.text+' · '+this.fmt(c.conf)+(c.ok?' · correct':' · wrong')})),
+      actions:st.calibrated?[btn('Suggest (≤ 5% wrong)',()=>this.setState({t:this.suggest(st.cases)})),btn('Save threshold',()=>this.setState({savedT:st.t}),true,!unsaved)]:[btn('Run calibration',this.runCal,true,n<16||!can)],
+      actionNote:!can?'':st.calibrated?'Saving changes the gate for new questions only.':n<16?'Need '+(16-n)+' more cases.':'Ready: Reflex will pick the lowest threshold with at most 5% wrong.',
+      count:n+' cases',countNote:n>=16?'enough to calibrate':(16-n)+' more needed',countPct:Math.min(100,n/16*100)+'%',countColor:n>=16?'var(--reflex)':'var(--llm)',paste:st.paste,onPaste:e=>this.setState({paste:e.target.value}),
+      caseActions:[btn('Add pasted cases',()=>{ const lines=st.paste.split('\n').filter(x=>x.includes('|')); if(!lines.length||!can) return; const add=lines.map(x=>{ const [t,a]=x.split('|').map(y=>y.trim()); const ev=this.evaluate('runbook',t,Object.assign({},st,{calibrated:false})); return {text:t,ok:this.kwBest(this.QUESTIONS[0],t.toLowerCase())===a,conf:ev.conf==null?-4.9:ev.conf}; }); this.setState(s=>({cases:[...s.cases,...add],paste:''})); },false,!st.paste.includes('|')||!can),btn('Load sample cases',()=>{ if(can) this.setState({cases:this.CASES.slice()}); },false,!can||n>=28)]};
+    const now=st.now, buckets=Array.from({length:24},()=>({reflex:0,llm:0,abstain:0}));
+    lg.forEach(x=>{ const i=Math.floor((now-x.at)/3600e3); if(i>=0&&i<24) buckets[23-i][x.lane]++; });
+    const mx=Math.max(1,...buckets.map(b=>b.reflex+b.llm+b.abstain));
+    const fbR=lg.filter(x=>x.fb==='right').length, fbW=lg.filter(x=>x.fb==='wrong').length;
+    const lf=st.logFilter, rows=lg.filter(x=>lf==='all'||x.lane===lf).slice(0,40);
+    const logVm={tiles:[{k:'LLM calls saved',v:this.pctS(share('reflex')),color:'var(--reflex)',vcolor:'var(--reflex)',sub:cnt.reflex+' of '+lg.length+' questions'},{k:'reflex',v:String(cnt.reflex),color:'var(--reflex)',vcolor:'var(--text)',sub:'avg '+avg('reflex').toFixed(1)+' ms'},{k:'llm',v:String(cnt.llm),color:'var(--llm)',vcolor:'var(--text)',sub:'avg '+(avg('llm')/1000).toFixed(2)+' s'},{k:'abstain',v:String(cnt.abstain),color:'var(--abstain)',vcolor:'var(--text)',sub:'nobody answered'},{k:'feedback',v:fbR+' ✓ · '+fbW+' ✕',color:'var(--accent)',vcolor:'var(--text)',sub:'from playground and reviews'}],
+      bars:buckets.map((b,i)=>({r:(b.reflex/mx*100)+'%',l:(b.llm/mx*100)+'%',a:(b.abstain/mx*100)+'%',title:(23-i)+'h ago · '+b.reflex+' reflex · '+b.llm+' llm · '+b.abstain+' abstain'})),
+      filters:['all','reflex','llm','abstain'].map(k=>({label:k,onClick:()=>this.setState({logFilter:k}),border:lf===k?(LC[k]||'var(--accent)'):'var(--line)',bg:lf===k?mix(LC[k]||'var(--accent)',12):'transparent',color:lf===k?'var(--text)':'var(--muted)'})),
+      rows:rows.map(x=>({time:new Date(x.at).toTimeString().slice(0,5),lane:x.lane,color:LC[x.lane],answer:x.answer,q:(this.QUESTIONS.find(y=>y.id===x.q)||{}).label,input:x.input,conf:this.fmt(x.conf),ms:this.msL(x.ms),fb:x.fb==='right'?'✓':x.fb==='wrong'?'✕':''})),
+      empty:!rows.length,emptyText:mode==='noq'?'No questions defined yet, so nothing has been routed.':'No decisions in this lane.'};
+    const modes={live:['live','var(--reflex)'],shadow:['shadow · not calibrated','var(--llm)'],off:['not installed','var(--abstain)'],nocorpus:['no corpus','var(--abstain)'],blocked:['paused · too many domains','var(--abstain)'],noq:['no questions','var(--llm)']};
+    const banners={off:['Reflex is not installed','Every question goes to the LLM. Install Reflex to start answering from your own docs.','Install Reflex',this.install],nocorpus:['No corpus yet','Add English runbook notes under docs/reflex/<domain>/. One folder per domain, 1–8 domains.','Scan docs/reflex/',this.scanCorpus],blocked:['Too many domains ('+st.domains.length+')','Reflex supports 1–8 domains and stays paused until you merge or archive '+(st.domains.length-8)+'. Questions go to the LLM meanwhile.','Archive '+Math.max(0,st.domains.length-8)+' smallest',this.archive],noq:['No questions yet','Reflex only answers questions with fixed answers. Add one to start routing.','Add starter questions',this.addQuestions],shadow:['Not calibrated · every question goes to the LLM','Reflex is scoring in shadow, but without a threshold it never answers. '+(n<16?'Add '+(16-n)+' more cases, then calibrate.':'You have enough cases, run calibration.'),'Open calibrate',()=>this.goto('cal')]};
+    const bn=banners[mode];
+    const seg=(cur,val)=>({bg:cur===val?'var(--accent)':'transparent',color:cur===val?'var(--accent-ink)':'var(--muted)'});
+    const d=new Date(now);
+    return {
+      theme:st.theme, project:st.project, clock:String(d.getDate()).padStart(2,'0')+'.'+String(d.getMonth()+1).padStart(2,'0')+' '+d.toTimeString().slice(0,8),
+      layouts:[['A','A · Guided'],['B','B · Workbench'],['C','C · Console']].map(x=>Object.assign({label:x[1],onClick:()=>this.setState({variant:x[0]})},seg(st.variant,x[0]))),
+      presets:[['ready','Ready'],['not_installed','Not installed'],['no_corpus','No corpus'],['too_many','> 8 domains'],['uncalibrated','Not calibrated'],['thai','Thai input']].map(x=>({label:x[1],onClick:()=>this.applyPreset(x[0]),border:st.preset===x[0]?'var(--accent)':'var(--line2)',bg:st.preset===x[0]?mix('var(--accent)',12):'transparent',color:st.preset===x[0]?'var(--text)':'var(--muted)'})),
+      themes:[['dark','dark'],['light','light']].map(x=>Object.assign({label:x[1],onClick:()=>this.setState({theme:x[0]})},seg(st.theme,x[0]))),
+      modeLabel:modes[mode][0],modeColor:modes[mode][1],
+      hasBanner:!!bn,bannerTitle:bn?bn[0]:'',bannerText:bn?bn[1]:'',bannerCtaLabel:bn?bn[2]:'',bannerCta:bn?bn[3]:()=>{},bannerBorder:mix(mode==='shadow'||mode==='noq'?'var(--llm)':'var(--abstain)',45),bannerBg:mix(mode==='shadow'||mode==='noq'?'var(--llm)':'var(--abstain)',6),
+      isA:st.variant==='A',isB:st.variant==='B',isC:st.variant==='C',
+      tabs:[['how','How it works'],['play','Playground'],['cal','Calibrate'],['log','Decision log']].map(x=>({label:x[1],onClick:()=>this.setState({tab:x[0]}),border:st.tab===x[0]?'var(--accent)':'transparent',color:st.tab===x[0]?'var(--text)':'var(--muted)'})),
+      tabHow:st.tab==='how',tabPlay:st.tab==='play',tabCal:st.tab==='cal',tabLog:st.tab==='log',
+      mini:['reflex','llm','abstain'].map(l=>({k:l,v:this.pctS(share(l)),color:LC[l]})),
+      flowVm,setupVm,playVm,calVm,logVm,
+      howMeta:'last 24 h · '+lg.length+' questions',setupMeta:steps.filter(s=>s.done).length+' / 5 done',playMeta:T==null?'no threshold yet':'threshold '+this.fmt(T),calMeta:n+' cases · threshold '+this.fmt(st.t),logMeta:this.pctS(share('reflex'))+' of LLM calls saved',
+    };
+  }
+}
+</script>
+</body>
+</html>

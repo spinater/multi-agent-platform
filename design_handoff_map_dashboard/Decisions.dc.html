@@ -1,0 +1,419 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+html,body{margin:0;background:#07080a;color:#e6e9ef;font-family:Geist,ui-sans-serif,system-ui,sans-serif;-webkit-font-smoothing:antialiased}
+*{box-sizing:border-box}
+a{color:#ff9a4d;text-decoration:none}a:hover{color:#ffbd8a}
+button{font-family:inherit}
+::-webkit-scrollbar{width:8px;height:8px}::-webkit-scrollbar-thumb{background:#1b1f27;border-radius:4px}::-webkit-scrollbar-track{background:transparent}
+</style>
+</helmet>
+<div style="min-height:100vh;background:radial-gradient(1400px 800px at 50% 0%, #10131b 0%, #07080a 60%);color:#e6e9ef">
+
+  <nav style="position:sticky;top:0;z-index:20;display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px 20px;padding:8px 20px;min-height:44px;border-bottom:1px solid rgba(255,255,255,.07);background:rgba(7,8,10,.97)">
+    <div style="display:flex;align-items:center;gap:8px 16px;flex-wrap:wrap">
+      <a href="Projects.dc.html" style="display:flex;align-items:center;gap:7px;font:700 14px/1 Geist,sans-serif;letter-spacing:.08em;color:#e6e9ef;white-space:nowrap"><span style="color:#FF7A1A">⬡</span>MAP</a>
+      <div style="position:relative;letter-spacing:0;text-transform:none">
+        <button onClick="{{ toggleProjMenu }}" style="display:flex;align-items:center;gap:8px;height:28px;padding:0 10px;border-radius:7px;border:1px solid rgba(255,255,255,.12);background:transparent;font:500 11.5px/1 'JetBrains Mono',ui-monospace,monospace;color:#e6e9ef;white-space:nowrap;cursor:pointer"><span style="width:6px;height:6px;border-radius:50%;background:#FF7A1A"></span>{{ projectName }}<span style="color:#7a8494">▾</span></button>
+        <sc-if value="{{ projMenu }}" hint-placeholder-val="{{ false }}">
+          <div onClick="{{ closeProjMenu }}" style="position:fixed;inset:0;z-index:60"></div>
+          <div style="position:absolute;top:34px;left:0;z-index:61;width:290px;padding:6px;border-radius:10px;border:1px solid rgba(255,255,255,.12);background:#0c0e13;box-shadow:0 20px 50px rgba(0,0,0,.6);display:flex;flex-direction:column;gap:2px">
+            <span style="padding:8px 10px 6px;font:500 10px/1 'JetBrains Mono',ui-monospace,monospace;letter-spacing:.14em;text-transform:uppercase;color:#7a8494">Switch project</span>
+            <sc-for list="{{ projItems }}" as="pi" hint-placeholder-count="5">
+              <button onClick="{{ pi.onClick }}" style="display:flex;align-items:center;gap:10px;padding:9px 10px;border-radius:7px;border:0;background:{{ pi.bg }};color:#e6e9ef;text-align:left;cursor:pointer;font:500 12.5px/1.2 'JetBrains Mono',ui-monospace,monospace" style-hover="background:rgba(255,255,255,.05)"><span style="flex:none;width:6px;height:6px;border-radius:50%;background:{{ pi.dot }}"></span><span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ pi.name }}</span><span style="color:#FF7A1A">{{ pi.mark }}</span></button>
+            </sc-for>
+            <div style="height:1px;background:rgba(255,255,255,.08);margin:4px 0"></div>
+            <a href="Projects.dc.html" style="padding:9px 10px;border-radius:7px;font:500 12.5px/1 Geist,sans-serif;color:#c5ccd6" style-hover="background:rgba(255,255,255,.05);color:#e6e9ef">All projects</a>
+            <a href="Projects.dc.html?new=1" style="padding:9px 10px;border-radius:7px;font:500 12.5px/1 Geist,sans-serif;color:#ffb37a" style-hover="background:rgba(255,122,26,.1)">+ New project</a>
+          </div>
+        </sc-if>
+      </div>
+      <div style="display:flex;gap:2px;flex-wrap:nowrap;flex:none">
+        <a href="Projects.dc.html" style="height:28px;display:flex;align-items:center;padding:0 10px;border-radius:6px;color:#c5ccd6;font:500 12px/1 Geist,sans-serif;white-space:nowrap" style-hover="background:rgba(255,255,255,.05);color:#e6e9ef">Projects</a>
+        <a href="Agent%20Command%20Centre.dc.html" style="height:28px;display:flex;align-items:center;padding:0 10px;border-radius:6px;color:#c5ccd6;font:500 12px/1 Geist,sans-serif;white-space:nowrap" style-hover="background:rgba(255,255,255,.05);color:#e6e9ef">Command centre</a>
+        <a href="Skills.dc.html" style="height:28px;display:flex;align-items:center;padding:0 10px;border-radius:6px;color:#c5ccd6;font:500 12px/1 Geist,sans-serif;white-space:nowrap" style-hover="background:rgba(255,255,255,.05);color:#e6e9ef">Skills</a>
+        <a href="Decisions.dc.html" style="height:28px;display:flex;align-items:center;padding:0 10px;border-radius:6px;background:rgba(255,122,26,.12);color:#ffb37a;font:500 12px/1 Geist,sans-serif;white-space:nowrap">Decisions</a>
+        <a href="Reflex.dc.html" style="height:28px;display:flex;align-items:center;padding:0 10px;border-radius:6px;color:#c5ccd6;font:500 12px/1 Geist,sans-serif;white-space:nowrap" style-hover="background:rgba(255,255,255,.05);color:#e6e9ef">Reflex</a>
+        <a href="Usage.dc.html" style="height:28px;display:flex;align-items:center;padding:0 10px;border-radius:6px;color:#c5ccd6;font:500 12px/1 Geist,sans-serif;white-space:nowrap" style-hover="background:rgba(255,255,255,.05);color:#e6e9ef">Usage</a>
+      </div>
+    </div>
+    <div style="display:flex;align-items:center;gap:14px">
+      <dc-import name="UsageMini" hint-size="200px,28px"></dc-import>
+      <span style="font:500 10px/1 'JetBrains Mono',ui-monospace,monospace;letter-spacing:.12em;text-transform:uppercase;color:#7a8494;white-space:nowrap">{{ clock }}</span>
+    </div>
+  </nav>
+
+  <main style="max-width:1600px;margin:0 auto;padding:30px 24px 60px;display:flex;flex-direction:column;gap:22px">
+    <div style="display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:20px">
+      <div style="display:flex;flex-direction:column;gap:10px;max-width:760px">
+        <span style="font:500 10px/1 'JetBrains Mono',ui-monospace,monospace;letter-spacing:.2em;text-transform:uppercase;color:#7a8494">Project · {{ project }} · orchestrator.rs</span>
+        <h1 style="margin:0;font:600 38px/1.05 Geist,sans-serif;letter-spacing:-.02em">Decision model</h1>
+        <p style="margin:0;font:400 14px/1.55 Geist,sans-serif;color:#a3acb9;text-wrap:pretty">Every task passes through the same checks, from readiness to the end decision. Each one shows where its task is now, what the orchestrator checked, and which way it went.</p>
+      </div>
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+        <span style="display:flex;align-items:center;gap:7px;font:500 10.5px/1 'JetBrains Mono',ui-monospace,monospace;letter-spacing:.1em;text-transform:uppercase;color:{{ liveColor }};white-space:nowrap"><span style="width:7px;height:7px;border-radius:50%;background:{{ liveColor }}"></span>{{ liveLabel }}</span>
+        <button onClick="{{ toggleLive }}" style="height:32px;padding:0 13px;border-radius:7px;border:1px solid rgba(255,255,255,.14);background:transparent;color:#e6e9ef;font:600 12px/1 Geist,sans-serif;cursor:pointer;white-space:nowrap">{{ liveBtn }}</button>
+        <button onClick="{{ step }}" style="height:32px;padding:0 13px;border-radius:7px;border:1px solid #FF7A1A;background:#FF7A1A;color:#0b0c10;font:600 12px/1 Geist,sans-serif;cursor:pointer;white-space:nowrap">Step one decision →</button>
+      </div>
+    </div>
+
+    <div style="display:flex;flex-wrap:wrap;gap:6px">
+      <sc-for list="{{ summary }}" as="sm" hint-placeholder-count="6">
+        <button onClick="{{ sm.onClick }}" style="display:flex;align-items:center;gap:8px;height:30px;padding:0 11px;border-radius:7px;border:1px solid {{ sm.border }};background:{{ sm.bg }};color:#e6e9ef;font:500 11.5px/1 'JetBrains Mono',ui-monospace,monospace;cursor:pointer;white-space:nowrap"><span style="width:7px;height:7px;border-radius:2px;background:{{ sm.color }}"></span>{{ sm.label }}<span style="color:{{ sm.color }};font-weight:600">{{ sm.n }}</span></button>
+      </sc-for>
+    </div>
+
+    <sc-if value="{{ isEmpty }}" hint-placeholder-val="{{ false }}">
+      <div style="display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:12px;padding:14px 16px;border-radius:12px;border:1px solid rgba(255,122,26,.35);background:rgba(255,122,26,.06)">
+        <span style="font:400 13px/1.5 Geist,sans-serif;color:#d6dde6">No tasks for {{ project }} yet. Tasks you add in its command centre show up here with their decisions.</span>
+        <a href="Agent%20Command%20Centre.dc.html" style="height:32px;display:flex;align-items:center;padding:0 13px;border-radius:7px;background:#FF7A1A;color:#0b0c10;font:600 12px/1 Geist,sans-serif;white-space:nowrap">Open command centre →</a>
+      </div>
+    </sc-if>
+    <div style="border:1px solid rgba(255,255,255,.07);border-radius:14px;background-color:#08090c;background-image:radial-gradient(rgba(255,255,255,.04) 1px, transparent 1px);background-size:22px 22px;overflow-x:auto">
+      <div style="position:relative;min-width:1040px;height:470px">
+        <canvas ref="{{ canvasRef }}" style="position:absolute;inset:0;width:100%;height:100%;display:block"></canvas>
+      </div>
+    </div>
+
+    <div style="display:flex;flex-wrap:wrap;gap:20px;align-items:flex-start">
+      <section style="flex:1 1 320px;min-width:0;display:flex;flex-direction:column;gap:10px">
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;font:600 11px/1 'JetBrains Mono',ui-monospace,monospace;letter-spacing:.14em;text-transform:uppercase">
+          <span style="display:flex;align-items:center;gap:8px;white-space:nowrap"><span style="color:#FF7A1A">◇</span>Tasks by decision point</span>
+          <span style="font-weight:400;letter-spacing:.06em;text-transform:none;color:#7a8494;white-space:nowrap">{{ filterLabel }}</span>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:5px">
+          <sc-for list="{{ taskRows }}" as="t" hint-placeholder-count="10">
+            <button onClick="{{ t.onClick }}" style="display:grid;grid-template-columns:30px 8px minmax(0,1fr) auto;align-items:center;gap:9px;padding:9px 10px;border-radius:8px;border:1px solid {{ t.border }};background:{{ t.bg }};color:#e6e9ef;text-align:left;cursor:pointer">
+              <span style="font:400 10.5px/1 'JetBrains Mono',ui-monospace,monospace;color:#7a8494">{{ t.id }}</span>
+              <span style="width:7px;height:7px;border-radius:50%;background:{{ t.dot }}"></span>
+              <span style="display:flex;flex-direction:column;gap:4px;min-width:0"><span style="font:500 12.5px/1.25 Geist,sans-serif;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ t.title }}</span><span style="font:400 10.5px/1.3 'JetBrains Mono',ui-monospace,monospace;color:#7a8494;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ t.sub }}</span></span>
+              <span style="flex:none;display:inline-flex;align-items:center;height:18px;padding:0 6px;border-radius:4px;font:500 9px/1 'JetBrains Mono',ui-monospace,monospace;letter-spacing:.08em;text-transform:uppercase;white-space:nowrap;color:{{ t.tc }};background:{{ t.tb }};border:1px solid {{ t.td }}">{{ t.node }}</span>
+            </button>
+          </sc-for>
+        </div>
+      </section>
+
+      <section style="flex:1.4 1 420px;min-width:0;display:flex;flex-direction:column;border-radius:14px;border:1px solid rgba(255,255,255,.1);background:rgba(9,11,15,.92);overflow:hidden">
+        <div style="display:flex;align-items:flex-start;gap:12px;padding:16px 18px 14px;border-bottom:1px solid rgba(255,255,255,.07)">
+          <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:7px">
+            <span style="display:flex;align-items:center;gap:7px;font:500 10px/1 'JetBrains Mono',ui-monospace,monospace;letter-spacing:.14em;text-transform:uppercase;color:#7a8494"><span style="width:7px;height:7px;border-radius:50%;background:{{ panel.color }}"></span>{{ panel.kicker }}</span>
+            <span style="font:600 18px/1.25 Geist,sans-serif;word-break:break-word;text-wrap:pretty">{{ panel.title }}</span>
+            <span style="font:400 11px/1.4 'JetBrains Mono',ui-monospace,monospace;color:#7a8494">{{ panel.sub }}</span>
+          </div>
+          <span style="flex:none;display:inline-flex;align-items:center;height:20px;padding:0 7px;border-radius:4px;font:500 9.5px/1 'JetBrains Mono',ui-monospace,monospace;letter-spacing:.08em;text-transform:uppercase;white-space:nowrap;color:{{ panel.tc }};background:{{ panel.tb }};border:1px solid {{ panel.td }}">{{ panel.badge }}</span>
+        </div>
+
+        <div style="margin:14px 18px 4px;padding:14px 16px;border-radius:10px;border:1px solid {{ panel.nowBorder }};background:{{ panel.nowBg }};display:flex;flex-direction:column;gap:8px">
+          <span style="font:600 10px/1 'JetBrains Mono',ui-monospace,monospace;letter-spacing:.16em;text-transform:uppercase;color:{{ panel.nowColor }}">{{ panel.nowKicker }}</span>
+          <span style="font:600 14.5px/1.35 Geist,sans-serif;text-wrap:pretty">{{ panel.question }}</span>
+          <sc-for list="{{ panel.inputs }}" as="in" hint-placeholder-count="3">
+            <div style="display:grid;grid-template-columns:14px minmax(0,1fr);gap:8px;font:400 12px/1.5 'JetBrains Mono',ui-monospace,monospace"><span style="color:{{ in.color }}">{{ in.mark }}</span><span style="color:#d6dde6;word-break:break-word">{{ in.text }}</span></div>
+          </sc-for>
+          <span style="font:400 10.5px/1.3 'JetBrains Mono',ui-monospace,monospace;color:#7a8494">{{ panel.fn }}</span>
+        </div>
+
+        <div style="padding:14px 18px 18px;display:flex;flex-direction:column;gap:0">
+          <span style="font:400 10px/1 'JetBrains Mono',ui-monospace,monospace;letter-spacing:.12em;text-transform:uppercase;color:#7a8494;margin-bottom:10px">{{ panel.listLabel }}</span>
+          <sc-for list="{{ panel.items }}" as="it" hint-placeholder-count="6">
+            <button onClick="{{ it.onClick }}" style="display:grid;grid-template-columns:62px 14px minmax(0,1fr);gap:10px;padding:0;border:0;background:transparent;color:#e6e9ef;text-align:left;cursor:pointer">
+              <span style="font:400 10.5px/1.5 'JetBrains Mono',ui-monospace,monospace;color:#5d6673;padding-top:8px">{{ it.time }}</span>
+              <span style="position:relative;display:flex;justify-content:center"><span style="position:absolute;top:0;bottom:0;width:1px;background:rgba(255,255,255,.08)"></span><span style="position:relative;margin-top:11px;width:9px;height:9px;border-radius:50%;background:{{ it.color }};box-shadow:0 0 0 3px #090b0f"></span></span>
+              <span style="display:flex;flex-direction:column;gap:5px;padding:7px 0 12px;min-width:0">
+                <span style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+                  <span style="display:inline-flex;align-items:center;height:18px;padding:0 6px;border-radius:4px;font:500 9.5px/1 'JetBrains Mono',ui-monospace,monospace;letter-spacing:.08em;text-transform:uppercase;white-space:nowrap;color:#e6e9ef;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1)">{{ it.node }}</span>
+                  <span style="font:500 12.5px/1.3 Geist,sans-serif;color:{{ it.color }}">{{ it.outcome }}</span>
+                </span>
+                <span style="font:400 11.5px/1.5 'JetBrains Mono',ui-monospace,monospace;color:#a3acb9;word-break:break-word">{{ it.input }}</span>
+              </span>
+            </button>
+          </sc-for>
+        </div>
+      </section>
+    </div>
+  </main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script>
+class Component extends DCLogic {
+  A = '#FF7A1A';
+  T = { ok:'#4ade80', warn:'#fbbf24', bad:'#f87171', info:'#38bdf8', idle:'#94a3b8' };
+  PROV = { claude:'#F2A65A', codex:'#5EA8F2', gemini:'#B48CF2', aider:'#4FD1B5' };
+  NODES = {
+    ready:{c:0,r:0,label:'Ready?',q:'Are all depends_on tasks done, and is a worker slot free?',fn:'Orchestrator::tick · max_parallel'},
+    pick:{c:1,r:0,label:'Pick provider',q:'Which provider takes this task?',fn:'pick_provider() · provider_order, skip missing or cooling down'},
+    launch:{c:2,r:0,label:'Launch',q:'Did the worker session start?',fn:'start() · hub.launch(LaunchRequest)'},
+    watch:{c:3,r:0,label:'Watch',q:'What has the worker reported?',fn:'check_running() · $MAP_RESULT_FILE, session state, timeout'},
+    verify:{c:4,r:0,label:'Verify',q:'Does every verify command exit 0?',fn:'finish() · cfg.verify'},
+    audit:{c:5,r:0,label:'Audit',q:'What does the auditor answer?',fn:'audit() → Verdict::Pass | Fail | Unavailable'},
+    post:{c:6,r:0,label:'post_done',q:'Do the post_done hooks pass?',fn:'finish() · cfg.post_done'},
+    end:{c:7,r:0,label:'End decision',q:'Can the worker session be closed?',fn:'detect::end_decision(clients, pane)'},
+    done:{c:8,r:0,label:'Done',terminal:true,q:'Task is done.',fn:'TaskStatus::Done'},
+    blocked:{c:0,r:1.62,label:'Blocked',terminal:true,q:'A dependency failed or was cancelled.',fn:'tick · "Blocked: dependency #n"'},
+    retry:{c:3.5,r:1.62,label:'Retry or fail',q:'Is there an attempt left?',fn:'retry_or_fail() · max_attempts'},
+    failed:{c:6.5,r:1.62,label:'Failed',terminal:true,q:'Task failed. A person decides what next.',fn:'TaskStatus::Failed'},
+  };
+  ORDER = ['ready','pick','launch','watch','verify','audit','post','end','retry','blocked','failed','done'];
+  EDGES = [
+    ['ready','pick','deps done · slot free'],['ready','blocked','dep failed'],['pick','launch','first available'],['launch','watch','started'],['launch','retry','launch error'],
+    ['watch','verify','result: done'],['watch','retry','failed · exited · auth · timeout'],['verify','audit','all pass'],['verify','retry','command failed'],
+    ['audit','post','PASS'],['audit','retry','FAIL'],['post','end','hooks ok'],['post','failed','hook failed'],['end','done','End'],
+    ['retry','ready','attempt left'],['retry','failed','no attempts left'],['retry','watch','person attached'],
+  ];
+  canvasRef = React.createRef(); tok = {}; pulses = []; hover = null; eid = 1;
+  state = this.seed();
+
+  seed() {
+    const now=Date.now(), m=60000; let project='acme-api'; try{ project=localStorage.getItem('map.project')||project; }catch(_){}
+    this.acme = project==='acme-api';
+    const T=(id,title,node,provider,session,x)=>Object.assign({id,title,node,provider,session,attempts:1,deps:[],trace:[],now:null,progress:0},x||{});
+    let saved=null; try{ saved=JSON.parse(localStorage.getItem('map.cc.'+project)||'null'); }catch(_){}
+    let tasks;
+    if (saved && saved.v===1) tasks=this.fromCC(saved);
+    else if (this.acme) tasks=[
+      T(1,'Scaffold auth module','done','claude','map-task-1-1'),
+      T(2,'Add sessions table migration','done','claude','map-task-2-1',{deps:[1]}),
+      T(3,'Rate limit the login endpoint','done','codex','map-task-3-1',{deps:[1]}),
+      T(4,'Refresh token rotation','watch','claude','map-task-4-1',{deps:[2],pinned:'claude',sstate:'working',mins:52}),
+      T(5,'Audit log writer','watch','codex','map-task-5-2',{deps:[2],attempts:2,sstate:'working',mins:21}),
+      T(6,'Password reset flow','watch','claude','map-task-6-1',{deps:[3],sstate:'rate_limited',mins:64}),
+      T(7,'Admin roles API','watch','gemini','map-task-7-1',{deps:[2],sstate:'waiting_input',mins:33}),
+      T(8,'Webhook delivery retries','watch','codex','map-task-8-1',{deps:[2],sstate:'stalled',mins:71}),
+      T(9,'End-to-end auth tests','ready',null,null,{deps:[6,7]}),
+      T(10,'Write the auth guide','ready',null,null,{deps:[9]}),
+      T(11,'Billing usage meter','verify','claude','map-task-11-1',{verified:2}),
+      T(12,'Usage panel in dashboard','ready',null,null,{deps:[11]}),
+      T(13,'Git worktree per task','audit','claude','map-task-13-1'),
+      T(14,'Provider failover on long resets','ready',null,null,{deps:[13]}),
+      T(15,'Fix flaky ws reconnect','failed','codex','map-task-15-2',{attempts:2,pinned:'codex'}),
+      T(16,'Remove legacy v1 routes','blocked',null,null,{deps:[15]}),
+      T(17,'Lint autofix pass','pick',null,null,{pinned:'aider'}),
+    ];
+    else tasks=[];
+    tasks.forEach(t => this.buildTrace(t, now));
+    const counts=this.countEdges(tasks);
+    const first=tasks.find(t=>t.node==='watch')||tasks[0];
+    return {project,tasks,counts,sel:first?{type:'task',id:first.id}:{type:'node',id:'ready'},filter:null,live:true,now};
+  }
+  fromCC(d) {
+    const ses={}; d.sessions.forEach(s=>ses[s.name]=s); const byId={}; d.tasks.forEach(t=>byId[t.id]=t);
+    const map={pending:'ready',running:'watch',verifying:'verify',auditing:'audit',done:'done',failed:'failed'};
+    return d.tasks.filter(t=>t.status!=='cancelled').map(t => { const s=t.session&&ses[t.session]; let node=map[t.status]||'ready';
+      if (node==='ready') { if (t.depends_on.some(x=>byId[x]&&(byId[x].status==='failed'||byId[x].status==='cancelled'))) node='blocked'; else if (t.provider==='aider') node='pick'; }
+      return {id:t.id,title:t.title,node,provider:s?s.provider:(t.ran||t.provider||null),session:t.session,attempts:t.attempts,deps:t.depends_on.slice(),pinned:t.provider,sstate:s?s.state:null,mins:s?Math.max(1,(Date.now()-s.created)/60000):0,trace:[],now:null,progress:0,verified:t.status==='verifying'?1:0};
+    });
+  }
+  countEdges(tasks) {
+    const c={}; this.EDGES.forEach(e=>c[e[0]+'>'+e[1]]=0);
+    tasks.forEach(t => { const tr=[...t.trace].reverse(); for (let i=0;i<tr.length;i++){ const to=i+1<tr.length?tr[i+1].node:t.node; const k=tr[i].node+'>'+to; if(c[k]!=null) c[k]++; } });
+    return c;
+  }
+  buildTrace(t, now) {
+    const m=60000, ok=this.T.ok, bad=this.T.bad, warn=this.T.warn, info=this.T.info;
+    const E=[]; let at=now-(t.mins||40)*m - 26*m;
+    const add=(node,input,outcome,color,gap)=>{ E.push({id:this.eid++,at,node,input,outcome,color}); at+= (gap||2)*m; };
+    const depTxt = t.deps.length ? t.deps.map(d=>'#'+d+' done').join(' · ') : 'no dependencies';
+    const sha = () => Math.floor(Math.random()*0xfffffff).toString(16).padStart(7,'0');
+    const startTo = (prov,sess,skip) => { add('ready',depTxt+' · slot '+(3+Math.floor(Math.random()*4))+'/8','ready → pick provider',ok,0.2); add('pick',(t.pinned?'pinned: '+t.pinned:'order claude → codex → gemini')+(skip?' · '+skip:''),'→ '+prov,ok,0.1); add('launch','hub.launch '+(sess||'map-task-'+t.id+'-'+t.attempts),'session started → watch',ok,(t.mins||30)*0.6); };
+    const finish = (prov,auditor) => { add('watch','$MAP_RESULT_FILE {"status":"done"}','reported done → verify',ok,3); add('verify','bun test ✓ · typecheck ✓ · lint ✓ · build ✓','all exit 0 → audit',ok,4); add('audit','chain gemini → claude → codex','VERDICT: PASS ('+(auditor||'gemini')+') → post_done',ok,1); add('post','git add -A && git commit','committed '+sha()+' → end decision',ok,0.1); add('end','clients 0 · input line empty','EndDecision::End · session closed → done',ok,0); };
+    if (t.node==='done') { startTo(t.provider,t.session); finish(t.provider); }
+    else if (this.acme && t.id===5) { add('ready',depTxt+' · slot 5/8','ready → pick provider',ok,0.2); add('pick','order claude → codex → gemini','→ claude',ok,0.1); add('launch','hub.launch map-task-5-1','session started → watch',ok,14); add('watch','$MAP_RESULT_FILE {"status":"done"}','reported done → verify',ok,2); add('verify','`cargo test audit_log` exit 101 · 1 failing','command failed → retry or fail',bad,0.1); add('retry','attempts 1 of 2 · clients 0','attempt left → back to ready, failure added to prompt',warn,0.2); add('ready',depTxt+' · slot 6/8','ready → pick provider',ok,0.1); add('pick','order claude → codex → gemini · claude cooling down (rate limited)','→ codex (claude skipped)',ok,0.1); add('launch','hub.launch map-task-5-2','session started → watch',ok,0); }
+    else if (this.acme && t.id===15) { add('ready','no dependencies · slot 4/8','ready → pick provider',ok,0.2); add('pick','pinned: codex','→ codex',ok,0.1); add('launch','hub.launch map-task-15-1','session started → watch',ok,9); add('watch','$MAP_RESULT_FILE {"status":"done"}','reported done → verify',ok,2); add('verify','`bun test` · 2 failing in ws.reconnect.test.ts','command failed → retry or fail',bad,0.1); add('retry','attempts 1 of 2','attempt left → back to ready',warn,0.2); add('ready','no dependencies · slot 6/8','ready → pick provider',ok,0.1); add('pick','pinned: codex','→ codex',ok,0.1); add('launch','hub.launch map-task-15-2','session started → watch',ok,8); add('watch','$MAP_RESULT_FILE {"status":"done"}','reported done → verify',ok,2); add('verify','`bun test` · 2 failing in ws.reconnect.test.ts','command failed → retry or fail',bad,0.1); add('retry','attempts 2 of 2','no attempts left → failed',bad,0); }
+    else if (t.node==='failed') { const p=t.provider||'claude'; const n=Math.max(1,t.attempts); for(let a=1;a<=n;a++){ add('ready',(a===1?depTxt:'retry')+' · slot 2/8','ready → pick provider',ok,0.1); add('pick',t.pinned?'pinned: '+t.pinned:'provider order','→ '+p,ok,0.1); add('launch','hub.launch map-task-'+t.id+'-'+a,'session started → watch',ok,8); add('watch','$MAP_RESULT_FILE {"status":"done"}','reported done → verify',ok,2); add('verify','a verify command exited non-zero','command failed → retry or fail',bad,0.1); add('retry','attempts '+a+' of 2',a<n?'attempt left → back to ready':'no attempts left → failed',a<n?warn:bad,0.2); } }
+    else if (t.node==='blocked') { const dd=t.deps[0]; add('ready','dependency #'+dd+' failed','Blocked: dependency #'+dd+' failed',warn,0); }
+    else if (t.node==='pick') { add('ready','no dependencies · slot 6/8','ready → pick provider',ok,0.1); add('pick','pinned: aider · aider not found on PATH','no provider available · waiting',warn,0); }
+    else if (t.node==='ready') { const waiting=t.deps.map(d=>'#'+d+' not done').join(' · '); add('ready',waiting,'waiting on dependencies',this.T.idle,0); }
+    else if (t.node==='verify') { startTo(t.provider||'claude',t.session); add('watch','$MAP_RESULT_FILE {"status":"done"}','reported done → verify',ok,0); }
+    else if (t.node==='audit') { startTo(t.provider||'claude',t.session); add('watch','$MAP_RESULT_FILE {"status":"done"}','reported done → verify',ok,3); add('verify','bun test ✓ · typecheck ✓ · lint ✓ · build ✓','all exit 0 → audit',ok,2); add('audit','gemini: no VERDICT line · cooling down','Unavailable → try next auditor (claude)',warn,0); }
+    else if (t.node==='watch') { startTo(t.provider,t.session,t.id===6?'':''); if(t.sstate==='rate_limited') add('watch','session rate_limited · reset parsed from pane','keep watching · the watcher wakes it at reset',warn,0); }
+    t.trace = E.reverse();
+  }
+
+  nowInfo(t, all) {
+    const st=t.node, ok=this.T.ok, warn=this.T.warn, bad=this.T.bad, idle=this.T.idle, info=this.T.info;
+    const byId = id => all.find(x=>x.id===id);
+    if (st==='ready') return t.deps.map(d => { const x=byId(d); const done=x&&x.node==='done'; return {mark:done?'✓':'…',color:done?ok:idle,text:'#'+d+' '+(x?x.title:'')+' · '+(x?(x.node==='done'?'done':'at '+this.NODES[x.node].label):'missing')}; }).concat([{mark:'·',color:idle,text:'slots '+this.active(all)+' of 8 in use'}]);
+    if (st==='pick') return [{mark:'·',color:idle,text:'pinned to '+t.pinned},{mark:'✕',color:bad,text:t.pinned+' binary not found on PATH'},{mark:'…',color:warn,text:'result: "Waiting: no provider is available"'}];
+    if (st==='watch') {
+      const s=t.sstate; const rows=[{mark:'·',color:idle,text:'session '+t.session+' · '+(s||'working').replace('_',' ')},{mark:'…',color:idle,text:'no $MAP_RESULT_FILE yet'},{mark:'·',color:idle,text:Math.round(t.mins||1)+'m of task_timeout 240m'}];
+      if (s==='rate_limited') rows.push({mark:'!',color:warn,text:'rate limited · the watcher types the wake prompt at reset; the orchestrator keeps waiting'});
+      if (s==='waiting_input') rows.push({mark:'!',color:this.A,text:'agent is asking a question · a person must answer in the session'});
+      if (s==='stalled') rows.push({mark:'!',color:warn,text:'no pane change for 47m · still under the timeout, so no decision yet'});
+      return rows;
+    }
+    if (st==='verify') { const cmds=['bun test','bun run typecheck','bun run lint','bun run build']; return cmds.map((c,i)=>({mark:i<(t.verified||0)?'✓':i===(t.verified||0)?'▸':'·',color:i<(t.verified||0)?ok:i===(t.verified||0)?info:idle,text:c+(i===(t.verified||0)?' · running':'')})); }
+    if (st==='audit') return [{mark:'✕',color:warn,text:'gemini · no VERDICT line, cooling down 30m'},{mark:'▸',color:info,text:'claude · reviewing git diff, git log -5'},{mark:'·',color:idle,text:'codex · next in chain'},{mark:'·',color:idle,text:'audit.required = false'}];
+    if (st==='post') return [{mark:'▸',color:info,text:'git add -A && git commit -m "Task '+t.id+': '+t.title+'"'}];
+    if (st==='end') return [{mark:'·',color:idle,text:'tmux clients attached: 0'},{mark:'·',color:idle,text:'input line: empty'}];
+    if (st==='retry') return [{mark:'·',color:idle,text:'attempts '+t.attempts+' of 2'}];
+    if (st==='blocked') return [{mark:'✕',color:bad,text:'dependency #'+t.deps[0]+' failed or was cancelled'},{mark:'·',color:idle,text:'retry #'+t.deps[0]+' to unblock'}];
+    if (st==='failed') return [{mark:'✕',color:bad,text:'attempts '+t.attempts+' of 2 used'},{mark:'·',color:idle,text:(t.trace[0]||{}).input||''}];
+    return [{mark:'✓',color:ok,text:(t.trace.find(e=>e.node==='post')||{}).outcome||'done'}];
+  }
+  active(all) { return all.filter(t=>['launch','watch','verify','audit','post','end'].includes(t.node)).length; }
+
+  componentDidMount() {
+    const cv=this.canvasRef.current; this.cv=cv; this.ctx=cv.getContext('2d');
+    const resize=()=>{ const r=cv.parentElement.getBoundingClientRect(); this.dpr=Math.min(2,window.devicePixelRatio||1); this.W=r.width; this.H=r.height; cv.width=Math.round(r.width*this.dpr); cv.height=Math.round(r.height*this.dpr); };
+    this.ro=new ResizeObserver(resize); this.ro.observe(cv.parentElement); resize();
+    cv.addEventListener('pointermove', e => { const r=cv.getBoundingClientRect(); this.hover=this.hit(e.clientX-r.left,e.clientY-r.top); cv.style.cursor=this.hover?'pointer':'default'; });
+    cv.addEventListener('pointerleave', () => { this.hover=null; });
+    cv.addEventListener('click', e => { const r=cv.getBoundingClientRect(); const h=this.hit(e.clientX-r.left,e.clientY-r.top); if(h) this.setState({sel:h}); });
+    this.frame = time => { this.raf=requestAnimationFrame(this.frame); if(!this.W||!this.H) resize(); if(this.W) this.draw(time); };
+    this.raf=requestAnimationFrame(this.frame);
+    this.clk=setInterval(()=>this.setState({now:Date.now()}),1000);
+    this.sim=setInterval(()=>{ if(this.state.live) this.tick(); },2800);
+  }
+  componentWillUnmount() { cancelAnimationFrame(this.raf); clearInterval(this.clk); clearInterval(this.sim); if(this.ro) this.ro.disconnect(); }
+
+  tick() {
+    const now=Date.now(), ok=this.T.ok, bad=this.T.bad, warn=this.T.warn;
+    let fired=null;
+    this.setState(s => {
+      const tasks=s.tasks.map(t=>Object.assign({},t)); const counts=Object.assign({},s.counts);
+      const move=(t,to,input,outcome,color)=>{ const from=t.node; t.trace=[{id:this.eid++,at:now,node:from,input,outcome,color}].concat(t.trace); t.node=to; const k=from+'>'+to; if(counts[k]!=null) counts[k]++; fired={k,id:t.id}; };
+      tasks.forEach(t=>{ if(t.node==='watch') t.mins=(t.mins||0)+0.05; if(t.sstate==='rate_limited'&&Math.random()<.08){ t.sstate='working'; t.trace=[{id:this.eid++,at:now,node:'watch',input:'watcher: rate limit reset, wake prompt typed',outcome:'session working again · keep watching',color:ok}].concat(t.trace); } });
+      const cands=[];
+      tasks.forEach(t=>{
+        if (t.node==='watch' && t.sstate==='working' && (t.mins||0)>2) cands.push(()=>move(t,'verify','$MAP_RESULT_FILE {"status":"done","summary":"…"}','reported done → verify',ok));
+        if (t.node==='verify') cands.push(()=>{ t.verified=(t.verified||0)+1; if(t.verified>=4){ if(Math.random()<.15){ t.verified=0; move(t,'retry','`bun run lint` exit 1 · 3 problems','command failed → retry or fail',bad); } else { t.verified=0; move(t,'audit','bun test ✓ · typecheck ✓ · lint ✓ · build ✓','all exit 0 → audit',ok); } } else { t.trace=[{id:this.eid++,at:now,node:'verify',input:['bun test','bun run typecheck','bun run lint','bun run build'][t.verified-1]+' exit 0',outcome:'pass · next command',color:ok}].concat(t.trace); fired={k:null,id:t.id}; } });
+        if (t.node==='audit') cands.push(()=>move(t,'post','claude: VERDICT: PASS','PASS (claude) → post_done',ok));
+        if (t.node==='post') cands.push(()=>move(t,'end','git add -A && git commit','committed '+Math.floor(Math.random()*0xfffffff).toString(16).padStart(7,'0')+' → end decision',ok));
+        if (t.node==='end') cands.push(()=>move(t,'done','clients 0 · input line empty','EndDecision::End · session closed → done',ok));
+        if (t.node==='retry') cands.push(()=>{ if(t.attempts<2){ move(t,'ready','attempts '+t.attempts+' of 2','attempt left → back to ready, failure added to prompt',warn); } else move(t,'failed','attempts 2 of 2','no attempts left → failed',bad); });
+        if (t.node==='ready' && t.deps.every(d=>(tasks.find(x=>x.id===d)||{}).node==='done') && this.active(tasks)<8) cands.push(()=>move(t,'pick',t.deps.map(d=>'#'+d+' done').join(' · ')+' · slot '+this.active(tasks)+'/8','ready → pick provider',ok));
+        if (t.node==='pick' && !t.pinned) cands.push(()=>{ t.provider='codex'; move(t,'launch','order claude → codex → gemini · claude cooling down','→ codex (claude skipped)',ok); });
+        if (t.node==='launch') cands.push(()=>{ t.attempts = t.session ? t.attempts+1 : t.attempts; t.session='map-task-'+t.id+'-'+t.attempts; t.sstate='working'; t.mins=0; move(t,'watch','hub.launch '+t.session,'session started → watch',ok); });
+      });
+      if (cands.length) cands[Math.floor(Math.random()*cands.length)]();
+      return {tasks,counts,now};
+    }, () => { if(fired && fired.k) this.pulses.push({k:fired.k,t0:performance.now()}); });
+  }
+
+  geo() {
+    const W=this.W, nodeW=Math.min(124,(W-48)/9-12), nodeH=66, step=(W-48-nodeW)/8;
+    const pos={}; for (const k in this.NODES){ const n=this.NODES[k]; const x=24+n.c*step, y=46+n.r*140; pos[k]={x,y,w:nodeW,h:nodeH,cx:x+nodeW/2,cy:y+nodeH/2}; }
+    return {pos,nodeW,nodeH};
+  }
+  anchors(a,b,pos) {
+    const A=pos[a], B=pos[b], na=this.NODES[a], nb=this.NODES[b];
+    if (na.r===nb.r) return {p0:[A.x+A.w,A.cy],p3:[B.x,B.cy],h:true};
+    if (a==='retry'&&b==='ready') return {p0:[A.x,A.cy],p3:[B.cx+10,B.y+B.h],h:false,c1:[A.x-120,A.cy],c2:[B.cx+10,B.y+B.h+60]};
+    if (a==='retry'&&b==='watch') return {p0:[A.cx-18,A.y],p3:[B.cx+14,B.y+B.h],h:false};
+    if (a==='retry'&&b==='failed') return {p0:[A.x+A.w,A.cy],p3:[B.x,B.cy],h:true};
+    const off={launch:6,watch:-14,verify:0,audit:0,post:0,ready:-10}[a]||0;
+    return {p0:[A.cx+off,A.y+A.h],p3:[B.cx+(a==='launch'?-30:a==='watch'?-6:a==='verify'?14:a==='audit'?30:0),B.y],h:false};
+  }
+  bez(g,t) { const p0=g.p0,p3=g.p3; const c1=g.c1||(g.h?[(p0[0]+p3[0])/2,p0[1]]:[p0[0],(p0[1]+p3[1])/2]); const c2=g.c2||(g.h?[(p0[0]+p3[0])/2,p3[1]]:[p3[0],(p0[1]+p3[1])/2]); const u=1-t; return [u*u*u*p0[0]+3*u*u*t*c1[0]+3*u*t*t*c2[0]+t*t*t*p3[0], u*u*u*p0[1]+3*u*u*t*c1[1]+3*u*t*t*c2[1]+t*t*t*p3[1], c1, c2]; }
+
+  projList() { let c=[]; try{ c=JSON.parse(localStorage.getItem('map.projects.custom')||'[]'); }catch(_){} const base=[['acme-api','#4ade80'],['mcp-generator','#4ade80'],['daily-news','#4ade80'],['trading-telegram-executor','#fbbf24'],['franchise-management','#5d6673']]; return base.concat(c.filter(x=>!base.some(b=>b[0]===x.name)).map(x=>[x.name,'#5d6673'])); }
+  dropVals(cur, onPick) { const st=this.state; return { projectName:cur, projMenu:!!st.projMenu, toggleProjMenu:()=>this.setState({projMenu:!st.projMenu}), closeProjMenu:()=>this.setState({projMenu:false}), projItems:this.projList().map(x=>({name:x[0],dot:x[1],mark:x[0]===cur?'✓':'',bg:x[0]===cur?'rgba(255,122,26,.1)':'transparent',onClick:()=>{ try{ localStorage.setItem('map.project',x[0]); }catch(_){} if(onPick) onPick(x[0]); else window.location.reload(); }})) }; }
+
+  rgba(hex,a) { const v=parseInt(hex.slice(1),16); return 'rgba('+((v>>16)&255)+','+((v>>8)&255)+','+(v&255)+','+Math.max(0,Math.min(1,a)).toFixed(3)+')'; }
+  rr(ctx,x,y,w,h,r){ ctx.beginPath(); ctx.moveTo(x+r,y); ctx.arcTo(x+w,y,x+w,y+h,r); ctx.arcTo(x+w,y+h,x,y+h,r); ctx.arcTo(x,y+h,x,y,r); ctx.arcTo(x,y,x+w,y,r); ctx.closePath(); }
+  nodeColor(k) { return k==='done'?this.A:k==='failed'?this.T.bad:k==='blocked'?this.T.warn:k==='retry'?this.T.warn:'#d6dde6'; }
+
+  hit(mx,my) {
+    for (const id in this.tok) { const p=this.tok[id]; if (Math.hypot(p.x-mx,p.y-my)<8) return {type:'task',id:+id}; }
+    if (!this.W) return null; const {pos}=this.geo();
+    for (const k in pos) { const p=pos[k]; if (mx>=p.x&&mx<=p.x+p.w&&my>=p.y&&my<=p.y+p.h) return {type:'node',id:k}; }
+    return null;
+  }
+
+  draw(time) {
+    const ctx=this.ctx, W=this.W, H=this.H, st=this.state, A=this.A, T=this.T;
+    ctx.setTransform(this.dpr,0,0,this.dpr,0,0); ctx.clearRect(0,0,W,H);
+    const {pos,nodeW,nodeH}=this.geo(); const mono=(s,w)=>(w||500)+' '+s+'px "JetBrains Mono", ui-monospace, monospace';
+    const selTask = st.sel&&st.sel.type==='task' ? st.tasks.find(t=>t.id===st.sel.id) : null;
+    const selNode = st.sel&&st.sel.type==='node' ? st.sel.id : null;
+    const path = new Set(); if (selTask) { const tr=[...selTask.trace].reverse(); for (let i=0;i<tr.length;i++){ const nx = i+1<tr.length ? tr[i+1].node : selTask.node; if(tr[i].node!==nx) path.add(tr[i].node+'>'+nx); } }
+    const here = {}; st.tasks.forEach(t => { (here[t.node]=here[t.node]||[]).push(t); });
+    for (const e of this.EDGES) {
+      const k=e[0]+'>'+e[1], g=this.anchors(e[0],e[1],pos); const n=st.counts[k]||0; const onPath=path.has(k), nodeHl=selNode&&(e[0]===selNode||e[1]===selNode);
+      const fail = e[1]==='retry'||e[1]==='failed'||e[1]==='blocked';
+      const col = onPath ? A : fail ? T.bad : '#ffffff';
+      const al = onPath ? .95 : nodeHl ? .6 : n ? (fail ? .35 : .28) : .1;
+      const m1=this.bez(g,0.5);
+      ctx.beginPath(); ctx.moveTo(g.p0[0],g.p0[1]); const cc=this.bez(g,0); ctx.bezierCurveTo(cc[2][0],cc[2][1],cc[3][0],cc[3][1],g.p3[0],g.p3[1]);
+      ctx.strokeStyle=this.rgba(col,al); ctx.lineWidth=onPath?2:1.2; if(!n&&!onPath) ctx.setLineDash([3,4]); ctx.stroke(); ctx.setLineDash([]);
+      const pe=this.bez(g,.97), ang=Math.atan2(g.p3[1]-pe[1],g.p3[0]-pe[0]);
+      ctx.beginPath(); ctx.moveTo(g.p3[0],g.p3[1]); ctx.lineTo(g.p3[0]-7*Math.cos(ang-.45),g.p3[1]-7*Math.sin(ang-.45)); ctx.lineTo(g.p3[0]-7*Math.cos(ang+.45),g.p3[1]-7*Math.sin(ang+.45)); ctx.closePath(); ctx.fillStyle=this.rgba(col,Math.min(1,al+.2)); ctx.fill();
+      const lbl=e[2]; ctx.font=mono(9); const tw=ctx.measureText(lbl).width; const cnt='×'+n; ctx.font=mono(9,600); const cw=ctx.measureText(cnt).width;
+      let lx=m1[0], ly=m1[1]+(g.h?-10:0);
+      if (e[0]==='retry'&&e[1]==='ready') { lx=pos.retry.x-150; ly=pos.retry.cy+20; }
+      if (e[0]==='retry'&&e[1]==='watch') { lx=m1[0]-34; }
+      const bw=tw+cw+20; ctx.fillStyle='rgba(8,9,12,.92)'; this.rr(ctx,lx-bw/2,ly-8,bw,16,4); ctx.fill();
+      ctx.textAlign='left'; ctx.font=mono(9); ctx.fillStyle=onPath?'#ffb37a':'rgba(163,172,185,'+(n||onPath?.95:.55)+')'; ctx.fillText(lbl,lx-bw/2+6,ly+3);
+      ctx.font=mono(9,600); ctx.fillStyle=onPath?A:fail&&n?T.bad:n?'#e6e9ef':'#5d6673'; ctx.fillText(cnt,lx+bw/2-cw-6,ly+3);
+    }
+    const tnow=performance.now(); this.pulses=this.pulses.filter(p=>tnow-p.t0<1100);
+    for (const p of this.pulses) { const e=p.k.split('>'); const g=this.anchors(e[0],e[1],pos); const t=Math.min(1,(tnow-p.t0)/1000); const q=this.bez(g,t); ctx.shadowColor=A; ctx.shadowBlur=14; ctx.fillStyle=A; ctx.beginPath(); ctx.arc(q[0],q[1],4,0,7); ctx.fill(); ctx.shadowBlur=0; }
+    for (const k in this.NODES) {
+      const n=this.NODES[k], p=pos[k], list=here[k]||[]; const isSel=selNode===k, onTask=selTask&&selTask.node===k, hov=this.hover&&this.hover.type==='node'&&this.hover.id===k;
+      const col=this.nodeColor(k);
+      this.rr(ctx,p.x,p.y,p.w,p.h,n.terminal?p.h/2:10);
+      ctx.fillStyle = k==='done'?'rgba(255,122,26,.12)':k==='failed'?'rgba(248,113,113,.1)':k==='blocked'?'rgba(251,191,36,.08)':'rgba(12,14,19,.96)'; ctx.fill();
+      if (onTask||isSel) { ctx.shadowColor=A; ctx.shadowBlur=18; }
+      ctx.strokeStyle = onTask||isSel ? A : hov ? 'rgba(255,255,255,.5)' : list.length ? this.rgba(col,.55) : 'rgba(255,255,255,.14)'; ctx.lineWidth=onTask||isSel?2:1.2; ctx.stroke(); ctx.shadowBlur=0;
+      ctx.textAlign='left'; ctx.font='600 12.5px Geist, sans-serif'; ctx.fillStyle=k==='done'?'#ffb37a':k==='failed'?T.bad:k==='blocked'?T.warn:'#e6e9ef'; ctx.fillText(n.label,p.x+12,p.y+22);
+      ctx.font=mono(8.5); ctx.fillStyle='#7a8494'; const fn=n.fn.split(' ·')[0]; ctx.fillText(fn.length>18?fn.slice(0,17)+'…':fn,p.x+12,p.y+38);
+      ctx.textAlign='right'; ctx.font=mono(17,600); ctx.fillStyle=list.length?(k==='done'?A:k==='failed'?T.bad:'#e6e9ef'):'#3a404b'; ctx.fillText(String(list.length),p.x+p.w-10,p.y+p.h-12);
+      list.sort((a,b)=>a.id-b.id).forEach((t,i) => {
+        const perRow=Math.max(3,Math.floor((p.w-16)/15)); const tx=p.x+12+(i%perRow)*15, ty=p.y+p.h+14+Math.floor(i/perRow)*15;
+        const o=this.tok[t.id]||(this.tok[t.id]={x:tx,y:ty}); o.x+=(tx-o.x)*.12; o.y+=(ty-o.y)*.12;
+        const c=t.provider?this.PROV[t.provider]:'#8b95a5'; const s=selTask&&selTask.id===t.id, h=this.hover&&this.hover.type==='task'&&this.hover.id===t.id;
+        ctx.beginPath(); ctx.moveTo(o.x,o.y-5); ctx.lineTo(o.x+5,o.y); ctx.lineTo(o.x,o.y+5); ctx.lineTo(o.x-5,o.y); ctx.closePath(); ctx.fillStyle=t.provider?c:'transparent'; ctx.fill(); ctx.strokeStyle=c; ctx.lineWidth=1.2; ctx.stroke();
+        if (t.sstate&&t.sstate!=='working'&&t.node==='watch') { ctx.strokeStyle=t.sstate==='waiting_input'?A:T.warn; ctx.setLineDash([2,2]); ctx.beginPath(); ctx.arc(o.x,o.y,8,0,7); ctx.stroke(); ctx.setLineDash([]); }
+        if (s||h) { ctx.strokeStyle=A; ctx.lineWidth=1.5; ctx.beginPath(); ctx.arc(o.x,o.y,9.5,0,7); ctx.stroke(); ctx.textAlign='left'; ctx.font=mono(10,600); const lab='#'+t.id; const lw=ctx.measureText(lab).width; ctx.fillStyle='rgba(0,0,0,.85)'; this.rr(ctx,o.x+11,o.y-8,lw+10,16,3); ctx.fill(); ctx.fillStyle='#ffb37a'; ctx.fillText(lab,o.x+16,o.y+4); }
+      });
+    }
+    ctx.textAlign='left'; ctx.font=mono(9); if('letterSpacing' in ctx) ctx.letterSpacing='2px'; ctx.fillStyle='#5d6673';
+    ctx.fillText('HAPPY PATH →',24,24); ctx.fillText('RECOVERY',24,pos.retry.y-14+0); if('letterSpacing' in ctx) ctx.letterSpacing='0px';
+    ctx.textAlign='right'; ctx.font=mono(9); ctx.fillStyle='#5d6673'; ctx.fillText('◆ task, colour = provider · ◇ not assigned · dashed ring = needs attention · ×n = times taken today',W-24,H-14);
+  }
+
+  renderVals() {
+    const st=this.state, A=this.A, T=this.T, now=st.now;
+    const tone = c => ({tc:c,tb:this.rgba(c,.1),td:this.rgba(c,.35)});
+    const nodeTone = k => k==='done'?A:k==='failed'?T.bad:k==='blocked'||k==='retry'?T.warn:k==='watch'?T.ok:k==='verify'||k==='audit'?T.info:k==='pick'||k==='ready'?T.idle:'#d6dde6';
+    const hms = t => new Date(t).toTimeString().slice(0,8);
+    const groups = ['watch','verify','audit','pick','ready','retry','blocked','failed','done'];
+    const summary = groups.map(k => { const n=st.tasks.filter(t=>t.node===k).length; const c=nodeTone(k); const on=st.filter===k; return {label:this.NODES[k].label,n:String(n),color:c,onClick:()=>this.setState({filter:on?null:k,sel:{type:'node',id:k}}),border:on?c:'rgba(255,255,255,.1)',bg:on?this.rgba(c,.12):'transparent'}; });
+    const order = k => { const i=this.ORDER.indexOf(k); return i<0?99:i; };
+    const rows = st.tasks.filter(t=>!st.filter||t.node===st.filter).sort((a,b)=>order(b.node)-order(a.node)||a.id-b.id);
+    const sub = t => t.node==='watch' ? (t.session+' · '+(t.sstate||'working').replace('_',' ')) : t.node==='ready' ? 'waiting on '+t.deps.map(d=>'#'+d).join(', ') : t.node==='pick' ? 'pinned '+t.pinned+' · not available' : t.node==='blocked' ? 'dependency #'+t.deps[0]+' failed' : t.node==='failed' ? 'attempts '+t.attempts+'/2' : (t.session||'')+(t.provider?' · '+t.provider:'');
+    const taskRows = rows.map(t => { const s=st.sel&&st.sel.type==='task'&&st.sel.id===t.id; return Object.assign({id:'#'+t.id,title:t.title,sub:sub(t),node:this.NODES[t.node].label,dot:t.provider?this.PROV[t.provider]:'#5d6673',onClick:()=>this.setState({sel:{type:'task',id:t.id}}),border:s?'rgba(255,122,26,.5)':'rgba(255,255,255,.05)',bg:s?'rgba(255,122,26,.07)':'rgba(255,255,255,.015)'},tone(nodeTone(t.node))); });
+    let panel;
+    if (st.sel && st.sel.type==='task') {
+      const t=st.tasks.find(x=>x.id===st.sel.id)||st.tasks[0]; const n=this.NODES[t.node]; const c=nodeTone(t.node);
+      panel = Object.assign({kicker:'task #'+t.id+(t.provider?' · '+t.provider:'')+' · attempt '+t.attempts,title:t.title,sub:(t.session||'no session yet')+(t.deps.length?' · after '+t.deps.map(d=>'#'+d).join(', '):''),color:t.provider?this.PROV[t.provider]:'#8b95a5',badge:'at '+n.label,
+        nowKicker:n.terminal?'outcome':'now deciding · '+n.label,question:n.q,inputs:this.nowInfo(t,st.tasks),fn:n.fn,nowBorder:this.rgba(c,.4),nowBg:this.rgba(c,.06),nowColor:c,
+        listLabel:'decision trace · newest first',items:t.trace.map(e=>({time:hms(e.at),node:this.NODES[e.node].label,outcome:e.outcome,input:e.input,color:e.color,onClick:()=>this.setState({sel:{type:'node',id:e.node}})}))},tone(c));
+    } else {
+      const k=(st.sel&&st.sel.id)||'watch'; const n=this.NODES[k]; const c=nodeTone(k); const list=st.tasks.filter(t=>t.node===k);
+      const outs=this.EDGES.filter(e=>e[0]===k).map(e=>({mark:'→',color:(e[1]==='retry'||e[1]==='failed'||e[1]==='blocked')?T.bad:T.ok,text:e[2]+' → '+this.NODES[e[1]].label+' · ×'+(st.counts[e[0]+'>'+e[1]]||0)+' today'}));
+      const ins=this.EDGES.filter(e=>e[1]===k).map(e=>this.NODES[e[0]].label).join(', ');
+      panel = Object.assign({kicker:'decision point',title:n.label,sub:n.fn,color:c,badge:list.length+' here',nowKicker:'rule',question:n.q,inputs:outs.length?outs:[{mark:'·',color:T.idle,text:'terminal state · arrives from '+ins}],fn:'arrives from: '+(ins||'new tasks'),nowBorder:this.rgba(c,.4),nowBg:this.rgba(c,.06),nowColor:c,
+        listLabel:list.length?'tasks here now':'no tasks here right now',items:list.map(t=>({time:'#'+t.id,node:t.provider||'unassigned',outcome:t.title,input:sub(t),color:t.provider?this.PROV[t.provider]:'#8b95a5',onClick:()=>this.setState({sel:{type:'task',id:t.id}})}))},tone(c));
+    }
+    const d=new Date(now);
+    return {
+      project:st.project, isEmpty:!st.tasks.length, ...this.dropVals(st.project), clock:String(d.getDate()).padStart(2,'0')+'.'+String(d.getMonth()+1).padStart(2,'0')+' '+d.toTimeString().slice(0,8),
+      canvasRef:this.canvasRef, liveColor:st.live?T.ok:T.idle, liveLabel:st.live?'live · tick 5s':'paused',
+      toggleLive:()=>this.setState({live:!st.live}), liveBtn:st.live?'❚❚ Pause':'▶ Resume', step:()=>this.tick(),
+      summary, taskRows, filterLabel:st.filter?'only '+this.NODES[st.filter].label+' · click again to clear':st.tasks.length+' tasks', panel,
+    };
+  }
+}
+</script>
+</body>
+</html>

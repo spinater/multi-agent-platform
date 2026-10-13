@@ -1,0 +1,1208 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+html,body{margin:0;background:#07080a;color:#e6e9ef;font-family:Geist,ui-sans-serif,system-ui,sans-serif;-webkit-font-smoothing:antialiased}
+*{box-sizing:border-box}
+a{color:#ff9a4d;text-decoration:none}a:hover{color:#ffbd8a}
+button,input,textarea{font-family:inherit}
+::-webkit-scrollbar{width:8px;height:8px}::-webkit-scrollbar-thumb{background:#1b1f27;border-radius:4px}::-webkit-scrollbar-track{background:transparent}
+input::placeholder,textarea::placeholder{color:#5d6673}
+</style>
+</helmet>
+<div style="min-height:100vh;display:flex;flex-direction:column;background:radial-gradient(1400px 800px at 55% 40%, #10131b 0%, #07080a 65%);color:#e6e9ef">
+
+  <div style="display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px 20px;padding:0 20px;min-height:34px;padding-top:6px;padding-bottom:6px;border-bottom:1px solid rgba(255,255,255,.06);font:500 10px/1.3 'JetBrains Mono',ui-monospace,monospace;letter-spacing:.1em;white-space:nowrap;text-transform:uppercase;color:#7a8494">
+    <div style="display:flex;flex-wrap:wrap;gap:6px 18px;align-items:center">
+      <a href="Projects.dc.html" style="display:flex;align-items:center;gap:7px;font:700 14px/1 Geist,sans-serif;letter-spacing:.08em;text-transform:none;color:#e6e9ef"><span style="color:#FF7A1A">⬡</span>MAP</a>
+      <div style="position:relative;letter-spacing:0;text-transform:none">
+        <button onClick="{{ toggleProjMenu }}" style="display:flex;align-items:center;gap:8px;height:28px;padding:0 10px;border-radius:7px;border:1px solid rgba(255,255,255,.12);background:transparent;font:500 11.5px/1 'JetBrains Mono',ui-monospace,monospace;color:#e6e9ef;white-space:nowrap;cursor:pointer"><span style="width:6px;height:6px;border-radius:50%;background:#FF7A1A"></span>{{ projectName }}<span style="color:#7a8494">▾</span></button>
+        <sc-if value="{{ projMenu }}" hint-placeholder-val="{{ false }}">
+          <div onClick="{{ closeProjMenu }}" style="position:fixed;inset:0;z-index:60"></div>
+          <div style="position:absolute;top:34px;left:0;z-index:61;width:290px;padding:6px;border-radius:10px;border:1px solid rgba(255,255,255,.12);background:#0c0e13;box-shadow:0 20px 50px rgba(0,0,0,.6);display:flex;flex-direction:column;gap:2px">
+            <span style="padding:8px 10px 6px;font:500 10px/1 'JetBrains Mono',ui-monospace,monospace;letter-spacing:.14em;text-transform:uppercase;color:#7a8494">Switch project</span>
+            <sc-for list="{{ projItems }}" as="pi" hint-placeholder-count="5">
+              <button onClick="{{ pi.onClick }}" style="display:flex;align-items:center;gap:10px;padding:9px 10px;border-radius:7px;border:0;background:{{ pi.bg }};color:#e6e9ef;text-align:left;cursor:pointer;font:500 12.5px/1.2 'JetBrains Mono',ui-monospace,monospace" style-hover="background:rgba(255,255,255,.05)"><span style="flex:none;width:6px;height:6px;border-radius:50%;background:{{ pi.dot }}"></span><span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ pi.name }}</span><span style="color:#FF7A1A">{{ pi.mark }}</span></button>
+            </sc-for>
+            <div style="height:1px;background:rgba(255,255,255,.08);margin:4px 0"></div>
+            <a href="Projects.dc.html" style="padding:9px 10px;border-radius:7px;font:500 12.5px/1 Geist,sans-serif;color:#c5ccd6" style-hover="background:rgba(255,255,255,.05);color:#e6e9ef">All projects</a>
+            <a href="Projects.dc.html?new=1" style="padding:9px 10px;border-radius:7px;font:500 12.5px/1 Geist,sans-serif;color:#ffb37a" style-hover="background:rgba(255,122,26,.1)">+ New project</a>
+          </div>
+        </sc-if>
+      </div>
+      <div style="display:flex;gap:2px;flex:none;flex-wrap:nowrap;letter-spacing:0;text-transform:none">
+        <a href="Projects.dc.html" style="height:28px;display:flex;align-items:center;padding:0 10px;border-radius:6px;color:#c5ccd6;font:500 12px/1 Geist,sans-serif" style-hover="background:rgba(255,255,255,.05);color:#e6e9ef">Projects</a>
+        <a href="Agent%20Command%20Centre.dc.html" style="height:28px;display:flex;align-items:center;padding:0 10px;border-radius:6px;background:rgba(255,122,26,.12);color:#ffb37a;font:500 12px/1 Geist,sans-serif">Command centre</a>
+        <a href="Skills.dc.html" style="height:28px;display:flex;align-items:center;padding:0 10px;border-radius:6px;color:#c5ccd6;font:500 12px/1 Geist,sans-serif" style-hover="background:rgba(255,255,255,.05);color:#e6e9ef">Skills</a>
+        <a href="Decisions.dc.html" style="height:28px;display:flex;align-items:center;padding:0 10px;border-radius:6px;color:#c5ccd6;font:500 12px/1 Geist,sans-serif" style-hover="background:rgba(255,255,255,.05);color:#e6e9ef">Decisions</a>
+        <a href="Reflex.dc.html" style="height:28px;display:flex;align-items:center;padding:0 10px;border-radius:6px;color:#c5ccd6;font:500 12px/1 Geist,sans-serif;white-space:nowrap" style-hover="background:rgba(255,255,255,.05);color:#e6e9ef">Reflex</a>
+        <a href="Usage.dc.html" style="height:28px;display:flex;align-items:center;padding:0 10px;border-radius:6px;color:#c5ccd6;font:500 12px/1 Geist,sans-serif;white-space:nowrap" style-hover="background:rgba(255,255,255,.05);color:#e6e9ef">Usage</a>
+      </div>
+      <span style="display:flex;align-items:center;gap:7px"><span style="width:6px;height:6px;border-radius:50%;background:{{ orchDot }}"></span>core · {{ orchWord }}</span>
+      <span style="display:flex;align-items:center;gap:7px"><span style="width:6px;height:6px;border-radius:50%;background:#4ade80"></span>watcher · 5s</span>
+      <span style="display:flex;align-items:center;gap:7px"><span style="width:6px;height:6px;border-radius:50%;background:#4ade80"></span>ws · live</span>
+      <span>sqlite · .map/map.db</span>
+    </div>
+    <div style="display:flex;gap:18px;flex-wrap:wrap;align-items:center"><dc-import name="UsageMini" hint-size="200px,28px"></dc-import><span>workspace · ~/code/{{ projectName }}</span><span style="color:#e6e9ef">{{ clock }}</span></div>
+  </div>
+
+  <div style="flex:1;display:flex;flex-wrap:wrap;min-height:0">
+
+    <sc-if value="{{ showSides }}" hint-placeholder-val="{{ true }}">
+      <aside style="flex:1 1 300px;max-width:100%;height:calc(100vh - 46px);overflow:auto;border-right:1px solid rgba(255,255,255,.06);padding:20px 20px 28px;display:flex;flex-direction:column;gap:28px">
+        <sc-if value="{{ isAll }}" hint-placeholder-val="{{ false }}">
+        <section style="display:flex;flex-direction:column;gap:14px">
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;font:600 11px/1 'JetBrains Mono',ui-monospace,monospace;letter-spacing:.14em;text-transform:uppercase;color:#e6e9ef">
+            <span style="display:flex;align-items:center;gap:8px;white-space:nowrap"><span style="color:#FF7A1A;font-size:13px">◎</span>All projects</span>
+            <span style="font-weight:400;letter-spacing:.06em;text-transform:none;color:#7a8494;white-space:nowrap">{{ allMeta }}</span>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:8px">
+            <span style="font:600 36px/1 Geist,sans-serif;letter-spacing:-.02em;color:#FF7A1A">{{ allBig }}</span>
+            <span style="font:400 10.5px/1.4 'JetBrains Mono',ui-monospace,monospace;color:#7a8494;letter-spacing:.04em">read-only overview · open a project to act</span>
+          </div>
+          <div style="display:flex;flex-direction:column;border:1px solid rgba(255,255,255,.07);border-radius:10px;overflow:hidden">
+            <sc-for list="{{ projRows }}" as="pr" hint-placeholder-count="5">
+              <div onClick="{{ pr.onClick }}" style="display:grid;grid-template-columns:8px minmax(0,1fr) auto;align-items:center;gap:10px;padding:10px 12px;background:{{ pr.bg }};border-bottom:1px solid rgba(255,255,255,.05);cursor:pointer">
+                <span style="width:8px;height:8px;border-radius:50%;background:{{ pr.color }}"></span>
+                <span style="display:flex;flex-direction:column;gap:4px;min-width:0">
+                  <span style="display:flex;align-items:center;gap:8px;min-width:0"><span style="font:500 13px/1.1 Geist,sans-serif;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ pr.name }}</span><span style="flex:none;display:inline-flex;align-items:center;height:16px;padding:0 5px;border-radius:4px;font:500 9px/1 'JetBrains Mono',ui-monospace,monospace;letter-spacing:.08em;text-transform:uppercase;white-space:nowrap;color:{{ pr.tc }};background:{{ pr.tb }};border:1px solid {{ pr.td }}">{{ pr.state }}</span></span>
+                  <span style="font:400 10.5px/1.2 'JetBrains Mono',ui-monospace,monospace;color:#7a8494;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ pr.sub }}</span>
+                </span>
+                <button onClick="{{ pr.onOpen }}" style="height:24px;padding:0 9px;border-radius:5px;border:1px solid rgba(255,255,255,.16);background:transparent;color:#e6e9ef;font:600 11px/1 Geist,sans-serif;cursor:pointer;white-space:nowrap">Open →</button>
+              </div>
+            </sc-for>
+          </div>
+        </section>
+      </sc-if>
+      <sc-if value="{{ notAll }}" hint-placeholder-val="{{ true }}">
+        <section style="display:flex;flex-direction:column;gap:14px">
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;font:600 11px/1 'JetBrains Mono',ui-monospace,monospace;letter-spacing:.14em;text-transform:uppercase;color:#e6e9ef">
+            <span style="display:flex;align-items:center;gap:8px;white-space:nowrap"><span style="color:#FF7A1A;font-size:13px">⬡</span>Orchestrator</span>
+            <span style="font-weight:400;letter-spacing:.06em;text-transform:none;color:#7a8494;white-space:nowrap">{{ activeLabel }}</span>
+          </div>
+          <div style="display:flex;align-items:flex-end;justify-content:space-between;gap:12px">
+            <div style="display:flex;flex-direction:column;gap:8px;min-width:0">
+              <span style="font:600 36px/1 Geist,sans-serif;letter-spacing:-.02em;color:{{ orchColor }}">{{ orchBig }}</span>
+              <span style="font:400 10.5px/1.4 'JetBrains Mono',ui-monospace,monospace;color:#7a8494;letter-spacing:.04em">{{ orderLine }}</span>
+            </div>
+            <button onClick="{{ toggleRun }}" style="flex:none;height:34px;padding:0 14px;border-radius:7px;border:1px solid {{ runBtn.border }};background:{{ runBtn.bg }};color:{{ runBtn.color }};font:600 12px/1 Geist,sans-serif;cursor:pointer;display:flex;align-items:center;gap:7px;white-space:nowrap">{{ runBtn.label }}</button>
+          </div>
+          <div style="display:flex;flex-direction:column;border:1px solid rgba(255,255,255,.07);border-radius:10px;overflow:hidden">
+            <sc-for list="{{ providerRows }}" as="p" hint-placeholder-count="4">
+              <div onClick="{{ p.onClick }}" style="display:grid;grid-template-columns:12px 8px minmax(0,1fr) auto;align-items:center;gap:10px;padding:10px 12px;background:{{ p.bg }};border-bottom:1px solid rgba(255,255,255,.05);color:#e6e9ef;cursor:pointer">
+                <span style="font:400 10px/1 'JetBrains Mono',ui-monospace,monospace;color:#5d6673">{{ p.idx }}</span>
+                <span style="width:8px;height:8px;border-radius:50%;background:{{ p.color }}"></span>
+                <span style="display:flex;flex-direction:column;gap:4px;min-width:0">
+                  <span style="font:500 13px/1.1 Geist,sans-serif">{{ p.name }}</span>
+                  <span style="font:400 10.5px/1.2 'JetBrains Mono',ui-monospace,monospace;color:#7a8494;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ p.model }} · {{ p.live }}</span>
+                </span>
+                <span style="display:flex;align-items:center;gap:6px">
+                  <sc-if value="{{ p.showSignIn }}" hint-placeholder-val="{{ false }}"><button onClick="{{ p.onSignIn }}" style="height:24px;padding:0 10px;border-radius:5px;border:1px solid #FF7A1A;background:rgba(255,122,26,.12);color:#ffb37a;font:600 11px/1 Geist,sans-serif;cursor:pointer;white-space:nowrap">Sign in</button></sc-if>
+                  <sc-if value="{{ p.showBadge }}" hint-placeholder-val="{{ true }}"><span style="flex:none;display:inline-flex;align-items:center;height:18px;padding:0 6px;white-space:nowrap;border-radius:4px;font:500 9.5px/1 'JetBrains Mono',ui-monospace,monospace;letter-spacing:.08em;text-transform:uppercase;color:{{ p.tc }};background:{{ p.tb }};border:1px solid {{ p.td }}">{{ p.status }}</span></sc-if>
+                </span>
+              </div>
+            </sc-for>
+          </div>
+        </section>
+      </sc-if>
+
+        <section style="display:flex;flex-direction:column;gap:12px">
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;font:600 11px/1 'JetBrains Mono',ui-monospace,monospace;letter-spacing:.14em;text-transform:uppercase;color:#e6e9ef">
+            <span style="display:flex;align-items:center;gap:8px;white-space:nowrap"><span style="color:#FF7A1A;font-size:12px">◇</span>{{ queueTitle }}</span>
+            <sc-if value="{{ notAll }}" hint-placeholder-val="{{ true }}"><button onClick="{{ openModal }}" style="height:26px;padding:0 10px;border-radius:6px;border:1px solid #FF7A1A;background:#FF7A1A;color:#0b0c10;font:600 11px/1 Geist,sans-serif;letter-spacing:0;text-transform:none;cursor:pointer;white-space:nowrap;flex:none">+ New task</button></sc-if>
+          </div>
+          <span style="font:400 10.5px/1 'JetBrains Mono',ui-monospace,monospace;color:#7a8494">{{ taskSummary }}</span>
+          <div style="display:flex;flex-direction:column;gap:6px">
+            <sc-for list="{{ taskRows }}" as="t" hint-placeholder-count="8">
+              <button onClick="{{ t.onClick }}" style="display:grid;grid-template-columns:30px minmax(0,1fr) auto;align-items:center;gap:8px;padding:9px 10px;border-radius:8px;border:1px solid {{ t.border }};background:{{ t.bg }};color:#e6e9ef;text-align:left;cursor:pointer;opacity:{{ t.opacity }}">
+                <span style="font:400 10.5px/1 'JetBrains Mono',ui-monospace,monospace;color:#7a8494">{{ t.id }}</span>
+                <span style="display:flex;flex-direction:column;gap:4px;min-width:0">
+                  <span style="font:500 12.5px/1.25 Geist,sans-serif;text-wrap:pretty">{{ t.title }}</span>
+                  <span style="font:400 10px/1.2 'JetBrains Mono',ui-monospace,monospace;color:#7a8494">{{ t.deps }}</span>
+                </span>
+                <span style="flex:none;display:inline-flex;align-items:center;height:18px;padding:0 6px;white-space:nowrap;border-radius:4px;font:500 9.5px/1 'JetBrains Mono',ui-monospace,monospace;letter-spacing:.08em;text-transform:uppercase;color:{{ t.tc }};background:{{ t.tb }};border:1px solid {{ t.td }}">{{ t.status }}</span>
+              </button>
+            </sc-for>
+          </div>
+        </section>
+      </aside>
+    </sc-if>
+
+    <main style="flex:100 1 560px;min-width:0;height:calc(100vh - 46px);min-height:620px;display:flex;flex-direction:column;gap:12px;padding:16px 20px 14px">
+      <div style="display:flex;flex-direction:column;gap:8px">
+        <div style="display:flex;align-items:baseline;gap:6px 12px;flex-wrap:wrap">
+          <span style="font:700 22px/1.15 Geist,sans-serif;letter-spacing:.08em;white-space:nowrap"><span style="color:#FF7A1A">⬡</span> MAP</span>
+          <span style="font:500 22px/1.15 Geist,sans-serif;color:#FF7A1A;letter-spacing:-.01em;white-space:nowrap">Multi-Agent Platform</span>
+          <span style="font:500 10px/1.15 'JetBrains Mono',ui-monospace,monospace;letter-spacing:.16em;text-transform:uppercase;color:#7a8494;white-space:nowrap">command centre</span>
+          <div style="display:flex;border:1px solid rgba(255,255,255,.1);border-radius:7px;overflow:hidden;align-self:center">
+            <sc-for list="{{ scopes }}" as="sc" hint-placeholder-count="2"><button onClick="{{ sc.onClick }}" style="height:24px;padding:0 10px;border:0;background:{{ sc.bg }};color:{{ sc.color }};font:600 10.5px/1 'JetBrains Mono',ui-monospace,monospace;cursor:pointer;white-space:nowrap">{{ sc.label }}</button></sc-for>
+          </div>
+        </div>
+        <span style="font:400 10.5px/1.4 'JetBrains Mono',ui-monospace,monospace;color:#7a8494;letter-spacing:.04em">{{ statsLine }}</span>
+      </div>
+
+      <div style="display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:10px">
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+          <span style="font:500 10px/1 'JetBrains Mono',ui-monospace,monospace;letter-spacing:.2em;color:#5d6673">VIEW</span>
+          <div style="display:flex;border:1px solid rgba(255,255,255,.1);border-radius:8px;overflow:hidden">
+            <sc-for list="{{ tabs }}" as="tab" hint-placeholder-count="4">
+              <button onClick="{{ tab.onClick }}" style="height:30px;padding:0 14px;border:0;border-right:1px solid rgba(255,255,255,.08);background:{{ tab.bg }};color:{{ tab.color }};font:600 11px/1 'JetBrains Mono',ui-monospace,monospace;letter-spacing:.1em;cursor:pointer;white-space:nowrap">{{ tab.label }}</button>
+            </sc-for>
+          </div>
+        </div>
+        <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+          <sc-for list="{{ toggles }}" as="g" hint-placeholder-count="2">
+            <button onClick="{{ g.onClick }}" style="height:30px;padding:0 11px;border-radius:7px;border:1px solid {{ g.border }};background:transparent;color:{{ g.color }};font:500 11px/1 'JetBrains Mono',ui-monospace,monospace;letter-spacing:.04em;cursor:pointer;white-space:nowrap">{{ g.label }}</button>
+          </sc-for>
+          <div style="height:30px;display:flex;align-items:center;gap:6px;padding:0 10px;border-radius:7px;border:1px solid rgba(255,255,255,.12)">
+            <span style="font:500 12px/1 'JetBrains Mono',ui-monospace,monospace;color:#7a8494">⌕</span>
+            <input value="{{ search }}" onChange="{{ onSearch }}" onKeyDown="{{ onSearchKey }}" placeholder="search" style="width:110px;background:transparent;border:0;outline:none;color:#e6e9ef;font:400 11.5px/1 'JetBrains Mono',ui-monospace,monospace">
+          </div>
+          <button onClick="{{ fit }}" style="height:30px;padding:0 11px;border-radius:7px;border:1px solid rgba(255,255,255,.12);background:transparent;color:#c5ccd6;font:500 11px/1 'JetBrains Mono',ui-monospace,monospace;cursor:pointer;white-space:nowrap">⛶ fit</button>
+          <button onClick="{{ toggleFocus }}" style="height:30px;padding:0 11px;border-radius:7px;border:1px solid {{ focusBtn.border }};background:transparent;color:{{ focusBtn.color }};font:500 11px/1 'JetBrains Mono',ui-monospace,monospace;cursor:pointer;white-space:nowrap">{{ focusBtn.label }}</button>
+        </div>
+      </div>
+
+      <div style="display:flex;flex-wrap:wrap;align-items:center;gap:6px">
+        <sc-for list="{{ chips }}" as="c" hint-placeholder-count="6">
+          <button onClick="{{ c.onClick }}" style="height:26px;display:flex;align-items:center;gap:7px;padding:0 10px;border-radius:6px;border:1px solid {{ c.border }};background:{{ c.bg }};color:#e6e9ef;font:500 11px/1 'JetBrains Mono',ui-monospace,monospace;cursor:pointer;white-space:nowrap">
+            <span style="width:7px;height:7px;border-radius:50%;background:{{ c.dot }}"></span>{{ c.label }}<span style="color:#7a8494">{{ c.count }}</span>
+          </button>
+        </sc-for>
+        <span style="width:1px;height:18px;background:rgba(255,255,255,.1);margin:0 6px"></span>
+        <sc-for list="{{ types }}" as="ty" hint-placeholder-count="4">
+          <button onClick="{{ ty.onClick }}" style="height:26px;display:flex;align-items:center;gap:6px;padding:0 9px;border-radius:6px;border:1px solid rgba(255,255,255,.06);background:rgba(255,255,255,.02);color:#c5ccd6;font:500 11px/1 'JetBrains Mono',ui-monospace,monospace;cursor:pointer;white-space:nowrap;opacity:{{ ty.opacity }};text-decoration:{{ ty.deco }}">
+            <span style="color:#e6e9ef">{{ ty.glyph }}</span>{{ ty.label }}
+          </button>
+        </sc-for>
+      </div>
+
+      <div style="flex:1;min-height:420px;position:relative;border:1px solid rgba(255,255,255,.06);border-radius:14px;overflow:hidden;background-color:#08090c;background-image:radial-gradient(rgba(255,255,255,.045) 1px, transparent 1px);background-size:22px 22px">
+        <canvas ref="{{ canvasRef }}" style="position:absolute;inset:0;width:100%;height:100%;display:block;touch-action:none;cursor:grab"></canvas>
+        <div style="position:absolute;left:0;right:0;bottom:12px;text-align:center;font:500 9.5px/1.4 'JetBrains Mono',ui-monospace,monospace;letter-spacing:.2em;color:#5d6673;pointer-events:none;padding:0 16px">{{ hint }}</div>
+
+        <sc-if value="{{ hasDetail }}" hint-placeholder-val="{{ false }}">
+          <div style="position:absolute;top:14px;right:14px;width:min(360px, calc(100% - 28px));max-height:calc(100% - 28px);overflow:auto;background:rgba(9,11,15,.94);border:1px solid rgba(255,255,255,.1);border-radius:12px;box-shadow:0 20px 60px rgba(0,0,0,.55);backdrop-filter:blur(10px);display:flex;flex-direction:column">
+            <div style="display:flex;align-items:flex-start;gap:10px;padding:14px 14px 12px 16px;border-bottom:1px solid rgba(255,255,255,.07)">
+              <div style="flex:1;display:flex;flex-direction:column;gap:7px;min-width:0">
+                <span style="display:flex;align-items:center;gap:7px;font:500 10px/1 'JetBrains Mono',ui-monospace,monospace;letter-spacing:.14em;text-transform:uppercase;color:#7a8494"><span style="width:7px;height:7px;border-radius:50%;background:{{ detail.color }}"></span>{{ detail.kicker }}</span>
+                <span style="font:600 15px/1.3 Geist,sans-serif;word-break:break-word;text-wrap:pretty">{{ detail.title }}</span>
+              </div>
+              <span style="flex:none;display:inline-flex;align-items:center;height:18px;padding:0 6px;white-space:nowrap;border-radius:4px;font:500 9.5px/1 'JetBrains Mono',ui-monospace,monospace;letter-spacing:.08em;text-transform:uppercase;color:{{ detail.tc }};background:{{ detail.tb }};border:1px solid {{ detail.td }}">{{ detail.badge }}</span>
+              <button onClick="{{ clearSel }}" style="flex:none;width:24px;height:24px;border-radius:6px;border:1px solid rgba(255,255,255,.1);background:transparent;color:#c5ccd6;cursor:pointer;font:400 13px/1 Geist,sans-serif">×</button>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:7px;padding:12px 16px">
+              <sc-for list="{{ detail.rows }}" as="r" hint-placeholder-count="4">
+                <div style="display:grid;grid-template-columns:92px minmax(0,1fr);gap:12px;align-items:baseline">
+                  <span style="font:400 10px/1.5 'JetBrains Mono',ui-monospace,monospace;letter-spacing:.08em;text-transform:uppercase;color:#7a8494">{{ r.k }}</span>
+                  <span style="font:400 12.5px/1.4 Geist,sans-serif;color:#d6dde6;word-break:break-word">{{ r.v }}</span>
+                </div>
+              </sc-for>
+            </div>
+            <sc-for list="{{ detail.blocks }}" as="b" hint-placeholder-count="1">
+              <div style="padding:0 16px 12px;display:flex;flex-direction:column;gap:6px">
+                <span style="font:400 10px/1 'JetBrains Mono',ui-monospace,monospace;letter-spacing:.12em;text-transform:uppercase;color:#7a8494">{{ b.label }}</span>
+                <div style="background:#05060a;border:1px solid rgba(255,255,255,.06);border-radius:8px;padding:10px 12px;font:400 11.5px/1.6 'JetBrains Mono',ui-monospace,monospace;max-height:230px;overflow:auto;display:flex;flex-direction:column">
+                  <sc-for list="{{ b.lines }}" as="ln" hint-placeholder-count="4">
+                    <span style="color:{{ ln.color }};white-space:pre-wrap;word-break:break-word">{{ ln.text }}</span>
+                  </sc-for>
+                </div>
+              </div>
+            </sc-for>
+            <sc-if value="{{ detail.isLive }}" hint-placeholder-val="{{ false }}">
+              <div style="padding:0 16px 12px;display:flex;flex-direction:column;gap:8px">
+                <div style="display:flex;gap:6px">
+                  <input value="{{ termInput }}" onChange="{{ onTermInput }}" onKeyDown="{{ onTermKey }}" placeholder="Type to the agent, Enter to send" style="flex:1;min-width:0;height:32px;background:#05060a;border:1px solid rgba(255,255,255,.12);border-radius:7px;color:#e6e9ef;padding:0 10px;font:400 12px/1 'JetBrains Mono',ui-monospace,monospace;outline:none">
+                  <button onClick="{{ sendPrompt }}" style="height:32px;padding:0 12px;border-radius:7px;border:1px solid #FF7A1A;background:#FF7A1A;color:#0b0c10;font:600 12px/1 Geist,sans-serif;cursor:pointer">Send</button>
+                </div>
+                <div style="display:flex;flex-wrap:wrap;gap:5px">
+                  <sc-for list="{{ keys }}" as="k" hint-placeholder-count="5">
+                    <button onClick="{{ k.onClick }}" style="height:24px;padding:0 8px;border-radius:5px;border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.03);color:#c5ccd6;font:500 10.5px/1 'JetBrains Mono',ui-monospace,monospace;cursor:pointer">{{ k.label }}</button>
+                  </sc-for>
+                </div>
+              </div>
+            </sc-if>
+            <div style="display:flex;flex-wrap:wrap;gap:8px;padding:12px 16px 16px;border-top:1px solid rgba(255,255,255,.07)">
+              <sc-for list="{{ detail.actions }}" as="a" hint-placeholder-count="2">
+                <button onClick="{{ a.onClick }}" style="height:30px;padding:0 12px;border-radius:7px;border:1px solid {{ a.border }};background:{{ a.bg }};color:{{ a.color }};font:600 12px/1 Geist,sans-serif;cursor:pointer">{{ a.label }}</button>
+              </sc-for>
+            </div>
+          </div>
+        </sc-if>
+      </div>
+    </main>
+
+    <sc-if value="{{ showSides }}" hint-placeholder-val="{{ true }}">
+      <aside style="flex:1 1 320px;max-width:100%;height:calc(100vh - 46px);overflow:auto;border-left:1px solid rgba(255,255,255,.06);padding:20px 20px 28px;display:flex;flex-direction:column;gap:28px">
+        <section style="display:flex;flex-direction:column;gap:12px">
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;font:600 11px/1 'JetBrains Mono',ui-monospace,monospace;letter-spacing:.14em;text-transform:uppercase;color:#e6e9ef">
+            <span style="display:flex;align-items:center;gap:8px;white-space:nowrap"><span style="color:#FF7A1A">⚑</span>Needs you</span>
+            <span style="font-weight:400;letter-spacing:.06em;text-transform:none;color:#7a8494;white-space:nowrap">watcher can't fix these</span>
+          </div>
+          <div style="display:flex;align-items:center;gap:14px">
+            <span style="font:600 46px/1 Geist,sans-serif;color:#FF7A1A;letter-spacing:-.02em">{{ needsCount }}</span>
+            <span style="font:500 10px/1.5 'JetBrains Mono',ui-monospace,monospace;letter-spacing:.14em;text-transform:uppercase;color:#7a8494">{{ needsLabel }}</span>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:2px">
+            <sc-for list="{{ needs }}" as="n" hint-placeholder-count="3">
+              <button onClick="{{ n.onClick }}" style="display:grid;grid-template-columns:14px minmax(0,1fr);gap:10px;padding:9px 0;border:0;border-top:1px solid rgba(255,255,255,.05);background:transparent;color:#e6e9ef;text-align:left;cursor:pointer">
+                <span style="color:{{ n.tc }};font:500 12px/1.3 Geist,sans-serif">⚑</span>
+                <span style="display:flex;flex-direction:column;gap:3px;min-width:0">
+                  <span style="display:flex;align-items:baseline;gap:8px;justify-content:space-between"><span style="font:500 12.5px/1.2 'JetBrains Mono',ui-monospace,monospace;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ n.title }}</span><span style="flex:none;font:500 9.5px/1 'JetBrains Mono',ui-monospace,monospace;letter-spacing:.1em;text-transform:uppercase;color:{{ n.tc }}">{{ n.tag }}</span></span>
+                  <span style="font:400 12px/1.4 Geist,sans-serif;color:#a3acb9;text-wrap:pretty">{{ n.reason }}</span>
+                </span>
+              </button>
+            </sc-for>
+          </div>
+        </section>
+
+        <section style="display:flex;flex-direction:column;gap:10px">
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;font:600 11px/1 'JetBrains Mono',ui-monospace,monospace;letter-spacing:.14em;text-transform:uppercase;color:#e6e9ef">
+            <span style="display:flex;align-items:center;gap:8px;white-space:nowrap"><span style="color:#FF7A1A">○</span>Sessions</span>
+            <span style="display:flex;align-items:center;gap:10px"><span style="font-weight:400;letter-spacing:.06em;text-transform:none;color:#7a8494;white-space:nowrap">{{ liveLabel }}</span><sc-if value="{{ notAll }}" hint-placeholder-val="{{ true }}"><button onClick="{{ openSes }}" style="height:24px;padding:0 9px;border-radius:6px;border:1px solid rgba(255,255,255,.16);background:transparent;color:#e6e9ef;font:600 11px/1 Geist,sans-serif;letter-spacing:0;text-transform:none;cursor:pointer;white-space:nowrap">+ New</button></sc-if></span>
+          </div>
+          <div style="display:flex;flex-direction:column">
+            <sc-for list="{{ sessionRows }}" as="s" hint-placeholder-count="8">
+              <button onClick="{{ s.onClick }}" style="display:flex;flex-direction:column;gap:4px;padding:9px 10px;margin:0 -10px;border:0;border-radius:7px;background:{{ s.bg }};color:#e6e9ef;text-align:left;cursor:pointer;opacity:{{ s.opacity }}">
+                <span style="display:flex;align-items:center;gap:8px;width:100%">
+                  <span style="flex:none;width:7px;height:7px;border-radius:50%;background:{{ s.dot }}"></span>
+                  <span style="flex:1;min-width:0;font:500 12.5px/1.2 'JetBrains Mono',ui-monospace,monospace;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ s.name }}</span>
+                  <span style="flex:none;display:inline-flex;align-items:center;height:18px;padding:0 6px;white-space:nowrap;border-radius:4px;font:500 9.5px/1 'JetBrains Mono',ui-monospace,monospace;letter-spacing:.08em;text-transform:uppercase;color:{{ s.tc }};background:{{ s.tb }};border:1px solid {{ s.td }}">{{ s.state }}</span>
+                </span>
+                <span style="padding-left:15px;font:400 10.5px/1.3 'JetBrains Mono',ui-monospace,monospace;color:#7a8494">{{ s.meta }}</span>
+                <span style="padding-left:15px;font:400 10.5px/1.3 'JetBrains Mono',ui-monospace,monospace;color:#a3acb9;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%">{{ s.last }}</span>
+              </button>
+            </sc-for>
+          </div>
+        </section>
+
+        <section style="display:flex;flex-direction:column;gap:10px">
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;font:600 11px/1 'JetBrains Mono',ui-monospace,monospace;letter-spacing:.14em;text-transform:uppercase;color:#e6e9ef">
+            <span style="display:flex;align-items:center;gap:8px;white-space:nowrap"><span style="color:#FF7A1A">≡</span>Event log</span>
+            <span style="font-weight:400;letter-spacing:.06em;text-transform:none;color:#7a8494;white-space:nowrap">newest first</span>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:2px">
+            <sc-for list="{{ eventRows }}" as="e" hint-placeholder-count="10">
+              <button onClick="{{ e.onClick }}" style="display:grid;grid-template-columns:58px minmax(0,1fr);gap:10px;padding:6px 0;border:0;background:transparent;color:#e6e9ef;text-align:left;cursor:pointer">
+                <span style="font:400 10.5px/1.6 'JetBrains Mono',ui-monospace,monospace;color:#5d6673">{{ e.time }}</span>
+                <span style="display:flex;flex-direction:column;gap:4px;min-width:0">
+                  <span style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+                    <span style="display:inline-flex;align-items:center;height:17px;padding:0 5px;white-space:nowrap;border-radius:4px;font:500 9px/1 'JetBrains Mono',ui-monospace,monospace;letter-spacing:.08em;text-transform:uppercase;color:{{ e.tc }};background:{{ e.tb }};border:1px solid {{ e.td }}">{{ e.kind }}</span>
+                    <span style="font:400 10.5px/1 'JetBrains Mono',ui-monospace,monospace;color:#7a8494">{{ e.who }}</span>
+                  </span>
+                  <span style="font:400 12px/1.4 Geist,sans-serif;color:#c5ccd6;word-break:break-word">{{ e.msg }}</span>
+                </span>
+              </button>
+            </sc-for>
+          </div>
+        </section>
+      </aside>
+    </sc-if>
+  </div>
+
+  <sc-if value="{{ modalOpen }}" hint-placeholder-val="{{ false }}">
+    <div onClick="{{ closeModal }}" style="position:fixed;inset:0;background:rgba(3,4,6,.72);backdrop-filter:blur(4px);display:flex;align-items:center;justify-content:center;padding:20px;z-index:50">
+      <div onClick="{{ stop }}" style="width:min(580px,100%);max-height:calc(100vh - 40px);overflow:auto;background:#0c0e13;border:1px solid rgba(255,255,255,.1);border-radius:14px;box-shadow:0 30px 80px rgba(0,0,0,.6);display:flex;flex-direction:column">
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:16px 18px;border-bottom:1px solid rgba(255,255,255,.07)">
+          <span style="display:flex;align-items:center;gap:8px;font:600 11px/1 'JetBrains Mono',ui-monospace,monospace;letter-spacing:.14em;text-transform:uppercase"><span style="color:#FF7A1A">◇</span>New task · #{{ nextId }}</span>
+          <button onClick="{{ closeModal }}" style="width:26px;height:26px;border-radius:6px;border:1px solid rgba(255,255,255,.1);background:transparent;color:#c5ccd6;cursor:pointer">×</button>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:16px;padding:18px">
+          <label style="display:flex;flex-direction:column;gap:6px;font:500 11px/1 'JetBrains Mono',ui-monospace,monospace;letter-spacing:.08em;text-transform:uppercase;color:#7a8494">Title
+            <input value="{{ form.title }}" onChange="{{ onTitle }}" placeholder="Add rate limiting to the login endpoint" style="height:38px;background:#07080b;border:1px solid rgba(255,255,255,.12);border-radius:7px;color:#e6e9ef;padding:0 12px;font:400 13.5px/1 Geist,sans-serif;letter-spacing:0;text-transform:none;outline:none">
+          </label>
+          <label style="display:flex;flex-direction:column;gap:6px;font:500 11px/1 'JetBrains Mono',ui-monospace,monospace;letter-spacing:.08em;text-transform:uppercase;color:#7a8494">Prompt for the worker
+            <textarea rows="6" value="{{ form.prompt }}" onChange="{{ onPrompt }}" placeholder="What to build, which files matter, and how to prove it works." style="background:#07080b;border:1px solid rgba(255,255,255,.12);border-radius:7px;color:#e6e9ef;padding:10px 12px;font:400 12.5px/1.6 'JetBrains Mono',ui-monospace,monospace;letter-spacing:0;text-transform:none;outline:none;resize:vertical"></textarea>
+          </label>
+          <div style="display:flex;flex-direction:column;gap:8px">
+            <span style="font:500 11px/1 'JetBrains Mono',ui-monospace,monospace;letter-spacing:.08em;text-transform:uppercase;color:#7a8494">Provider</span>
+            <div style="display:flex;flex-wrap:wrap;gap:6px">
+              <sc-for list="{{ provChips }}" as="pc" hint-placeholder-count="4">
+                <button onClick="{{ pc.onClick }}" style="height:28px;padding:0 11px;border-radius:6px;border:1px solid {{ pc.border }};background:{{ pc.bg }};color:{{ pc.color }};font:500 11.5px/1 'JetBrains Mono',ui-monospace,monospace;cursor:pointer">{{ pc.label }}</button>
+              </sc-for>
+            </div>
+          </div>
+          <sc-if value="{{ hasModels }}" hint-placeholder-val="{{ false }}">
+            <div style="display:flex;flex-direction:column;gap:8px">
+              <span style="font:500 11px/1 'JetBrains Mono',ui-monospace,monospace;letter-spacing:.08em;text-transform:uppercase;color:#7a8494">Model</span>
+              <div style="display:flex;flex-wrap:wrap;gap:6px">
+                <sc-for list="{{ modelChips }}" as="mc" hint-placeholder-count="3">
+                  <button onClick="{{ mc.onClick }}" style="height:28px;padding:0 11px;border-radius:6px;border:1px solid {{ mc.border }};background:{{ mc.bg }};color:{{ mc.color }};font:500 11.5px/1 'JetBrains Mono',ui-monospace,monospace;cursor:pointer">{{ mc.label }}</button>
+                </sc-for>
+              </div>
+            </div>
+          </sc-if>
+          <div style="display:flex;flex-direction:column;gap:8px">
+            <span style="font:500 11px/1 'JetBrains Mono',ui-monospace,monospace;letter-spacing:.08em;text-transform:uppercase;color:#7a8494">Runs after</span>
+            <div style="display:flex;flex-wrap:wrap;gap:6px;max-height:120px;overflow:auto">
+              <sc-for list="{{ depChips }}" as="dc" hint-placeholder-count="6">
+                <button onClick="{{ dc.onClick }}" style="height:26px;padding:0 9px;border-radius:6px;border:1px solid {{ dc.border }};background:{{ dc.bg }};color:{{ dc.color }};font:400 11px/1 'JetBrains Mono',ui-monospace,monospace;cursor:pointer;white-space:nowrap">{{ dc.label }}</button>
+              </sc-for>
+            </div>
+          </div>
+          <p style="margin:0;font:400 11px/1.6 'JetBrains Mono',ui-monospace,monospace;color:#7a8494;text-wrap:pretty">The orchestrator appends the $MAP_RESULT_FILE protocol and the 4 verify commands to this prompt, then an audit by another agent must return VERDICT: PASS.</p>
+        </div>
+        <div style="display:flex;justify-content:flex-end;gap:8px;padding:14px 18px;border-top:1px solid rgba(255,255,255,.07)">
+          <button onClick="{{ closeModal }}" style="height:34px;padding:0 14px;border-radius:7px;border:1px solid rgba(255,255,255,.14);background:transparent;color:#e6e9ef;font:600 12.5px/1 Geist,sans-serif;cursor:pointer">Cancel</button>
+          <button onClick="{{ addTask }}" style="height:34px;padding:0 14px;border-radius:7px;border:1px solid #FF7A1A;background:#FF7A1A;color:#0b0c10;font:600 12.5px/1 Geist,sans-serif;cursor:pointer;opacity:{{ addOpacity }}">Add task</button>
+        </div>
+      </div>
+    </div>
+  </sc-if>
+  <sc-if value="{{ sesOpen }}" hint-placeholder-val="{{ false }}">
+    <div onClick="{{ closeSes }}" style="position:fixed;inset:0;z-index:50;background:rgba(3,4,6,.72);backdrop-filter:blur(4px);display:flex;align-items:center;justify-content:center;padding:20px">
+      <div onClick="{{ stop }}" style="width:min(540px,100%);max-height:calc(100vh - 40px);overflow:auto;background:#0c0e13;border:1px solid rgba(255,255,255,.1);border-radius:14px;box-shadow:0 30px 80px rgba(0,0,0,.6);display:flex;flex-direction:column">
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:16px 18px;border-bottom:1px solid rgba(255,255,255,.07)">
+          <span style="display:flex;align-items:center;gap:8px;font:600 11px/1 'JetBrains Mono',ui-monospace,monospace;letter-spacing:.14em;text-transform:uppercase;white-space:nowrap"><span style="color:#FF7A1A">○</span>New session · {{ sesName }}</span>
+          <button onClick="{{ closeSes }}" style="width:26px;height:26px;border-radius:6px;border:1px solid rgba(255,255,255,.1);background:transparent;color:#c5ccd6;cursor:pointer">×</button>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:16px;padding:18px">
+          <div style="display:flex;flex-direction:column;gap:8px"><span style="font:500 11px/1 'JetBrains Mono',ui-monospace,monospace;letter-spacing:.08em;text-transform:uppercase;color:#7a8494">Provider</span>
+            <div style="display:flex;flex-wrap:wrap;gap:6px"><sc-for list="{{ sesProvChips }}" as="sp" hint-placeholder-count="3"><button onClick="{{ sp.onClick }}" style="height:28px;padding:0 11px;border-radius:6px;border:1px solid {{ sp.border }};background:{{ sp.bg }};color:{{ sp.color }};font:500 11.5px/1 'JetBrains Mono',ui-monospace,monospace;cursor:pointer;white-space:nowrap">{{ sp.label }}</button></sc-for></div></div>
+          <div style="display:flex;flex-direction:column;gap:8px"><span style="font:500 11px/1 'JetBrains Mono',ui-monospace,monospace;letter-spacing:.08em;text-transform:uppercase;color:#7a8494">Model</span>
+            <div style="display:flex;flex-wrap:wrap;gap:6px"><sc-for list="{{ sesModelChips }}" as="sm" hint-placeholder-count="3"><button onClick="{{ sm.onClick }}" style="height:28px;padding:0 11px;border-radius:6px;border:1px solid {{ sm.border }};background:{{ sm.bg }};color:{{ sm.color }};font:500 11.5px/1 'JetBrains Mono',ui-monospace,monospace;cursor:pointer;white-space:nowrap">{{ sm.label }}</button></sc-for></div></div>
+          <label style="display:flex;flex-direction:column;gap:6px;font:500 11px/1 'JetBrains Mono',ui-monospace,monospace;letter-spacing:.08em;text-transform:uppercase;color:#7a8494">Name (optional)
+            <input value="{{ sesForm.name }}" onChange="{{ onSesName }}" placeholder="reviewer" style="height:38px;background:#07080b;border:1px solid rgba(255,255,255,.12);border-radius:7px;color:#e6e9ef;padding:0 12px;font:400 13px/1 'JetBrains Mono',ui-monospace,monospace;letter-spacing:0;text-transform:none;outline:none">
+          </label>
+          <button onClick="{{ toggleSup }}" style="display:flex;align-items:flex-start;gap:10px;border:0;background:transparent;color:#e6e9ef;cursor:pointer;text-align:left;padding:0">
+            <span style="flex:none;margin-top:1px;width:16px;height:16px;border-radius:4px;border:1px solid {{ supBox.border }};background:{{ supBox.bg }};color:#0b0c10;font:700 11px/16px Geist,sans-serif;text-align:center">{{ supBox.mark }}</span>
+            <span style="display:flex;flex-direction:column;gap:3px"><span style="font:500 13px/1.2 Geist,sans-serif">Supervisor role</span><span style="font:400 11px/1.4 'JetBrains Mono',ui-monospace,monospace;color:#7a8494">a long-lived planning agent that creates and reviews tasks through the API</span></span>
+          </button>
+          <label style="display:flex;flex-direction:column;gap:6px;font:500 11px/1 'JetBrains Mono',ui-monospace,monospace;letter-spacing:.08em;text-transform:uppercase;color:#7a8494">Initial prompt (optional)
+            <textarea rows="4" value="{{ sesForm.prompt }}" onChange="{{ onSesPrompt }}" placeholder="Review the open diff and list risks…" style="background:#07080b;border:1px solid rgba(255,255,255,.12);border-radius:7px;color:#e6e9ef;padding:10px 12px;font:400 12.5px/1.6 'JetBrains Mono',ui-monospace,monospace;letter-spacing:0;text-transform:none;outline:none;resize:vertical"></textarea>
+          </label>
+        </div>
+        <div style="display:flex;justify-content:flex-end;gap:8px;padding:14px 18px;border-top:1px solid rgba(255,255,255,.07)">
+          <button onClick="{{ closeSes }}" style="height:34px;padding:0 14px;border-radius:7px;border:1px solid rgba(255,255,255,.14);background:transparent;color:#e6e9ef;font:600 12.5px/1 Geist,sans-serif;cursor:pointer">Cancel</button>
+          <button onClick="{{ createSession }}" style="height:34px;padding:0 14px;border-radius:7px;border:1px solid #FF7A1A;background:#FF7A1A;color:#0b0c10;font:600 12.5px/1 Geist,sans-serif;cursor:pointer;white-space:nowrap">Start session</button>
+        </div>
+      </div>
+    </div>
+  </sc-if>
+  <sc-if value="{{ authOpen }}" hint-placeholder-val="{{ false }}">
+    <div onClick="{{ closeAuth }}" style="position:fixed;inset:0;z-index:70;background:rgba(3,4,6,.72);backdrop-filter:blur(4px);display:flex;align-items:center;justify-content:center;padding:20px">
+      <div onClick="{{ stop }}" style="width:min(480px,100%);max-height:calc(100vh - 40px);overflow:auto;background:#0c0e13;border:1px solid rgba(255,255,255,.1);border-radius:14px;box-shadow:0 30px 80px rgba(0,0,0,.6);display:flex;flex-direction:column">
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:16px 18px;border-bottom:1px solid rgba(255,255,255,.07)">
+          <span style="display:flex;align-items:center;gap:9px;font:600 15px/1 Geist,sans-serif;white-space:nowrap"><span style="width:9px;height:9px;border-radius:50%;background:{{ auth.color }}"></span>Sign in to {{ auth.name }}</span>
+          <button onClick="{{ closeAuth }}" style="width:26px;height:26px;border-radius:6px;border:1px solid rgba(255,255,255,.1);background:transparent;color:#c5ccd6;cursor:pointer">×</button>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:14px;padding:18px">
+          <sc-if value="{{ auth.isStart }}" hint-placeholder-val="{{ true }}">
+            <p style="margin:0;font:400 13px/1.55 Geist,sans-serif;color:#a3acb9;text-wrap:pretty">{{ auth.why }}</p>
+            <div style="display:flex;border:1px solid rgba(255,255,255,.12);border-radius:8px;overflow:hidden;align-self:flex-start">
+              <sc-for list="{{ auth.methods }}" as="am" hint-placeholder-count="2"><button onClick="{{ am.onClick }}" style="height:32px;padding:0 14px;border:0;background:{{ am.bg }};color:{{ am.color }};font:600 12px/1 Geist,sans-serif;cursor:pointer;white-space:nowrap">{{ am.label }}</button></sc-for>
+            </div>
+            <sc-if value="{{ auth.isBrowser }}" hint-placeholder-val="{{ true }}">
+              <div style="display:flex;flex-direction:column;gap:12px">
+                <div style="display:grid;grid-template-columns:22px minmax(0,1fr);gap:10px;align-items:start"><span style="width:22px;height:22px;border-radius:50%;border:1px solid #FF7A1A;color:#ffb37a;font:600 10px/20px 'JetBrains Mono',ui-monospace,monospace;text-align:center">1</span><span style="font:400 13px/1.5 Geist,sans-serif;color:#d6dde6">The dashboard runs <span style="font-family:'JetBrains Mono',ui-monospace,monospace;color:#ffb37a">{{ auth.cmd }}</span> in a helper tmux session.</span></div>
+                <div style="display:grid;grid-template-columns:22px minmax(0,1fr);gap:10px;align-items:start"><span style="width:22px;height:22px;border-radius:50%;border:1px solid #FF7A1A;color:#ffb37a;font:600 10px/20px 'JetBrains Mono',ui-monospace,monospace;text-align:center">2</span><span style="font:400 13px/1.5 Geist,sans-serif;color:#d6dde6">Approve the request in your browser with a one-time code. The CLI keeps the token in <span style="font-family:'JetBrains Mono',ui-monospace,monospace;color:#a3acb9">{{ auth.store }}</span>; the dashboard never sees it.</span></div>
+              </div>
+            </sc-if>
+            <sc-if value="{{ auth.isKey }}" hint-placeholder-val="{{ false }}">
+              <label style="display:flex;flex-direction:column;gap:6px;font:500 10.5px/1 'JetBrains Mono',ui-monospace,monospace;letter-spacing:.1em;color:#7a8494">{{ auth.keyName }}
+                <input type="password" value="{{ auth.key }}" onChange="{{ auth.onKey }}" placeholder="{{ auth.ph }}" style="height:38px;background:#07080b;border:1px solid rgba(255,255,255,.12);border-radius:7px;color:#e6e9ef;padding:0 12px;font:400 13px/1 'JetBrains Mono',ui-monospace,monospace;letter-spacing:0;outline:none">
+              </label>
+              <span style="font:400 11px/1.5 'JetBrains Mono',ui-monospace,monospace;color:#7a8494">Exported only into {{ auth.name }} sessions through the workspace env.</span>
+            </sc-if>
+          </sc-if>
+          <sc-if value="{{ auth.isWaiting }}" hint-placeholder-val="{{ false }}">
+            <div style="display:flex;flex-direction:column;align-items:center;gap:10px;padding:16px;border-radius:10px;border:1px solid rgba(255,122,26,.35);background:rgba(255,122,26,.06)">
+              <span style="font:400 11px/1 'JetBrains Mono',ui-monospace,monospace;letter-spacing:.14em;text-transform:uppercase;color:#7a8494">one-time code</span>
+              <span style="font:600 30px/1 'JetBrains Mono',ui-monospace,monospace;letter-spacing:.12em;color:#ffb37a">{{ auth.code }}</span>
+              <span style="font:400 11.5px/1.4 'JetBrains Mono',ui-monospace,monospace;color:#a3acb9;word-break:break-all;text-align:center">{{ auth.url }}</span>
+            </div>
+          </sc-if>
+          <sc-if value="{{ auth.isDone }}" hint-placeholder-val="{{ false }}">
+            <div style="display:flex;align-items:center;gap:12px;padding:14px 16px;border-radius:10px;border:1px solid rgba(74,222,128,.35);background:rgba(74,222,128,.07)">
+              <span style="flex:none;width:28px;height:28px;border-radius:50%;background:#4ade80;color:#0b0c10;font:700 15px/28px Geist,sans-serif;text-align:center">✓</span>
+              <span style="display:flex;flex-direction:column;gap:3px"><span style="font:600 14px/1.2 Geist,sans-serif">Signed in</span><span style="font:400 12px/1.4 Geist,sans-serif;color:#a3acb9">{{ auth.doneLine }}</span></span>
+            </div>
+          </sc-if>
+          <sc-if value="{{ auth.hasLines }}" hint-placeholder-val="{{ false }}">
+            <div style="background:#05060a;border:1px solid rgba(255,255,255,.06);border-radius:8px;padding:10px 12px;font:400 11.5px/1.6 'JetBrains Mono',ui-monospace,monospace;display:flex;flex-direction:column">
+              <sc-for list="{{ auth.lines }}" as="al" hint-placeholder-count="3"><span style="color:{{ al.color }};white-space:pre-wrap;word-break:break-all">{{ al.text }}</span></sc-for>
+            </div>
+          </sc-if>
+        </div>
+        <div style="display:flex;justify-content:flex-end;gap:8px;padding:14px 18px;border-top:1px solid rgba(255,255,255,.07)">
+          <sc-for list="{{ auth.actions }}" as="aa" hint-placeholder-count="2"><button onClick="{{ aa.onClick }}" style="height:34px;padding:0 14px;border-radius:7px;border:1px solid {{ aa.border }};background:{{ aa.bg }};color:{{ aa.color }};font:600 12.5px/1 Geist,sans-serif;cursor:pointer;white-space:nowrap;opacity:{{ aa.opacity }}">{{ aa.label }}</button></sc-for>
+        </div>
+      </div>
+    </div>
+  </sc-if>
+  <sc-if value="{{ toastOn }}" hint-placeholder-val="{{ false }}">
+    <div style="position:fixed;right:20px;bottom:20px;z-index:80;max-width:min(440px,calc(100vw - 40px));display:flex;align-items:center;gap:10px;padding:12px 14px;border-radius:10px;border:1px solid rgba(255,255,255,.12);background:#0c0e13;box-shadow:0 16px 40px rgba(0,0,0,.5);font:400 12.5px/1.45 Geist,sans-serif;color:#e6e9ef"><span style="flex:none;width:8px;height:8px;border-radius:50%;background:{{ toastColor }}"></span><span>{{ toastMsg }}</span></div>
+  </sc-if>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;defaultView&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;orbit&quot;,&quot;graph&quot;,&quot;rings&quot;,&quot;circle&quot;],&quot;default&quot;:&quot;orbit&quot;,&quot;tsType&quot;:&quot;'orbit'|'graph'|'rings'|'circle'&quot;},&quot;runDensity&quot;:{&quot;editor&quot;:&quot;range&quot;,&quot;min&quot;:60,&quot;max&quot;:600,&quot;step&quot;:20,&quot;default&quot;:260,&quot;tsType&quot;:&quot;number&quot;,&quot;unit&quot;:&quot;dots&quot;},&quot;simSpeed&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;paused&quot;,&quot;normal&quot;,&quot;fast&quot;],&quot;default&quot;:&quot;normal&quot;,&quot;tsType&quot;:&quot;'paused'|'normal'|'fast'&quot;}}">
+class Component extends DCLogic {
+  A = '#FF7A1A';
+  TONES = { ok:'#4ade80', warn:'#fbbf24', bad:'#f87171', info:'#38bdf8', idle:'#94a3b8', accent:'#FF7A1A' };
+  PROV = {
+    claude:{ color:'#F2A65A', models:['opus','sonnet','haiku'], def:'sonnet', available:true },
+    codex:{ color:'#5EA8F2', models:['gpt-6-sol','gpt-6-mini'], def:'gpt-6-sol', available:true },
+    gemini:{ color:'#B48CF2', models:['gemini-3.8-pro','gemini-3.8-flash-high'], def:'gemini-3.8-flash-high', available:true },
+    aider:{ color:'#4FD1B5', models:['sonnet'], def:'sonnet', available:false },
+  };
+  ORDER = ['claude','codex','gemini','aider'];
+  GROUPS = ['claude','codex','gemini','aider','queue'];
+  STAGES = [
+    {id:'test',label:'bun test',glyph:'T',phase:'verify'},
+    {id:'typecheck',label:'bun run typecheck',glyph:'Ty',phase:'verify'},
+    {id:'lint',label:'bun run lint',glyph:'L',phase:'verify'},
+    {id:'build',label:'bun run build',glyph:'B',phase:'verify'},
+    {id:'audit',label:'audit · gemini → claude → codex',glyph:'A',phase:'audit'},
+    {id:'commit',label:'git commit',glyph:'C',phase:'post_done'},
+    {id:'push',label:'git push',glyph:'P',phase:'post_done'},
+    {id:'tmux',label:'tmux · send-keys / capture-pane',glyph:'tm',phase:'terminal'},
+    {id:'sqlite',label:'sqlite · .map/map.db',glyph:'db',phase:'store'},
+    {id:'ws',label:'/api/ws push',glyph:'ws',phase:'hub'},
+  ];
+  SESSION_TONE = {starting:'info',working:'ok',idle:'idle',waiting_input:'accent',rate_limited:'warn',needs_auth:'bad',error:'bad',stalled:'warn',exited:'idle'};
+  TASK_TONE = {pending:'idle',running:'ok',verifying:'info',auditing:'info',done:'accent',failed:'bad',cancelled:'idle'};
+  VIEWS = [['rings','RINGS'],['circle','CIRCLE'],['graph','GRAPH'],['orbit','3D ORBIT']];
+  nodes = new Map(); links = []; runs = []; rid = 0; eid = 1000; hover = null; flyTo = null; flyN = 0;
+  cam = {yaw:0.6,pitch:0.38,yawT:0.6,pitchT:0.38,R:300,zoom:1,zoomT:1,px:0,py:0,pxT:0,pyT:0,ox:0};
+  ga = {orbit:0,rings:0,graph:0,circle:0};
+  canvasRef = React.createRef();
+  _c = {};
+  state = this.seed();
+
+  projectCfg(project) {
+    const base = {
+      'acme-api':{order:['claude','codex','gemini','aider'],maxPar:8},
+      'mcp-generator':{order:['claude','codex','gemini'],maxPar:4},
+      'daily-news':{order:['claude','gemini'],maxPar:2},
+      'trading-telegram-executor':{order:['codex','claude'],maxPar:2},
+      'franchise-management':{order:['claude'],maxPar:1},
+    }[project];
+    if (base) return base;
+    let c=null; try{ c=JSON.parse(localStorage.getItem('map.projects.custom')||'[]').find(x=>x.name===project); }catch(_){}
+    return {order:(c&&c.providers&&c.providers.length)?c.providers:['claude'],maxPar:(c&&c.maxPar)||2,path:c&&c.path,custom:true};
+  }
+  seed() {
+    let project='acme-api'; try{ project=localStorage.getItem('map.project')||project; }catch(_){}
+    const cfg=this.projectCfg(project); this.ORDER=cfg.order.slice(); this.GROUPS=this.ORDER.concat(['queue']);
+    let scope='project'; try{ scope=localStorage.getItem('map.scope')==='all'?'all':'project'; }catch(_){}
+    this.all = scope==='all';
+    if (this.all) { const mg=this.mergeAll(); this.GROUPS=mg.projects; this.ORDER=['claude','codex','gemini','aider']; this.projRunning=mg.running;
+      return { project, scope, view:'graph', sessions:mg.sessions, tasks:mg.tasks, events:mg.events, running:true, maxPar:mg.maxPar, auth:this.loadAuth(), authM:null, toast:null, projMenu:false, sesModal:false, sesForm:{provider:'claude',model:'',name:'',prompt:'',supervisor:false}, filter:'all', hidden:{}, names:true, motion:true, search:'', selected:null, focus:false, modal:false, form:{title:'',prompt:'',provider:'',model:'',deps:[]}, termInput:'', now:Date.now() }; }
+    let saved=null; try{ saved=JSON.parse(localStorage.getItem('map.cc.'+project)||'null'); }catch(_){}
+    const d = saved && saved.v===1 ? saved : this.dataset(project, cfg);
+    if (saved) this.eid = Math.max(1000, ...d.events.map(e=>e.id+1));
+    return { project, view: this.props.defaultView ?? 'orbit', sessions:d.sessions, tasks:d.tasks, events:d.events, running:d.running, maxPar:cfg.maxPar, auth:this.loadAuth(), authM:null, toast:null, projMenu:false, sesModal:false, sesForm:{provider:this.ORDER[0],model:'',name:'',prompt:'',supervisor:false}, filter:'all', hidden:{}, names:true, motion:true, search:'', selected:null, focus:false, modal:false, form:{title:'',prompt:'',provider:'',model:'',deps:[]}, termInput:'', now:Date.now() };
+  }
+  dataset(project, cfg) {
+    if (project==='acme-api') {
+    const now = Date.now(), m = 60000;
+    const S = (name,provider,model,role,task_id,state,x) => Object.assign({name,provider,model,role,task_id,state,detail:null,reset_at:null,wakeups:0,last_line:null,attached:false,created:now-30*m,log:[]}, x||{});
+    const sessions = [
+      S('map-plan','gemini','gemini-3.8-pro','supervisor',null,'working',{created:now-190*m,last_line:'Drafting tasks 17–19 from docs/roadmap.md'}),
+      S('map-task-1-1','claude','sonnet','worker',1,'exited',{created:now-182*m,last_line:'Wrote $MAP_RESULT_FILE · status done'}),
+      S('map-task-2-1','claude','sonnet','worker',2,'exited',{created:now-150*m,last_line:'Wrote $MAP_RESULT_FILE · status done'}),
+      S('map-task-3-1','codex','gpt-6-sol','worker',3,'exited',{created:now-148*m,last_line:'Wrote $MAP_RESULT_FILE · status done'}),
+      S('map-task-4-1','claude','opus','worker',4,'working',{created:now-52*m,last_line:'Edit  backend/src/auth/refresh.rs (+38 −6)'}),
+      S('map-task-5-2','codex','gpt-6-sol','worker',5,'working',{created:now-21*m,last_line:'Bash  cargo test audit_log'}),
+      S('map-task-6-1','claude','sonnet','worker',6,'rate_limited',{created:now-64*m,detail:'Usage limit reached · watcher wakes it at reset',reset_at:now+75000,wakeups:1,last_line:'Usage limit reached'}),
+      S('map-task-7-1','gemini','gemini-3.8-flash-high','worker',7,'waiting_input',{created:now-33*m,detail:'Asks to apply migration 0004_roles.sql (y/n)',last_line:'Apply migration 0004_roles.sql? (y/n)'}),
+      S('map-task-8-1','codex','gpt-6-sol','worker',8,'stalled',{created:now-71*m,detail:'No pane change for 47m',last_line:'Bash  cargo test webhooks -- --nocapture'}),
+      S('map-task-11-1','claude','haiku','worker',11,'idle',{created:now-40*m,last_line:'Wrote $MAP_RESULT_FILE · status done'}),
+      S('map-task-13-1','claude','sonnet','worker',13,'exited',{created:now-30*m,last_line:'Wrote $MAP_RESULT_FILE · status done'}),
+      S('map-audit-13','gemini','gemini-3.8-flash-high','worker',13,'working',{created:now-6*m,last_line:'Reviewing diff · 6 files changed'}),
+      S('map-pav','claude','sonnet','manual',null,'idle',{created:now-95*m,attached:true,last_line:'Ready'}),
+      S('map-reviewer','codex','gpt-6-sol','manual',null,'needs_auth',{created:now-12*m,detail:'codex is signed out · run codex login',last_line:'Please sign in to continue'}),
+    ];
+    const T = (id,title,deps,status,file,x) => Object.assign({id,title,depends_on:deps,status,file,provider:null,model:null,session:null,attempts:1,result:null,progress:0,prompt:''}, x||{});
+    const tasks = [
+      T(1,'Scaffold auth module',[],'done','backend/src/auth/mod.rs',{session:'map-task-1-1',result:'Auth module with Argon2 hashing and a session extractor. VERDICT: PASS · committed 4b1e9c2'}),
+      T(2,'Add sessions table migration',[1],'done','backend/migrations/0002_sessions.sql',{session:'map-task-2-1',result:'Migration 0002 adds sessions(id, user_id, expires_at). VERDICT: PASS · committed 91d0a7f'}),
+      T(3,'Rate limit the login endpoint',[1],'done','backend/src/api/login.rs',{session:'map-task-3-1',result:'Token bucket, 5/min per IP, 429 with Retry-After. VERDICT: PASS · committed 8f3c2a1'}),
+      T(4,'Refresh token rotation',[2],'running','backend/src/auth/refresh.rs',{session:'map-task-4-1',provider:'claude',model:'opus'}),
+      T(5,'Audit log writer',[2],'running','backend/src/audit/log.rs',{session:'map-task-5-2',attempts:2}),
+      T(6,'Password reset flow',[3],'running','backend/src/auth/reset.rs',{session:'map-task-6-1'}),
+      T(7,'Admin roles API',[2],'running','backend/src/api/roles.rs',{session:'map-task-7-1'}),
+      T(8,'Webhook delivery retries',[2],'running','backend/src/webhooks/retry.rs',{session:'map-task-8-1'}),
+      T(9,'End-to-end auth tests',[6,7],'pending','e2e/auth.spec.ts'),
+      T(10,'Write the auth guide',[9],'pending','docs/auth.md'),
+      T(11,'Billing usage meter',[],'verifying','backend/src/billing/meter.rs',{session:'map-task-11-1'}),
+      T(12,'Usage panel in dashboard',[11],'pending','frontend/components/usage.tsx'),
+      T(13,'Git worktree per task',[],'auditing','backend/src/orchestrator/worktree.rs',{session:'map-task-13-1'}),
+      T(14,'Provider failover on long resets',[13],'pending','backend/src/orchestrator/failover.rs'),
+      T(15,'Fix flaky ws reconnect',[],'failed','frontend/lib/ws.ts',{provider:'codex',attempts:2,result:'bun test: 2 failing in ws.reconnect.test.ts after 2/2 attempts'}),
+      T(16,'Remove legacy v1 routes',[],'cancelled','backend/src/api/legacy.rs'),
+    ];
+    tasks.forEach(t => { t.prompt = t.title + '.\n\nWork in ' + t.file + '. Keep the public API stable and add tests next to the change.\nProve it with: bun test · bun run typecheck · bun run lint · bun run build.'; });
+    const E = (minAgo,level,kind,session,task_id,message) => ({id:this.eid++,at:now-minAgo*m,level,kind,session,task_id,message});
+    const events = [
+      E(0.3,'info','session.activity','map-task-4-1',4,'Edit  backend/src/auth/refresh.rs (+38 −6)'),
+      E(1.2,'warn','session.rate_limited','map-task-6-1',6,'Claude usage limit · wake-up scheduled'),
+      E(2.5,'info','session.waiting_input','map-task-7-1',7,'Agent asks to apply migration 0004_roles.sql'),
+      E(4,'info','task.auditing','map-audit-13',13,'Audit by gemini on map-audit-13'),
+      E(6,'success','task.verify_passed','map-task-11-1',11,'4/4 verify commands passed'),
+      E(9,'error','session.needs_auth','map-reviewer',null,'codex is signed out'),
+      E(12,'warn','session.stalled','map-task-8-1',8,'No pane change for 45m'),
+      E(21,'warn','task.retry','map-task-5-2',5,'Attempt 2/2 · cargo test audit_log failed on attempt 1'),
+      E(38,'error','task.failed',null,15,'bun test: 2 failing after 2/2 attempts'),
+      E(52,'success','task.done','map-task-3-1',3,'VERDICT: PASS · committed 8f3c2a1'),
+      E(96,'success','task.done','map-task-2-1',2,'VERDICT: PASS · committed 91d0a7f'),
+      E(190,'info','orchestrator.started',null,null,'Running · max_parallel 8 · order claude → codex → gemini'),
+    ];
+      return {sessions,tasks,events,running:true};
+    }
+    const now=Date.now(), m=60000;
+    const S=(name,provider,model,role,task_id,state,x)=>Object.assign({name,provider,model,role,task_id,state,detail:null,reset_at:null,wakeups:0,last_line:null,attached:false,created:now-30*m,log:[]},x||{});
+    const T=(id,title,deps,status,file,x)=>Object.assign({id,title,depends_on:deps,status,file,provider:null,model:null,session:null,ran:null,attempts:1,result:null,progress:0,prompt:''},x||{});
+    const E=(minAgo,level,kind,session,task_id,message)=>({id:this.eid++,at:now-minAgo*m,level,kind,session,task_id,message});
+    const sha=i=>((0x1a2b3c4+i*7919)>>>0).toString(16).slice(-7);
+    const fin=ts=>{ ts.forEach(t=>{ if(!t.prompt) t.prompt=t.title+'.\n\nWork in '+t.file+'. Keep the public API stable and add tests next to the change.'; if(t.status==='done'&&!t.result) t.result='VERDICT: PASS · committed '+sha(t.id); }); return ts; };
+    const done=(start,titles,files,provs)=>titles.map((ti,i)=>T(start+i,ti,[],'done',files[i%files.length],{ran:provs[i%provs.length]}));
+    const ex=(n,p,model,task,minAgo)=>S(n,p,model,'worker',task,'exited',{created:now-minAgo*m,last_line:'Wrote $MAP_RESULT_FILE · status done'});
+    if (project==='mcp-generator') {
+      const sessions=[ex('map-task-1-1','claude','sonnet',1,300),ex('map-task-2-1','codex','gpt-6-sol',2,260),ex('map-task-3-1','claude','sonnet',3,250),ex('map-task-4-1','gemini','gemini-3.8-flash-high',4,180),ex('map-task-5-1','claude','opus',5,150),
+        S('map-task-6-1','claude','sonnet','worker',6,'working',{created:now-24*m,last_line:'Bash  bun test snapshots --update'}),
+        S('map-task-7-1','codex','gpt-6-sol','worker',7,'working',{created:now-18*m,last_line:'Edit  src/cli/init.ts (+64 −3)'}),
+        S('map-task-8-1','gemini','gemini-3.8-flash-high','worker',8,'idle',{created:now-35*m,last_line:'Wrote $MAP_RESULT_FILE · status done'})];
+      const tasks=fin([
+        T(1,'Parse OpenAPI 3.1 specs',[],'done','src/openapi/parse.ts',{session:'map-task-1-1'}),
+        T(2,'Generate tool schemas from operations',[1],'done','src/gen/tools.ts',{session:'map-task-2-1'}),
+        T(3,'Auth header passthrough',[1],'done','src/runtime/auth.ts',{session:'map-task-3-1'}),
+        T(4,'Pagination helpers for list endpoints',[2],'done','src/runtime/paginate.ts',{session:'map-task-4-1'}),
+        T(5,'Streaming responses over SSE',[2],'done','src/runtime/sse.ts',{session:'map-task-5-1'}),
+        T(6,'Snapshot tests for generated servers',[4,5],'running','test/snapshots.test.ts',{session:'map-task-6-1'}),
+        T(7,'CLI: mcp-gen init wizard',[2],'running','src/cli/init.ts',{session:'map-task-7-1'}),
+        T(8,'Retries with backoff on 429',[3],'verifying','src/runtime/retry.ts',{session:'map-task-8-1'}),
+        T(9,'Publish to npm with provenance',[6,7],'pending','package.json'),
+        T(10,'Docs site for generated tools',[9],'pending','docs/index.md'),
+        T(11,'Example: Stripe server',[6],'pending','examples/stripe/server.ts')]);
+      const events=[E(0.4,'info','session.activity','map-task-7-1',7,'Edit  src/cli/init.ts (+64 −3)'),E(2,'info','task.verifying','map-task-8-1',8,'Worker reported done · running 4 verify commands'),E(18,'info','task.started','map-task-7-1',7,'Started on codex · gpt-6-sol'),E(24,'info','task.started','map-task-6-1',6,'Started on claude · sonnet'),E(150,'success','task.done','map-task-5-1',5,'VERDICT: PASS · committed '+sha(5)),E(300,'info','orchestrator.started',null,null,'Running · max_parallel 4 · order claude → codex → gemini')];
+      return {sessions,tasks,events,running:true};
+    }
+    if (project==='daily-news') {
+      const feats=['RSS fetcher with ETag caching','Article extraction with readability','Thai/English language detection','Summaries with source links','Telegram channel publisher','Dedupe by canonical URL','Morning schedule at 06:30 ICT','Failure alert to admin chat'];
+      const days=['29.09','30.09','01.10','02.10','03.10','04.10','05.10','06.10','07.10','08.10','09.10','10.10','11.10','12.10'];
+      const tasks=fin(done(1,feats,['src/fetch.ts','src/extract.ts','src/lang.ts','src/summarize.ts','src/publish.ts'],['claude','gemini']).concat(done(9,days.map(d=>'Morning digest · '+d),['digests/'],['claude'])).concat([
+        T(23,'Morning digest · 13.10',[],'running','digests/2026-10-13.md',{session:'map-task-23-1'}),
+        T(24,'Add Thai PBS RSS source',[],'pending','src/sources.ts'),
+        T(25,'Cluster stories across sources',[24],'pending','src/cluster.ts')]));
+      tasks.filter(t=>t.id>=9&&t.id<=22).forEach(t=>t.result='Digest posted to the channel · 12 stories · VERDICT: PASS');
+      const sessions=[ex('map-task-21-1','claude','haiku',21,1450),ex('map-task-22-1','claude','haiku',22,1440),
+        S('map-task-23-1','claude','haiku','worker',23,'working',{created:now-4*m,last_line:'Read  feeds/bangkokpost.xml'}),
+        S('map-editor','gemini','gemini-3.8-pro','manual',null,'idle',{created:now-60*m,attached:true,last_line:'Ready'})];
+      tasks.find(t=>t.id===21).session='map-task-21-1'; tasks.find(t=>t.id===22).session='map-task-22-1';
+      const events=[E(0.5,'info','session.activity','map-task-23-1',23,'Read  feeds/bangkokpost.xml'),E(4,'info','task.started','map-task-23-1',23,'Started on claude · haiku'),E(1440,'success','task.done','map-task-22-1',22,'Digest posted · VERDICT: PASS'),E(2880,'success','task.done','map-task-21-1',21,'Digest posted · VERDICT: PASS'),E(4000,'info','orchestrator.started',null,null,'Running · max_parallel 2 · order claude → gemini')];
+      return {sessions,tasks,events,running:true};
+    }
+    if (project==='trading-telegram-executor') {
+      const tasks=fin(done(1,['Parse signal messages from Telegram','Binance spot order placement','Stop-loss and take-profit brackets','Position sizing by risk %','Paper trading mode','Signal dedupe window','Health check endpoint','Docker compose for the VPS','Trade journal in SQLite'],['src/signal.rs','src/binance.rs','src/orders.rs','src/risk.rs','src/paper.rs'],['codex','claude']).concat([
+        T(10,'Bybit futures adapter',[],'failed','src/bybit.rs',{session:'map-task-10-2',attempts:2,result:'cargo test: 3 failing in bybit::orders after 2/2 attempts'}),
+        T(11,'Reconnect websocket on close 1006',[],'failed','src/ws.rs',{session:'map-task-11-2',attempts:2,result:'Audit failed: claude: the reconnect loop has no backoff cap'}),
+        T(12,'Trailing stop orders',[3],'pending','src/orders.rs'),
+        T(13,'PnL report command',[9],'pending','src/report.rs'),
+        T(14,'Route signals to multiple accounts',[10],'pending','src/router.rs'),
+        T(15,'Backtest runner on CSV candles',[],'pending','src/backtest.rs'),
+        T(16,'Alert when slippage is above 0.5%',[11],'pending','src/alerts.rs'),
+        T(17,'Telegram admin commands',[],'pending','src/admin.rs')]));
+      const sessions=[S('map-task-10-2','codex','gpt-6-sol','worker',10,'exited',{created:now-240*m,last_line:'cargo test · 3 failed'}),S('map-task-11-2','claude','sonnet','worker',11,'exited',{created:now-220*m,last_line:'Wrote $MAP_RESULT_FILE · status done'})];
+      const events=[E(190,'info','orchestrator.paused',null,null,'Paused by you · 2 failed tasks need review'),E(196,'error','task.failed','map-task-11-2',11,'Audit failed: no backoff cap on reconnect · 2/2 attempts'),E(205,'error','task.failed','map-task-10-2',10,'cargo test: 3 failing in bybit::orders · 2/2 attempts'),E(260,'warn','task.retry','map-task-10-1',10,'Retrying: cargo test failed'),E(600,'success','task.done',null,9,'VERDICT: PASS · committed '+sha(9)),E(1400,'info','orchestrator.started',null,null,'Running · max_parallel 2 · order codex → claude')];
+      return {sessions,tasks,events,running:false};
+    }
+    if (project==='franchise-management') {
+      const titles=['TH/EN locale switcher','Extract strings: dashboard','Extract strings: branches','Extract strings: orders','Extract strings: inventory','Extract strings: staff','Extract strings: reports','Extract strings: settings','Thai Buddhist-era dates','Currency formatting in THB','Pluralization rules','Layout audit for long Thai labels','Locale-aware sorting','Translate email templates','Translate PDF invoices','Language in user profile','Detect browser language','Missing-key check in CI','Translation memory export','Glossary for franchise terms','Fix overflow in Thai labels','Thai font fallback','Search with Thai word breaks','Locale in API errors','Seed data in Thai','Docs screenshots TH','Docs screenshots EN','Accessibility labels TH','E2E tests per locale','Release notes TH/EN','Merge checklist for feat/i18n-th-en'];
+      const tasks=fin(done(1,titles,['src/i18n/','messages/th.json','messages/en.json','src/format.ts'],['claude']));
+      const events=[E(2880,'success','task.done',null,31,'VERDICT: PASS · committed '+sha(31)),E(2900,'success','task.done',null,30,'VERDICT: PASS · committed '+sha(30)),E(9000,'info','orchestrator.started',null,null,'Running · max_parallel 1 · order claude')];
+      return {sessions:[],tasks,events,running:true};
+    }
+    return {sessions:[],tasks:[],events:[E(0.1,'info','project.created',null,null,'Workspace '+(cfg.path||project)+' · map check passed')],running:!!cfg.autostart};
+  }
+  PCOLS = ['#F2A65A','#5EA8F2','#B48CF2','#4FD1B5','#F27A9B','#C9D45C','#E6E9EF','#7DD3FC'];
+  mergeAll() {
+    const projects=this.projList().map(x=>x[0]); const sessions=[], tasks=[], events=[], running={}; let maxPar=0;
+    projects.forEach((p,pi) => { const cfg=this.projectCfg(p); maxPar+=cfg.maxPar; let d=null; try{ d=JSON.parse(localStorage.getItem('map.cc.'+p)||'null'); }catch(_){} if(!d||d.v!==1) d=this.dataset(p,cfg);
+      const off=(pi+1)*1000, sn=n=>p+'/'+n;
+      d.sessions.forEach(x=>sessions.push(Object.assign({},x,{name:sn(x.name),pid:p,task_id:x.task_id!=null?x.task_id+off:null})));
+      d.tasks.forEach(t=>tasks.push(Object.assign({},t,{id:t.id+off,local:t.id,pid:p,depends_on:t.depends_on.map(y=>y+off),session:t.session?sn(t.session):null})));
+      d.events.forEach(e=>events.push(Object.assign({},e,{id:off*100000+e.id,pid:p,session:e.session?sn(e.session):null,task_id:e.task_id!=null?e.task_id+off:null})));
+      running[p]=!!d.running; });
+    events.sort((a,b)=>b.at-a.at);
+    return {projects,sessions,tasks,events:events.slice(0,80),running,maxPar};
+  }
+  sg(s) { return this.all ? s.pid : s.provider; }
+  lid(x) { return this.all && x!=null ? x%1000 : x; }
+  fibDir(g) { const n=Math.max(1,this.GROUPS.length), i=Math.max(0,this.GROUPS.indexOf(g)); const y=1-2*(i+.5)/n, r=Math.sqrt(Math.max(0,1-y*y)), th=i*2.39996; return [Math.cos(th)*r, y*.85, Math.sin(th)*r]; }
+  projSummary(p) { const st=this.state; const ts=st.tasks.filter(t=>t.pid===p), ss=st.sessions.filter(s=>s.pid===p&&s.state!=='exited'); const c={}; ts.forEach(t=>c[t.status]=(c[t.status]||0)+1); const run=this.projRunning&&this.projRunning[p]; const busy=ss.length||c.running||c.verifying||c.auditing; const state=!ts.length&&!ss.length?'idle':!run?'paused':busy?'running':'idle'; const need=st.sessions.filter(s=>s.pid===p&&['waiting_input','needs_auth','stalled','error'].includes(s.state)).length+(c.failed||0); return {ts,ss,c,state,need,order:this.projectCfg(p).order}; }
+  setScope(sc,p) { clearTimeout(this.saveT); try{ localStorage.setItem('map.scope',sc); if(p) localStorage.setItem('map.project',p); }catch(_){} window.location.reload(); }
+  persist() { if (this.all) return; clearTimeout(this.saveT); this.saveT=setTimeout(()=>{ const s=this.state; try{ localStorage.setItem('map.cc.'+s.project, JSON.stringify({v:1,sessions:s.sessions,tasks:s.tasks,events:s.events.slice(0,60),running:s.running})); }catch(_){} },400); }
+  h(str,k) { let x = 2166136261 ^ ((k||0)*374761393); for (let i=0;i<str.length;i++){ x ^= str.charCodeAt(i); x = Math.imul(x,16777619); } x ^= x>>>13; x = Math.imul(x,0x5bd1e995); x ^= x>>>15; return (x>>>0)/4294967296; }
+  gauss(id,k) { return (this.h(id,k)+this.h(id,k+1)+this.h(id,k+2)-1.5)*2; }
+  rgba(hex,a) { let c = this._c[hex]; if(!c){ const v=parseInt(hex.slice(1),16); c=this._c[hex]=[(v>>16)&255,(v>>8)&255,v&255]; } return 'rgba('+c[0]+','+c[1]+','+c[2]+','+Math.max(0,Math.min(1,a)).toFixed(3)+')'; }
+  gcolor(g) { if (this.all) { const i=this.GROUPS.indexOf(g); return i<0?'#8b95a5':this.PCOLS[i%this.PCOLS.length]; } return g==='queue' ? '#8b95a5' : ((this.PROV[g]||{}).color || '#8b95a5'); }
+  rel(at,now) { if(!at) return ''; const d=Math.round((at-now)/1000), a=Math.abs(d); const t = a<60 ? a+'s' : a<3600 ? Math.floor(a/60)+'m '+(a%60)+'s' : Math.floor(a/3600)+'h '+Math.floor((a%3600)/60)+'m'; return d>=0 ? 'in '+t : t+' ago'; }
+  hms(ms) { return new Date(ms).toTimeString().slice(0,8); }
+
+  genRuns(n) {
+    const ss = this.state.sessions; if (!ss.length) { this.runs = []; return; } const w = ss.map(s => s.state==='working'?3:s.state==='exited'?2.2:1); const tot = w.reduce((a,b)=>a+b,0);
+    this.runs = [];
+    for (let i=0;i<n;i++){ let r=this.h('run'+i,3)*tot, j=0; while(r>w[j] && j<w.length-1){ r-=w[j]; j++; } this.runs.push({id:'r'+i,session:ss[j].name}); }
+  }
+
+  depths(tasks) {
+    const m = {}, byId = {}; tasks.forEach(t => byId[t.id]=t);
+    const f = (id,g) => { if(m[id]!=null) return m[id]; const t=byId[id]; if(!t||g>30) return 0; const deps=t.depends_on.filter(d=>byId[d]); const d = deps.length ? 1+Math.max(...deps.map(x=>f(x,g+1))) : 0; m[id]=d; return d; };
+    tasks.forEach(t => f(t.id,0)); return m;
+  }
+
+  sync() {
+    const st = this.state; const byName = {}; st.sessions.forEach(s => byName[s.name]=s);
+    const want = [];
+    want.push({id:'orch',type:'orch',group:null,label:'MAP · ORCHESTRATOR',color:this.A,parent:null});
+    this.GROUPS.forEach(g => want.push({id:'p:'+g,type:'prov',group:g,label:g.toUpperCase(),color:this.gcolor(g),parent:'orch'}));
+    st.sessions.forEach(s => want.push({id:'s:'+s.name,type:'session',group:this.sg(s),label:this.all?s.name.split('/').pop():s.name,color:this.gcolor(this.sg(s)),ref:s,parent:'p:'+this.sg(s)}));
+    st.tasks.forEach(t => { const s = t.session && byName[t.session]; const g = this.all ? t.pid : s ? s.provider : (t.ran && this.GROUPS.includes(t.ran) ? t.ran : 'queue'); want.push({id:'t:'+t.id,type:'task',group:g,label:(this.all?t.pid+' #'+t.local:'#'+t.id)+' '+t.title,color:this.gcolor(g),ref:t,parent:s?'s:'+s.name:'p:'+(this.all?t.pid:'queue')}); });
+    this.STAGES.forEach(g => want.push({id:'g:'+g.id,type:'stage',group:null,label:g.label,color:'#d6dde6',ref:g,parent:'orch'}));
+    this.runs.forEach(r => { const s = byName[r.session]; if(!s) return; want.push({id:'r:'+r.id,type:'run',group:this.sg(s),label:'run · '+s.name,color:this.gcolor(this.sg(s)),ref:r,parent:'s:'+s.name}); });
+    const seen = new Set();
+    want.forEach(w => { let n = this.nodes.get(w.id); if(!n){ const p = this.nodes.get(w.parent) || this.nodes.get('orch'); n = {x:p?p.x:0,y:p?p.y:0,z:p?p.z:0,a:0,sx:0,sy:0,ss:1,sz:0}; this.nodes.set(w.id,n); } Object.assign(n,w); seen.add(w.id); });
+    for (const k of [...this.nodes.keys()]) if(!seen.has(k)) this.nodes.delete(k);
+    const L = []; const add = (a,b,kind,active) => L.push({id:a+'>'+b,a,b,kind,active:!!active});
+    const working = new Set(st.sessions.filter(s=>s.state==='working').map(s=>s.name));
+    const activeProv = new Set(st.sessions.filter(s=>s.state==='working').map(s=>this.sg(s)));
+    this.GROUPS.forEach(g => add('orch','p:'+g,'hub',activeProv.has(g)));
+    st.sessions.forEach(s => add('p:'+this.sg(s),'s:'+s.name,'own',working.has(s.name)));
+    st.sessions.forEach(s => { if(s.task_id!=null && st.tasks.some(t=>t.id===s.task_id)) add('s:'+s.name,'t:'+s.task_id,'work',working.has(s.name)); });
+    st.tasks.forEach(t => { if(!t.session) add('p:'+(this.all?t.pid:'queue'),'t:'+t.id,'own',false); });
+    st.tasks.forEach(t => t.depends_on.forEach(d => { if(st.tasks.some(x=>x.id===d)) add('t:'+d,'t:'+t.id,'dep',false); }));
+    this.activeStages = new Set();
+    st.tasks.forEach(t => {
+      if(t.status==='verifying') ['test','typecheck','lint','build'].forEach(g => { add('t:'+t.id,'g:'+g,'stage',true); this.activeStages.add('g:'+g); });
+      if(t.status==='auditing') { add('t:'+t.id,'g:audit','stage',true); this.activeStages.add('g:audit'); }
+    });
+    ['tmux','sqlite','ws'].forEach(g => add('orch','g:'+g,'infra',false));
+    this.links = L;
+    this.gcount = {}; want.forEach(w => { if((w.type==='session'||w.type==='task') && w.group) this.gcount[w.group]=(this.gcount[w.group]||0)+1; });
+    this.layout();
+  }
+
+  layout() {
+    const view = this.state.view; const N = [...this.nodes.values()];
+    const set = (n,x,y,z,a) => { n.tx=x; n.ty=y; n.tz=z; n.ta=a==null?1:a; };
+    const sorted = (type,g) => N.filter(n=>n.type===type && (g===undefined||n.group===g)).sort((a,b)=>a.id<b.id?-1:1);
+    const sIdx = n => this.STAGES.findIndex(s=>'g:'+s.id===n.id);
+    const SN = this.STAGES.length;
+    if (view==='orbit') {
+      const D = {claude:[-0.72,-0.30,0.55],codex:[0.70,-0.38,0.50],gemini:[0.10,0.66,0.62],aider:[0.62,0.36,-0.68],queue:[-0.58,0.42,-0.66]};
+      Object.keys(D).forEach(k => { const v=D[k], l=Math.hypot(v[0],v[1],v[2]); D[k]=v.map(c=>c/l); });
+      N.forEach(n => {
+        const d = D[n.group] || this.fibDir(n.group); const G = k => this.gauss(n.id,k);
+        if (n.type==='orch') set(n,0,0,0);
+        else if (n.type==='prov') set(n,d[0]*.46,d[1]*.46,d[2]*.46);
+        else if (n.type==='session') set(n,d[0]*.62+G(1)*.14,d[1]*.62+G(4)*.14,d[2]*.62+G(7)*.14);
+        else if (n.type==='task') set(n,d[0]*.72+G(1)*.18,d[1]*.72+G(4)*.18,d[2]*.72+G(7)*.18);
+        else if (n.type==='run') { let x=d[0]*.58+G(1)*.24, y=d[1]*.58+G(4)*.24, z=d[2]*.58+G(7)*.24; const l=Math.hypot(x,y,z); if(l>.96){ x*=.96/l; y*=.96/l; z*=.96/l; } set(n,x,y,z); }
+        else if (n.type==='stage') { const t=sIdx(n)/SN*Math.PI*2; set(n,Math.cos(t)*1.2,0,Math.sin(t)*1.2); }
+      });
+    } else if (view==='rings') {
+      const span = 2*Math.PI/this.GROUPS.length;
+      this.GROUPS.forEach((g,i) => {
+        const c = -Math.PI/2 + i*span, sp = span*.8;
+        const place = (arr,r,alt) => arr.forEach((n,k) => { const t=c-sp/2+sp*(k+.5)/arr.length; const rr=r+(alt?(k%2)*alt:0); set(n,Math.cos(t)*rr,Math.sin(t)*rr,0); });
+        const p = this.nodes.get('p:'+g); if(p) set(p,Math.cos(c)*.2,Math.sin(c)*.2,0);
+        place(sorted('session',g),.42); place(sorted('task',g),.58,.08);
+        sorted('run',g).forEach(n => { const t=c+(this.h(n.id,1)-.5)*sp; const r=.8+this.h(n.id,2)*.15; set(n,Math.cos(t)*r,Math.sin(t)*r,0); });
+      });
+      N.forEach(n => { if(n.type==='orch') set(n,0,0,0); if(n.type==='stage'){ const t=-Math.PI/2+sIdx(n)/SN*Math.PI*2; set(n,Math.cos(t)*1.12,Math.sin(t)*1.12,0); } });
+    } else if (view==='circle') {
+      const main = N.filter(n=>n.type==='prov'||n.type==='session'||n.type==='task').sort((a,b)=>this.GROUPS.indexOf(a.group)-this.GROUPS.indexOf(b.group) || ({prov:0,session:1,task:2}[a.type]-{prov:0,session:1,task:2}[b.type]) || (a.id<b.id?-1:1));
+      main.forEach((n,i) => { const t=-Math.PI/2+i/main.length*Math.PI*2; set(n,Math.cos(t)*.9,Math.sin(t)*.9,0); });
+      N.forEach(n => {
+        if(n.type==='orch') set(n,0,0,0);
+        if(n.type==='stage'){ const t=-Math.PI/2+(sIdx(n)+.5)/SN*Math.PI*2; set(n,Math.cos(t)*.32,Math.sin(t)*.32,0); }
+      });
+      N.forEach(n => { if(n.type==='run'){ const p=this.nodes.get(n.parent); if(!p) return; const a=Math.atan2(p.ty,p.tx)+(this.h(n.id,1)-.5)*.12; const r=1.0+this.h(n.id,2)*.14; set(n,Math.cos(a)*r,Math.sin(a)*r,0,.8); } });
+    } else {
+      const orch = this.nodes.get('orch'); if(orch) set(orch,-1.5,0,0);
+      this.GROUPS.forEach((g,i) => { const p=this.nodes.get('p:'+g); if(p) set(p,-1.15,(this.GROUPS.length>1?-0.75+1.5*i/(this.GROUPS.length-1):0),0); });
+      const ses = N.filter(n=>n.type==='session').sort((a,b)=>this.GROUPS.indexOf(a.group)-this.GROUPS.indexOf(b.group)||(a.id<b.id?-1:1));
+      ses.forEach((n,i) => set(n,-0.78,ses.length>1?-0.88+1.76*i/(ses.length-1):0,0));
+      const dm = this.depths(this.state.tasks); const cols = {};
+      N.filter(n=>n.type==='task').forEach(n => { const d=dm[n.ref.id]||0; (cols[d]=cols[d]||[]).push(n); });
+      Object.keys(cols).forEach(d => { const arr=cols[d].sort((a,b)=>a.ref.id-b.ref.id); const sp=Math.min(.24,1.7/Math.max(1,arr.length-1)); arr.forEach((n,k) => set(n,-0.36+d*.29,(k-(arr.length-1)/2)*sp,0)); });
+      N.filter(n=>n.type==='stage').forEach(n => set(n,1.2,-0.8+1.6*sIdx(n)/(SN-1),0));
+      N.forEach(n => { if(n.type==='run'){ const p=this.nodes.get(n.parent); if(!p) return; set(n,p.tx-0.07-this.h(n.id,1)*.2,p.ty+(this.h(n.id,2)-.5)*.07,0,.55); } });
+    }
+  }
+
+  componentDidMount() {
+    const cv = this.canvasRef.current; this.cv = cv; this.ctx = cv.getContext('2d');
+    this.genRuns(this.props.runDensity ?? 260);
+    this.ga[this.state.view] = 1;
+    if (this.state.view!=='orbit') { this.cam.pitch=this.cam.pitchT=0; this.cam.yaw=this.cam.yawT=0; }
+    this.sync();
+    const resize = () => { const r=cv.parentElement.getBoundingClientRect(); this.dpr=Math.min(2,window.devicePixelRatio||1); this.W=r.width; this.H=r.height; cv.width=Math.round(r.width*this.dpr); cv.height=Math.round(r.height*this.dpr); };
+    this.ro = new ResizeObserver(resize); this.ro.observe(cv.parentElement); resize();
+    this.onDown = e => { this.dragging=true; this.moved=0; this.lx=e.clientX; this.ly=e.clientY; this.flyTo=null; try{cv.setPointerCapture(e.pointerId);}catch(_){} };
+    this.onMove = e => {
+      const r = cv.getBoundingClientRect(); const mx=e.clientX-r.left, my=e.clientY-r.top;
+      if (this.dragging) {
+        const dx=e.clientX-this.lx, dy=e.clientY-this.ly; this.lx=e.clientX; this.ly=e.clientY; this.moved+=Math.abs(dx)+Math.abs(dy);
+        if (this.state.view==='orbit') { this.cam.yawT+=dx*.006; this.cam.yaw+=dx*.006; this.cam.pitchT=Math.max(-1.2,Math.min(1.2,this.cam.pitchT+dy*.006)); }
+        else { this.cam.pxT+=dx; this.cam.pyT+=dy; this.cam.px+=dx; this.cam.py+=dy; }
+      }
+      this.hover = this.dragging && this.moved>3 ? null : this.hit(mx,my);
+      cv.style.cursor = this.dragging && this.moved>3 ? 'grabbing' : this.hover ? 'pointer' : 'grab';
+    };
+    this.onUp = () => { if (this.dragging && this.moved<4) this.setState({selected:this.hover||null}); this.dragging=false; };
+    this.onLeave = () => { this.hover=null; };
+    this.onWheel = e => { e.preventDefault(); this.cam.zoomT=Math.max(.45,Math.min(3.2,this.cam.zoomT*Math.exp(-e.deltaY*.0012))); };
+    this.onKey = e => { if(e.key==='Escape'){ if(this.state.authM) this.closeAuth(); else if(this.state.sesModal) this.setState({sesModal:false}); else if(this.state.modal) this.setState({modal:false}); else if(this.state.projMenu) this.setState({projMenu:false}); else this.setState({selected:null}); } };
+    cv.addEventListener('pointerdown',this.onDown); cv.addEventListener('pointermove',this.onMove); cv.addEventListener('pointerup',this.onUp); cv.addEventListener('pointerleave',this.onLeave); cv.addEventListener('wheel',this.onWheel,{passive:false});
+    window.addEventListener('keydown',this.onKey);
+    this.resize = resize;
+    this.frame = time => { this.raf=requestAnimationFrame(this.frame); if(!this.W || !this.H) resize(); if(this.ctx && this.W) this.draw(time); };
+    this.raf = requestAnimationFrame(this.frame);
+    this.clockT = setInterval(() => this.setState({now:Date.now()}), 1000);
+    this.setSim();
+    this.ingestQueued();
+    this.persist();
+  }
+
+  componentWillUnmount() {
+    cancelAnimationFrame(this.raf); clearInterval(this.clockT); clearInterval(this.simT); if(this.ro) this.ro.disconnect();
+    window.removeEventListener('keydown',this.onKey);
+  }
+
+  componentDidUpdate(pp) {
+    pp = pp || {};
+    const st = this.state; const ps = this._prev || st; this._prev = st;
+    if (ps.view!==st.view && st.view==='orbit') this.cam.pitchT=.38;
+    if (ps.view!==st.view) { this.cam.pxT=0; this.cam.pyT=0; }
+    if (ps.sessions!==st.sessions || ps.tasks!==st.tasks || ps.view!==st.view) this.sync();
+    if (pp.runDensity!==this.props.runDensity) { this.genRuns(this.props.runDensity ?? 260); this.sync(); }
+    if (pp.simSpeed!==this.props.simSpeed) this.setSim();
+    if (ps.sessions!==st.sessions || ps.tasks!==st.tasks || ps.events!==st.events || ps.running!==st.running) this.persist();
+  }
+
+  setSim() { clearInterval(this.simT); const sp=this.props.simSpeed ?? 'normal'; if(sp==='paused') return; this.simT=setInterval(()=>this.tick(), sp==='fast'?1100:2600); }
+
+  pickProvider(sessions) {
+    const skipped = [];
+    for (const p of this.ORDER) { if(!this.PROV[p].available){ skipped.push(p+' missing'); continue; } if(!this.state.auth[p]){ skipped.push(p+' signed out'); continue; } if(sessions.some(s=>s.provider===p && s.state==='rate_limited')){ skipped.push(p+' rate limited'); continue; } return {p,skipped}; }
+    return {p:'claude',skipped};
+  }
+
+  tick() {
+    if (this.all) return;
+    let spawn = null;
+    const ev = (level,kind,session,task_id,message) => ({id:this.eid++,at:Date.now(),level,kind,session,task_id,message});
+    this.setState(s => {
+      const now = Date.now(); let sessions = s.sessions.map(x=>Object.assign({},x)); const tasks = s.tasks.map(x=>Object.assign({},x)); const evs = [];
+      const byName = n => sessions.find(x=>x.name===n);
+      sessions.forEach(x => {
+        if (x.state==='starting') { x.state = x.role==='manual'?'idle':'working'; x.last_line = x.role==='manual'?'Ready':'Reading the task prompt and the $MAP_RESULT_FILE protocol'; }
+        if (x.state==='rate_limited' && x.reset_at && x.reset_at<=now) { x.state='working'; x.wakeups++; x.reset_at=null; x.detail=null; x.last_line='Rate limit reset · continuing the task'; evs.push(ev('success','session.woke',x.name,x.task_id,'Rate limit reset · wake prompt typed')); }
+      });
+      if (s.running) {
+        const inflight = tasks.filter(t => (t.status==='running' && (byName(t.session)||{}).state==='working') || t.status==='verifying' || t.status==='auditing');
+        if (inflight.length) {
+          const t = inflight[Math.floor(Math.random()*inflight.length)]; t.progress=(t.progress||0)+1; const ses = byName(t.session);
+          if (t.status==='running' && t.progress>=4) { t.status='verifying'; t.progress=0; if(ses){ ses.state='idle'; ses.last_line='Wrote $MAP_RESULT_FILE · status done'; } evs.push(ev('info','task.verifying',t.session,t.id,'Worker reported done · running 4 verify commands')); }
+          else if (t.status==='verifying' && t.progress>=2) { t.status='auditing'; t.progress=0; evs.push(ev('success','task.verify_passed',t.session,t.id,'bun test · typecheck · lint · build passed')); }
+          else if (t.status==='auditing' && t.progress>=2) {
+            const sha = Math.floor(Math.random()*0xfffffff).toString(16).padStart(7,'0'); t.status='done'; t.progress=0; t.result='VERDICT: PASS · committed '+sha;
+            sessions.forEach(x => { if(x.task_id===t.id && x.state!=='exited') x.state='exited'; });
+            evs.push(ev('success','task.done',t.session,t.id,'VERDICT: PASS · committed '+sha));
+          } else if (t.status==='running' && ses) {
+            const acts = ['Read  '+t.file,'Edit  '+t.file+' (+'+(8+Math.floor(Math.random()*50))+' −'+Math.floor(Math.random()*12)+')','Bash  bun test','Grep  "TODO" in '+t.file.split('/').slice(0,2).join('/'),'Bash  bun run typecheck','Write '+t.file.replace(/\.(\w+)$/,'.test.$1')];
+            ses.last_line = acts[Math.floor(Math.random()*acts.length)];
+            evs.push(ev('info','session.activity',ses.name,t.id,ses.last_line)); spawn = ses.name;
+          }
+        }
+        const active = tasks.filter(t=>['running','verifying','auditing'].includes(t.status)).length;
+        if (active < s.maxPar) {
+          const ready = tasks.find(t => t.status==='pending' && t.depends_on.every(d => (tasks.find(x=>x.id===d)||{}).status==='done'));
+          if (ready) {
+            const pick = ready.provider ? {p:ready.provider,skipped:[]} : this.pickProvider(sessions);
+            const model = ready.model || this.PROV[pick.p].def; const name = 'map-task-'+ready.id+'-'+ready.attempts;
+            sessions = sessions.filter(x=>x.name!==name);
+            sessions.push({name,provider:pick.p,model,role:'worker',task_id:ready.id,state:'starting',detail:null,reset_at:null,wakeups:0,last_line:'Launching tmux session',attached:false,created:now,log:[]});
+            ready.status='running'; ready.session=name; ready.progress=0;
+            evs.push(ev('info','task.started',name,ready.id,'Started on '+pick.p+' · '+model+(pick.skipped.length?' · skipped '+pick.skipped.join(', '):'')));
+          }
+        }
+      }
+      return { sessions, tasks, events:[...evs.reverse(), ...s.events].slice(0,80), now };
+    }, () => {
+      if (spawn) { this.runs.push({id:'n'+(this.rid++),session:spawn}); const max=(this.props.runDensity??260)+120; if(this.runs.length>max) this.runs.splice(this.runs.findIndex(r=>r.id[0]==='n'),1); this.sync(); }
+    });
+  }
+
+  hit(mx,my) {
+    let best=null, bd=1e9, bestRun=null, brd=1e9;
+    const RAD = {orch:18,prov:14,stage:12,session:9,task:9,run:5};
+    for (const n of this.nodes.values()) {
+      if (!n.vis || n.a*n.fa<.15) continue;
+      const d = Math.hypot(n.sx-mx,n.sy-my); const rad = RAD[n.type]*Math.max(.7,n.ss);
+      if (d<rad) { if(n.type==='run'){ if(d<brd){ brd=d; bestRun=n.id; } } else if(d<bd){ bd=d; best=n.id; } }
+    }
+    return best || bestRun;
+  }
+
+  pt(a,b,t,bez) {
+    if (!bez) return [a.sx+(b.sx-a.sx)*t, a.sy+(b.sy-a.sy)*t];
+    const mx=(a.sx+b.sx)/2, u=1-t;
+    return [u*u*u*a.sx+3*u*u*t*mx+3*u*t*t*mx+t*t*t*b.sx, u*u*u*a.sy+3*u*u*t*a.sy+3*u*t*t*b.sy+t*t*t*b.sy];
+  }
+
+  hex(ctx,x,y,r) { ctx.beginPath(); for(let i=0;i<6;i++){ const a=Math.PI/6+i*Math.PI/3; const px=x+Math.cos(a)*r, py=y+Math.sin(a)*r; i?ctx.lineTo(px,py):ctx.moveTo(px,py); } ctx.closePath(); }
+
+  draw(time) {
+    const ctx=this.ctx, W=this.W, H=this.H, st=this.state, view=st.view, cam=this.cam, A=this.A, TN=this.TONES;
+    ctx.setTransform(this.dpr,0,0,this.dpr,0,0); ctx.clearRect(0,0,W,H);
+    for (const n of this.nodes.values()) { n.x+=(n.tx-n.x)*.075; n.y+=(n.ty-n.y)*.075; n.z+=(n.tz-n.z)*.075; n.a+=(n.ta-n.a)*.06; }
+    if (view==='orbit') { if(st.motion && !this.dragging && !this.flyTo) cam.yawT+=.0016; }
+    else { cam.yawT=Math.round(cam.yaw/(Math.PI*2))*Math.PI*2; cam.pitchT=0; }
+    cam.yaw+=(cam.yawT-cam.yaw)*.08; cam.pitch+=(cam.pitchT-cam.pitch)*.08; cam.zoom+=(cam.zoomT-cam.zoom)*.12;
+    const Rt = (view==='graph' ? Math.min(W/2.9,H/2.05) : Math.min(W,H)*.38) * cam.zoom; cam.R+=(Rt-cam.R)*.1;
+    if (this.flyTo) { const f=this.nodes.get(this.flyTo); if(f && this.flyN-- > 0){ cam.pxT-=(f.sx-W/2)*.12; cam.pyT-=(f.sy-H/2)*.12; } else this.flyTo=null; }
+    cam.px+=(cam.pxT-cam.px)*.15; cam.py+=(cam.pyT-cam.py)*.15;
+    cam.ox+=((view==='graph'?.15:0)-cam.ox)*.08;
+    for (const v in this.ga) this.ga[v]+=((v===view?1:0)-this.ga[v])*.07;
+    const R=cam.R, cx=W/2+cam.px+cam.ox*R, cy=H/2+cam.py-12;
+    const cyw=Math.cos(cam.yaw), syw=Math.sin(cam.yaw), cp=Math.cos(cam.pitch), sp=Math.sin(cam.pitch), F=3.2;
+    const P = (x,y,z) => { const x1=x*cyw-z*syw, z1=x*syw+z*cyw; const y1=y*cp-z1*sp, z2=y*sp+z1*cp; const s=F/(F+z2); return [cx+x1*s*R, cy+y1*s*R, s, z2]; };
+    const poly = (pts,stroke,w) => { ctx.beginPath(); pts.forEach((p,i)=>{ const q=P(p[0],p[1],p[2]); i?ctx.lineTo(q[0],q[1]):ctx.moveTo(q[0],q[1]); }); ctx.strokeStyle=stroke; ctx.lineWidth=w||1; ctx.stroke(); };
+    const circ = (r,plane,y0) => { const a=[]; for(let i=0;i<=72;i++){ const t=i/72*Math.PI*2; a.push(plane==='xz'?[Math.cos(t)*r,y0||0,Math.sin(t)*r]:[Math.cos(t)*r,Math.sin(t)*r,0]); } return a; };
+    const mono = (sz,w) => (w||500)+' '+sz+'px "JetBrains Mono", ui-monospace, monospace';
+    if ('letterSpacing' in ctx) ctx.letterSpacing='0px';
+
+    const go=this.ga.orbit, gr=this.ga.rings, gg=this.ga.graph, gc=this.ga.circle;
+    if (go>.01) {
+      [-0.7,-0.35,0,0.35,0.7].forEach(y => poly(circ(Math.sqrt(1-y*y),'xz',y),'rgba(255,255,255,'+(.045*go)+')'));
+      for (let m=0;m<6;m++){ const th=m*Math.PI/6, a=[]; for(let i=0;i<=72;i++){ const t=i/72*Math.PI*2; a.push([Math.cos(t)*Math.cos(th),Math.sin(t),Math.cos(t)*Math.sin(th)]); } poly(a,'rgba(255,255,255,'+(.035*go)+')'); }
+      poly(circ(1.2,'xz',0),'rgba(255,255,255,'+(.2*go)+')',1.2);
+    }
+    if (gr>.01) {
+      [.2,.42,.62,.95].forEach(r => poly(circ(r,'xy'),'rgba(255,255,255,'+(.05*gr)+')'));
+      poly(circ(1.12,'xy'),'rgba(255,255,255,'+(.18*gr)+')',1.2);
+      const span=2*Math.PI/this.GROUPS.length;
+      for (let i=0;i<this.GROUPS.length;i++){ const t=-Math.PI/2+(i+.5)*span; poly([[Math.cos(t)*.12,Math.sin(t)*.12,0],[Math.cos(t)*.98,Math.sin(t)*.98,0]],'rgba(255,255,255,'+(.05*gr)+')'); }
+    }
+    if (gc>.01) { poly(circ(.9,'xy'),'rgba(255,255,255,'+(.12*gc)+')'); poly(circ(.32,'xy'),'rgba(255,255,255,'+(.08*gc)+')'); }
+    if (gg>.02) {
+      ctx.font=mono(9.5); if('letterSpacing' in ctx) ctx.letterSpacing='2px'; ctx.textAlign='center'; ctx.fillStyle='rgba(122,132,148,'+(.9*gg)+')';
+      [[-1.5,'ORCH'],[-1.15,this.all?'PROJECTS':'PROVIDERS'],[-0.78,'SESSIONS'],[0.22,'TASKS · DEPTH →'],[1.2,'PIPELINE']].forEach(h => { const q=P(h[0],-1.04,0); ctx.fillText(h[1],q[0],q[1]); });
+      if('letterSpacing' in ctx) ctx.letterSpacing='0px';
+    }
+
+    const q=st.search.trim().toLowerCase(), f=st.filter, hid=st.hidden, sel=st.selected, hov=this.hover, focusId=hov||sel;
+    const nbr = new Set(); if (focusId) { nbr.add(focusId); this.links.forEach(l => { if(l.a===focusId) nbr.add(l.b); if(l.b===focusId) nbr.add(l.a); }); if(focusId.startsWith('s:')) this.nodes.forEach((n,k)=>{ if(n.type==='run'&&n.parent===focusId) nbr.add(k); }); }
+    const list = [];
+    for (const n of this.nodes.values()) {
+      n.vis = !hid[n.type];
+      const p=P(n.x,n.y,n.z); n.sx=p[0]; n.sy=p[1]; n.ss=p[2]; n.sz=p[3];
+      let fa=1; if (f!=='all' && n.group && n.group!==f) fa=.08;
+      n.match = !!q && (n.label.toLowerCase().includes(q) || (n.ref && n.ref.file && n.ref.file.includes(q)));
+      if (q && !n.match && n.type!=='run') fa*=.15; if (q && n.type==='run') fa*=.15;
+      if (hov && !nbr.has(n.id)) fa*=.22;
+      n.fa=fa; n.da=Math.max(.28,Math.min(1,1-n.sz*.5));
+      if (n.vis) list.push(n);
+    }
+    const bez = gg>.5;
+    const kindA = {hub:.3,own:.16,work:.5,dep:.22,stage:.5,infra:.12};
+    for (const l of this.links) {
+      const a=this.nodes.get(l.a), b=this.nodes.get(l.b); if(!a||!b||!a.vis||!b.vis) continue;
+      const touch = focusId && (l.a===focusId || l.b===focusId);
+      let al = kindA[l.kind]*Math.min(a.a,b.a)*Math.min(a.fa,b.fa)*Math.min(a.da,b.da);
+      if (touch) al = Math.min(1,al*2.4+.25);
+      if (al<.01) continue;
+      const col = l.kind==='hub'?A : l.kind==='dep'||l.kind==='infra'?'#ffffff' : l.kind==='stage'?TN.info : a.color;
+      ctx.strokeStyle=this.rgba(col,al); ctx.lineWidth=touch?1.5:1;
+      ctx.beginPath(); ctx.moveTo(a.sx,a.sy);
+      if (bez) { const mx=(a.sx+b.sx)/2; ctx.bezierCurveTo(mx,a.sy,mx,b.sy,b.sx,b.sy); } else ctx.lineTo(b.sx,b.sy);
+      ctx.stroke();
+    }
+    if (st.motion) {
+      for (const l of this.links) {
+        if (!l.active) continue; const a=this.nodes.get(l.a), b=this.nodes.get(l.b); if(!a||!b||!a.vis||!b.vis) continue;
+        const al=Math.min(a.fa,b.fa)*Math.min(a.a,b.a); if(al<.05) continue;
+        const col = l.kind==='stage'?TN.info : l.kind==='hub'?A : a.color;
+        for (let j=0;j<2;j++) { const t=((time*.00032)+this.h(l.id,1)+j*.5)%1; const p=this.pt(a,b,t,bez); ctx.fillStyle=this.rgba(col,.95*al); ctx.shadowColor=col; ctx.shadowBlur=8; ctx.beginPath(); ctx.arc(p[0],p[1],1.8,0,7); ctx.fill(); }
+      }
+      ctx.shadowBlur=0;
+    }
+
+    list.sort((a,b)=>b.sz-a.sz);
+    const labels = [];
+    for (const n of list) {
+      const al=n.a*n.fa*n.da; if(al<.01) continue; const s=n.ss, x=n.sx, y=n.sy;
+      if (n.type==='run') { ctx.fillStyle=this.rgba(n.color,.62*al); ctx.beginPath(); ctx.arc(x,y,1.5*s,0,7); ctx.fill(); continue; }
+      if (n.type==='session') {
+        const se=n.ref, r=4.6*s, tc=TN[this.SESSION_TONE[se.state]];
+        if (se.state==='exited') { ctx.strokeStyle=this.rgba(n.color,.6*al); ctx.lineWidth=1.2; ctx.beginPath(); ctx.arc(x,y,r,0,7); ctx.stroke(); }
+        else {
+          ctx.shadowColor=n.color; ctx.shadowBlur=12*al; ctx.fillStyle=this.rgba(n.color,al); ctx.beginPath(); ctx.arc(x,y,r,0,7); ctx.fill(); ctx.shadowBlur=0;
+          if (se.state==='working'||se.state==='starting') { const pr=r+3+2.5*(.5+.5*Math.sin(time*.004+this.h(n.id,9)*6)); ctx.strokeStyle=this.rgba(tc,.5*al); ctx.lineWidth=1; ctx.beginPath(); ctx.arc(x,y,pr,0,7); ctx.stroke(); }
+          else if (se.state!=='idle') { ctx.setLineDash([2,2]); ctx.strokeStyle=this.rgba(tc,.95*al); ctx.lineWidth=1.4; ctx.beginPath(); ctx.arc(x,y,r+3.5,0,7); ctx.stroke(); ctx.setLineDash([]); }
+        }
+        if (st.names || n.match || n.id===focusId) labels.push([n,x+r+6,y+3.5,mono(9.5),this.rgba('#d6dde6',.8*al),'left']);
+      } else if (n.type==='task') {
+        const t=n.ref, r=4.6*s; let fill=null, stroke=null;
+        if (t.status==='pending') stroke=this.rgba('#a3acb9',al); else if (t.status==='running') fill=this.rgba(n.color,al); else if (t.status==='verifying'||t.status==='auditing') fill=this.rgba(TN.info,al); else if (t.status==='done') fill=this.rgba(n.color,.5*al); else if (t.status==='failed') fill=this.rgba(TN.bad,al); else stroke=this.rgba('#8b95a5',.4*al);
+        ctx.beginPath(); ctx.moveTo(x,y-r); ctx.lineTo(x+r,y); ctx.lineTo(x,y+r); ctx.lineTo(x-r,y); ctx.closePath();
+        if (fill) { ctx.fillStyle=fill; ctx.fill(); } if (stroke) { ctx.strokeStyle=stroke; ctx.lineWidth=1.2; ctx.stroke(); }
+        if (t.status==='running'||t.status==='verifying'||t.status==='auditing') { const pr=r+2.5+2*(.5+.5*Math.sin(time*.005+this.h(n.id,3)*6)); ctx.strokeStyle=this.rgba(fill?(t.status==='running'?n.color:TN.info):'#fff',.4*al); ctx.lineWidth=1; ctx.beginPath(); ctx.moveTo(x,y-pr); ctx.lineTo(x+pr,y); ctx.lineTo(x,y+pr); ctx.lineTo(x-pr,y); ctx.closePath(); ctx.stroke(); }
+        if ((st.names && gg>.5 && !this.all) || n.match || n.id===focusId) labels.push([n,x+r+6,y+3.5,mono(9.5),this.rgba('#e6e9ef',.85*al),'left']);
+      } else if (n.type==='prov') {
+        const r=10*s, info=this.PROV[n.group], avail=!info||info.available;
+        ctx.fillStyle=this.rgba(n.color,.16*al); ctx.beginPath(); ctx.arc(x,y,r,0,7); ctx.fill();
+        if (!avail) ctx.setLineDash([3,3]); ctx.strokeStyle=this.rgba(n.color,(avail?.95:.45)*al); ctx.lineWidth=1.4; ctx.beginPath(); ctx.arc(x,y,r,0,7); ctx.stroke(); ctx.setLineDash([]);
+        ctx.fillStyle=this.rgba(n.color,al); ctx.font='600 '+(10*s).toFixed(1)+'px Geist, sans-serif'; ctx.textAlign='center'; ctx.fillText(n.group[0].toUpperCase(),x,y+3.5*s);
+        labels.push([n,x+r+7,y-1,'600 11px Geist, sans-serif',this.rgba('#e6e9ef',.95*al),'left',String(this.gcount[n.group]||0)+(avail?'':' · missing')]);
+      } else if (n.type==='stage') {
+        const r=9*s, act=this.activeStages && this.activeStages.has(n.id);
+        this.hex(ctx,x,y,r); ctx.fillStyle='rgba(12,14,18,'+(.95*al)+')'; ctx.fill();
+        if (act) { ctx.shadowColor=TN.info; ctx.shadowBlur=12; }
+        ctx.strokeStyle=act?this.rgba(TN.info,al):'rgba(255,255,255,'+(.5*al)+')'; ctx.lineWidth=1.3; ctx.stroke(); ctx.shadowBlur=0;
+        ctx.fillStyle=act?this.rgba(TN.info,al):'rgba(214,221,230,'+(.85*al)+')'; ctx.font=mono((7.5*s).toFixed(1),600); ctx.textAlign='center'; ctx.fillText(n.ref.glyph,x,y+2.6*s);
+        if (st.names || n.id===focusId) labels.push([n,x,y+r+12,mono(9),'rgba(139,149,165,'+(.85*al)+')','center',null,n.ref.label.split(' ·')[0]]);
+      } else if (n.type==='orch') {
+        const r=15*s; ctx.shadowColor=A; ctx.shadowBlur=22; this.hex(ctx,x,y,r); ctx.fillStyle='rgba(11,12,16,'+al+')'; ctx.fill(); ctx.strokeStyle=this.rgba(A,al); ctx.lineWidth=2.2; ctx.stroke(); ctx.shadowBlur=0;
+        this.hex(ctx,x,y,r*.42); ctx.fillStyle=this.rgba(A,(st.running?.85:.3)*al); ctx.fill();
+        ctx.font=mono(10,600); if('letterSpacing' in ctx) ctx.letterSpacing='1.5px'; const tw=ctx.measureText(n.label).width;
+        ctx.fillStyle='rgba(0,0,0,'+(.78*al)+')'; ctx.fillRect(x-tw/2-8,y+r+8,tw+16,18); ctx.strokeStyle='rgba(255,255,255,'+(.12*al)+')'; ctx.lineWidth=1; ctx.strokeRect(x-tw/2-8,y+r+8,tw+16,18);
+        ctx.fillStyle='rgba(230,233,239,'+al+')'; ctx.textAlign='center'; ctx.fillText(n.label,x,y+r+21); if('letterSpacing' in ctx) ctx.letterSpacing='0px';
+      }
+      if (n.id===sel) { ctx.setLineDash([3,3]); ctx.lineDashOffset=-time*.02; ctx.strokeStyle=A; ctx.lineWidth=1.4; ctx.beginPath(); ctx.arc(x,y,(n.type==='orch'?24:n.type==='prov'?16:11)*s,0,7); ctx.stroke(); ctx.setLineDash([]); ctx.lineDashOffset=0; }
+      else if (n.match) { ctx.strokeStyle='rgba(255,255,255,.85)'; ctx.lineWidth=1.2; ctx.beginPath(); ctx.arc(x,y,10*s,0,7); ctx.stroke(); }
+    }
+    for (const L of labels) {
+      const [n,x,y,font,col,align,sub,text] = L; ctx.font=font; ctx.textAlign=align; ctx.fillStyle=col; ctx.fillText(text||n.label,x,y);
+      if (sub!=null) { ctx.font=mono(9.5); ctx.fillStyle=this.rgba(n.color,.9*n.a*n.fa); ctx.fillText(sub,x,y+12); }
+    }
+    if (hov) {
+      const n=this.nodes.get(hov);
+      if (n && n.type==='run') { const txt=n.label; ctx.font=mono(10); const tw=ctx.measureText(txt).width; ctx.fillStyle='rgba(0,0,0,.85)'; ctx.fillRect(n.sx+10,n.sy-22,tw+14,18); ctx.fillStyle='#e6e9ef'; ctx.textAlign='left'; ctx.fillText(txt,n.sx+17,n.sy-9); }
+    }
+  }
+
+
+  AUTHC = {claude:{cmd:'claude setup-token',url:'https://claude.ai/oauth/authorize?code=…',key:'ANTHROPIC_API_KEY',ph:'sk-ant-…',store:'~/.claude/.credentials.json'},codex:{cmd:'codex login',url:'https://auth.openai.com/device',key:'OPENAI_API_KEY',ph:'sk-…',store:'~/.codex/auth.json'},gemini:{cmd:'agy auth login',url:'https://accounts.google.com/device',key:'GEMINI_API_KEY',ph:'AIza…',store:'~/.gemini/oauth_creds.json'},aider:{cmd:'aider --api-key',url:'',key:'AIDER_API_KEY',ph:'…',store:'~/.aider.conf.yml'}};
+  PCOL = {claude:'#F2A65A',codex:'#5EA8F2',gemini:'#B48CF2',aider:'#4FD1B5'};
+  loadAuth() { try { const a=JSON.parse(localStorage.getItem('map.auth')||'null'); if(a) return a; } catch(_){} return {claude:true,codex:false,gemini:true,aider:false}; }
+  saveAuth(a) { try { localStorage.setItem('map.auth',JSON.stringify(a)); } catch(_){} }
+  openAuth(p) { const c=()=>Math.random().toString(36).slice(2,6).toUpperCase().padEnd(4,'X'); this.setState({authM:{p,method:'browser',phase:'start',key:'',code:c()+'-'+c()}}); }
+  closeAuth = () => { clearTimeout(this.authT); this.setState({authM:null}); };
+  authPrimary = () => { const m=this.state.authM; if(!m) return; if(m.phase==='done') return this.closeAuth(); if(m.phase==='waiting') return this.authDone(); if(m.method==='browser'){ this.setState({authM:Object.assign({},m,{phase:'waiting'})}); clearTimeout(this.authT); this.authT=setTimeout(()=>this.authDone(),5000); } else if(m.key.trim().length>6) this.authDone(); };
+  authDone() { clearTimeout(this.authT); const m=this.state.authM; if(!m||m.phase==='done') return; const p=m.p; const auth=Object.assign({},this.state.auth,{[p]:true}); this.saveAuth(auth); const fixed=this.state.sessions.filter(s=>s.provider===p&&s.state==='needs_auth').length; this.setState(s=>({auth,authM:Object.assign({},m,{phase:'done',fixed}),sessions:s.sessions.map(x=>x.provider===p&&x.state==='needs_auth'?Object.assign({},x,{state:'idle',detail:null,last_line:'Signed in · ready'}):x)})); this.pushE('success','provider.signed_in',null,null,p+' signed in'+(m.method==='key'?' with '+this.AUTHC[p].key:' via browser')+(fixed?' · '+fixed+' session resumed':'')); }
+  signOut(p) { const auth=Object.assign({},this.state.auth,{[p]:false}); this.saveAuth(auth); this.setState({auth}); this.showToast(p+' signed out · new tasks skip it until you sign in','warn'); }
+  showToast(msg,level) { clearTimeout(this.toastT); this.setState({toast:{msg,level:level||'info'}}); this.toastT=setTimeout(()=>this.setState({toast:null}),3800); }
+  authView() {
+    const m=this.state.authM, A='#FF7A1A'; if(!m) return {name:'',color:'transparent',actions:[],methods:[],lines:[],isStart:false,isWaiting:false,isDone:false,isBrowser:false,isKey:false,hasLines:false};
+    const a=this.AUTHC[m.p]; const dots='.'.repeat(1+Math.floor((this.state.now||Date.now())/1000)%3);
+    const methods=[['browser','Browser sign-in'],['key','API key']].map(x=>({label:x[1],onClick:()=>this.setState({authM:Object.assign({},this.state.authM,{method:x[0]})}),bg:m.method===x[0]?A:'transparent',color:m.method===x[0]?'#0b0c10':'#c5ccd6'}));
+    const lines = m.phase==='start' ? [] : m.method==='key' ? [{text:'✓ '+a.key+' saved for '+m.p+' sessions',color:'#4ade80'}] : [{text:'$ '+a.cmd,color:'#7a8494'},{text:'Open '+a.url,color:'#d6dde6'},{text:'Enter code '+m.code+' to continue',color:'#ffb37a'}].concat(m.phase==='waiting'?[{text:'Waiting for approval'+dots,color:'#38bdf8'}]:[{text:'✓ Authorized · credentials saved to '+a.store,color:'#4ade80'}]);
+    const btn=(label,onClick,primary,dim)=>({label,onClick,bg:primary?A:'transparent',color:primary?'#0b0c10':'#e6e9ef',border:primary?A:'rgba(255,255,255,.14)',opacity:dim?'.45':'1'});
+    const actions = m.phase==='done' ? [btn('Done',this.closeAuth,true)] : m.phase==='waiting' ? [btn('Cancel',this.closeAuth),btn("I've approved it",this.authPrimary,true)] : [btn('Cancel',this.closeAuth),btn(m.method==='browser'?'Start sign-in':'Save key',this.authPrimary,true,m.method==='key'&&m.key.trim().length<7)];
+    return {name:m.p,color:this.PCOL[m.p],why:m.p+' is signed out. The orchestrator skips it for new tasks, and its sessions stop at a sign-in prompt, until you sign in.',isStart:m.phase==='start',isWaiting:m.phase==='waiting',isDone:m.phase==='done',isBrowser:m.method==='browser',isKey:m.method==='key',methods,cmd:a.cmd,url:a.url,code:m.code,keyName:a.key,ph:a.ph,store:a.store,key:m.key,onKey:e=>this.setState({authM:Object.assign({},this.state.authM,{key:e.target.value})}),lines,hasLines:lines.length>0,actions,doneLine:m.p+' is ready'+(m.fixed?' · '+m.fixed+' waiting session resumed':' · new tasks can use it again')};
+  }
+  authVals() { const st=this.state; const lv={info:'#38bdf8',success:'#4ade80',warn:'#fbbf24',error:'#f87171'}; return { authOpen:!!st.authM, closeAuth:this.closeAuth, auth:this.authView(), toastOn:!!st.toast, toastMsg:st.toast?st.toast.msg:'', toastColor:st.toast?(lv[st.toast.level]||lv.info):lv.info }; }
+
+  projList() { let c=[]; try{ c=JSON.parse(localStorage.getItem('map.projects.custom')||'[]'); }catch(_){} const base=[['acme-api','#4ade80'],['mcp-generator','#4ade80'],['daily-news','#4ade80'],['trading-telegram-executor','#fbbf24'],['franchise-management','#5d6673']]; return base.concat(c.filter(x=>!base.some(b=>b[0]===x.name)).map(x=>[x.name,'#5d6673'])); }
+  dropVals(cur, onPick) { const st=this.state; return { projectName:cur, projMenu:!!st.projMenu, toggleProjMenu:()=>this.setState({projMenu:!st.projMenu}), closeProjMenu:()=>this.setState({projMenu:false}), projItems:this.projList().map(x=>({name:x[0],dot:x[1],mark:x[0]===cur?'✓':'',bg:x[0]===cur?'rgba(255,122,26,.1)':'transparent',onClick:()=>{ try{ localStorage.setItem('map.project',x[0]); }catch(_){} if(onPick) onPick(x[0]); else window.location.reload(); }})) }; }
+
+  signOut(p) { const auth=Object.assign({},this.state.auth,{[p]:false}); this.saveAuth(auth); this.setState({auth}); this.pushE('warn','provider.signed_out',null,null,p+' signed out · new tasks skip it'); this.showToast(p+' signed out · new tasks skip it until you sign in','warn'); }
+  removeSession(name) { this.setState(s=>({sessions:s.sessions.filter(x=>x.name!==name),selected:null})); this.pushE('info','session.removed',name,null,'Removed '+name+' · run files kept in .map/runs/'); }
+  ingestQueued() { if (this.all) return; let q=[]; try { const all=JSON.parse(localStorage.getItem('map.queued')||'[]'); q=all.filter(x=>!x.project||x.project===this.state.project); localStorage.setItem('map.queued',JSON.stringify(all.filter(x=>x.project&&x.project!==this.state.project))); } catch(_){} if(!q.length) return; let id=Math.max(0,...this.state.tasks.map(t=>t.id)); const add=q.map(x=>{ id++; return {id,title:x.title,prompt:x.prompt,depends_on:[],status:'pending',file:'src/',provider:null,model:null,session:null,attempts:1,result:null,progress:0}; }); this.setState(s=>({tasks:[...s.tasks,...add]})); add.forEach(t=>this.pushE('info','task.created',null,t.id,'#'+t.id+' '+t.title+' · queued from Skills')); }
+  createSession = () => { const st=this.state, f=st.sesForm; if(!st.auth[f.provider]){ this.openAuth(f.provider); return; } const name=this.sesName(); const model=f.model||this.PROV[f.provider].def; const s={name,provider:f.provider,model,role:f.supervisor?'supervisor':'manual',task_id:null,state:'starting',detail:null,reset_at:null,wakeups:0,last_line:f.prompt.trim()?'Prompt: '+f.prompt.trim():'Launching tmux session',attached:false,created:Date.now(),log:f.prompt.trim()?[{text:'> '+f.prompt.trim(),color:'#e6e9ef'}]:[]}; this.setState(x=>({sessions:[...x.sessions.filter(y=>y.name!==name),s],selected:'s:'+name,sesModal:false})); this.pushE('info','session.started',name,null,'Started '+name+' on '+f.provider+' · '+model); };
+  sesName() { const f=this.state.sesForm; return f.name.trim() ? 'map-'+f.name.trim().replace(/^map-/,'').replace(/\s+/g,'-') : 'map-'+f.provider+'-'+(this.state.sessions.filter(s=>s.provider===f.provider&&s.role!=='worker').length+1); }
+  select(id) { this.setState({selected:id}); }
+  fly(id) { this.flyTo=id; this.flyN=50; const n=this.nodes.get(id); if(n && this.state.view==='orbit'){ this.cam.yawT = Math.atan2(n.tx,n.tz)+Math.PI; while(this.cam.yawT-this.cam.yaw>Math.PI) this.cam.yawT-=Math.PI*2; while(this.cam.yaw-this.cam.yawT>Math.PI) this.cam.yawT+=Math.PI*2; this.cam.pitchT=.2; } this.cam.zoomT=Math.max(this.cam.zoomT,1.6); }
+  patchS(name,fn) { this.setState(s=>({sessions:s.sessions.map(x=>x.name===name?Object.assign({},x,fn(x)):x)})); }
+  patchT(id,fn) { this.setState(s=>({tasks:s.tasks.map(x=>x.id===id?Object.assign({},x,fn(x)):x)})); }
+  pushE(level,kind,session,task_id,message) { const e={id:this.eid++,at:Date.now(),level,kind,session,task_id,message}; this.setState(s=>({events:[e,...s.events].slice(0,80)})); if(['task.created','task.retry','task.cancelled','session.started','session.closed','session.close_refused','session.removed','provider.signed_in','orchestrator.started','orchestrator.paused'].includes(kind)) this.showToast(message,level); }
+
+  toggleRun = () => { const r=!this.state.running; this.setState({running:r}); this.pushE('info',r?'orchestrator.started':'orchestrator.paused',null,null,r?'Running · picks up ready tasks':'Paused · running tasks continue, no new starts'); };
+  openModal = () => this.setState({modal:true,form:{title:'',prompt:'',provider:'',model:'',deps:[]}});
+  closeModal = () => this.setState({modal:false});
+  setForm(p) { this.setState(s=>({form:Object.assign({},s.form,p)})); }
+  addTask = () => {
+    const f=this.state.form; if(!f.title.trim()||!f.prompt.trim()) return;
+    const id=Math.max(0,...this.state.tasks.map(t=>t.id))+1;
+    const t={id,title:f.title.trim(),prompt:f.prompt.trim(),depends_on:f.deps.slice(),status:'pending',file:'src/',provider:f.provider||null,model:f.model||null,session:null,attempts:1,result:null,progress:0};
+    this.setState(s=>({tasks:[...s.tasks,t],modal:false,selected:'t:'+id}));
+    this.pushE('info','task.created',null,id,'#'+id+' '+t.title+(t.depends_on.length?' · after '+t.depends_on.map(d=>'#'+this.lid(d)).join(', '):''));
+  };
+  sendPrompt = () => {
+    const id=this.state.selected, text=this.state.termInput.trim(); if(!text||!id||!id.startsWith('s:')) return; const name=id.slice(2);
+    this.patchS(name,x=>({log:[...x.log,{text:'> '+text,color:'#e6e9ef'}],state:['idle','waiting_input','stalled'].includes(x.state)?'working':x.state,detail:['waiting_input','stalled'].includes(x.state)?null:x.detail,last_line:'Prompt: '+text}));
+    this.pushE('info','session.prompt',name,null,'Typed: '+text); this.setState({termInput:''});
+  };
+  sendKey(k) {
+    const name=this.state.selected.slice(2); const s=this.state.sessions.find(x=>x.name===name); if(!s) return;
+    const patch={log:[...s.log,{text:'⌨ '+k,color:'#7a8494'}]};
+    if (s.state==='waiting_input' && (k==='y'||k==='Enter')) Object.assign(patch,{state:'working',detail:null,last_line:'Applying migration 0004_roles.sql'});
+    else if (s.state==='waiting_input' && k==='n') Object.assign(patch,{state:'idle',detail:null,last_line:'Skipped the migration · waiting for instructions'});
+    else if (k==='C-c' && s.state==='working') Object.assign(patch,{state:'idle',last_line:'Interrupted'});
+    else if (s.state==='stalled' && k==='Enter') Object.assign(patch,{state:'working',detail:null,last_line:'Resumed after Enter'});
+    this.patchS(name,()=>patch); this.pushE('info','session.key',name,s.task_id,'Sent key '+k);
+  }
+  closeSession(name) {
+    const s=this.state.sessions.find(x=>x.name===name); if(!s) return;
+    if (s.attached) { this.pushE('warn','session.close_refused',name,null,'409 · a person is attached to this session'); return; }
+    this.patchS(name,()=>({state:'exited'})); this.pushE('info','session.closed',name,s.task_id,'Session closed · final pane saved');
+  }
+  startSession(p) {
+    if(!this.state.auth[p]){ this.openAuth(p); return; }
+    const n=this.state.sessions.filter(s=>s.provider===p&&s.role==='manual').length+1; const name='map-'+p+'-'+n;
+    const s={name,provider:p,model:this.PROV[p].def,role:'manual',task_id:null,state:'starting',detail:null,reset_at:null,wakeups:0,last_line:'Launching tmux session',attached:false,created:Date.now(),log:[]};
+    this.setState(st=>({sessions:[...st.sessions,s],selected:'s:'+name})); this.pushE('info','session.started',name,null,'Manual session on '+p+' · '+s.model);
+  }
+  retryTask(id) { this.patchT(id,t=>({status:'pending',attempts:t.attempts+1,session:null,result:null,progress:0})); this.pushE('info','task.retry',null,id,'Queued for retry'); }
+  cancelTask(id) {
+    const t=this.state.tasks.find(x=>x.id===id); this.patchT(id,()=>({status:'cancelled'}));
+    if (t && t.session) this.patchS(t.session,x=>({state:x.state==='exited'?'exited':'exited'}));
+    this.pushE('warn','task.cancelled',t&&t.session,id,'Cancelled by you');
+  }
+
+  detail(id, active) {
+    if (!id) return null;
+    const st=this.state, now=st.now, A=this.A, TN=this.TONES, mut='#7a8494', txt='#d6dde6';
+    const tone = k => { const c=TN[k]||TN.idle; return {tc:c,tb:this.rgba(c,.1),td:this.rgba(c,.35)}; };
+    const btn = (label,onClick,kind) => ({label,onClick,bg:kind==='primary'?A:'transparent',color:kind==='primary'?'#0b0c10':kind==='danger'?TN.bad:'#e6e9ef',border:kind==='primary'?A:kind==='danger'?'rgba(248,113,113,.4)':'rgba(255,255,255,.14)'});
+    const rows = arr => arr.filter(r=>r[1]!=null&&r[1]!=='').map(r=>({k:r[0],v:String(r[1])}));
+    const flyBtn = btn('Fly to',()=>this.fly(id));
+    const base = {blocks:[],isLive:false};
+    if (id==='orch') return Object.assign(base,{kicker:'orchestrator',title:'map · orchestrator',color:A,badge:st.running?'running':'paused',...tone(st.running?'ok':'idle'),
+      rows:rows([['Parallel',active+' / '+st.maxPar],['Order',this.ORDER.join(' → ')],['Verify','bun test · typecheck · lint · build'],['Audit','gemini → claude → codex'],['Retries','max_attempts 2 · timeout 240m']]),
+      actions:[btn(st.running?'Pause orchestrator':'Run orchestrator',this.toggleRun,st.running?null:'primary'),btn('New task',this.openModal),btn('Reset demo data',()=>{ clearTimeout(this.saveT); try{ localStorage.removeItem('map.cc.'+st.project); }catch(_){} window.location.reload(); },'danger')]});
+    const ty=id.split(':')[0], key=id.slice(ty.length+1);
+    if (ty==='p' && this.all) { const P=this.projSummary(key), c=P.c; return Object.assign(base,{kicker:'project',title:key,color:this.gcolor(key),badge:P.state,...tone(P.state==='running'?'ok':P.state==='paused'?'warn':'idle'),rows:rows([['Providers',P.order.join(' → ')],['Tasks',['running','verifying','auditing','pending','done','failed'].filter(x=>c[x]).map(x=>c[x]+' '+x).join(' · ')||'none'],['Live',P.ss.length+' sessions'],['Needs you',P.need||'']]),actions:[btn('Open '+key+' →',()=>this.setScope('project',key),'primary'),flyBtn]}); }
+    if (ty==='p') {
+      if (key==='queue') { const q=st.tasks.filter(t=>!t.session); return Object.assign(base,{kicker:'queue',title:'Unassigned tasks',color:'#8b95a5',badge:q.length+' tasks',...tone('idle'),rows:rows([['Pending',q.filter(t=>t.status==='pending').length],['Failed',q.filter(t=>t.status==='failed').length],['Cancelled',q.filter(t=>t.status==='cancelled').length],['Rule','starts when every depends_on task is done']]),actions:[btn('New task',this.openModal,'primary'),flyBtn]}); }
+      const info=this.PROV[key]; const live=st.sessions.filter(s=>s.provider===key&&s.state!=='exited'); const rl=live.some(s=>s.state==='rate_limited'); const au=!!st.auth[key];
+      return Object.assign(base,{kicker:'provider',title:key,color:info.color,badge:!info.available?'missing':!au?'signed out':rl?'rate limited':'ready',...tone(!info.available?'idle':!au?'bad':rl?'warn':'ok'),
+        rows:rows([['Auth',!info.available?'—':au?'signed in · '+this.AUTHC[key].store:'signed out · new tasks skip it'],['Default',info.def],['Models',info.models.join(' · ')],['Binary',info.available?(key==='gemini'?'agy':key):'not found on PATH'],['Live',live.length+' sessions'],['Order',(this.ORDER.indexOf(key)+1)+' of '+this.ORDER.length]]),
+        actions:(!info.available?[]:!au?[btn('Sign in to '+key,()=>this.openAuth(key),'primary')]:[btn('Start session',()=>this.startSession(key),'primary'),btn('Sign out',()=>this.signOut(key),'danger')]).concat([flyBtn])});
+    }
+    if (ty==='s') {
+      const s=st.sessions.find(x=>x.name===key); if(!s) return null; const t=st.tasks.find(x=>x.id===s.task_id); const file=t?t.file:'README.md';
+      const lines=[{text:'$ '+s.provider+' --model '+s.model+(s.role==='worker'?' --dangerously-skip-permissions':''),color:mut}];
+      if (s.role==='supervisor') lines.push({text:'● Read  docs/roadmap.md',color:txt},{text:'● GET   /api/overview',color:txt},{text:'● POST  /api/tasks  "Agent-to-agent messages"',color:txt});
+      else if (t) lines.push({text:'● Read  '+file,color:txt},{text:'● Edit  '+file+' (+'+(12+Math.floor(this.h(s.name,1)*60))+' −'+Math.floor(this.h(s.name,2)*14)+')',color:txt},{text:'● Bash  bun test',color:txt},{text:'  ✓ '+(10+Math.floor(this.h(s.name,3)*40))+' passed · 0 failed',color:TN.ok});
+      s.log.forEach(l=>lines.push(l));
+      const tail={working:{text:'› '+(s.last_line||''),color:'#e6e9ef'},rate_limited:{text:'⎿ Usage limit reached · watcher wakes it '+this.rel(s.reset_at,now),color:TN.warn},waiting_input:{text:'? '+(s.last_line||''),color:A},needs_auth:{text:'Error: not signed in. Run `'+s.provider+' login`.',color:TN.bad},stalled:{text:'… no pane change for 47m',color:TN.warn},idle:{text:'> _',color:mut},starting:{text:'starting tmux session…',color:TN.info},exited:{text:'[exited] final pane saved to .map/runs/'+s.name+'/',color:mut}}[s.state];
+      if (tail) lines.push(tail);
+      const acts=[]; if(s.state==='needs_auth') acts.push(btn('Sign in to '+s.provider,()=>this.openAuth(s.provider),'primary')); if(t) acts.push(btn('Open task #'+this.lid(t.id),()=>this.select('t:'+t.id))); acts.push(flyBtn); if(s.state!=='exited') acts.push(btn('Close session',()=>this.closeSession(s.name),'danger')); else acts.push(btn('Remove',()=>this.removeSession(s.name),'danger'));
+      return Object.assign(base,{kicker:'session · '+s.role,title:s.name,color:this.gcolor(s.provider),badge:s.state.replace('_',' '),...tone(this.SESSION_TONE[s.state]),
+        rows:rows([['Provider',s.provider+' · '+s.model],['Task',t?'#'+t.id+' '+t.title:'—'],['Detail',s.detail],['Wakes',s.state==='rate_limited'?this.rel(s.reset_at,now):''],['Wake-ups',s.wakeups||''],['Attached',s.attached?'yes · protected from kill':''],['Started',this.rel(s.created,now)]]),
+        blocks:[{label:s.state==='exited'?'final pane':'live pane · tmux attach -t '+s.name,lines}],isLive:s.state!=='exited',actions:acts});
+    }
+    if (ty==='t') {
+      const t=st.tasks.find(x=>x.id===+key); if(!t) return null; const s=t.session&&st.sessions.find(x=>x.name===t.session);
+      const acts=[]; if(s) acts.push(btn('Open '+s.name,()=>this.select('s:'+s.name))); if(t.status==='failed'||t.status==='cancelled') acts.push(btn('Retry',()=>this.retryTask(t.id),'primary')); if(!['done','failed','cancelled'].includes(t.status)) acts.push(btn('Cancel',()=>this.cancelTask(t.id),'danger')); acts.push(flyBtn);
+      const blocks=[{label:'prompt',lines:t.prompt.split('\n').map(x=>({text:x||' ',color:txt}))}]; if(t.result) blocks.push({label:'result',lines:[{text:t.result,color:t.status==='failed'?TN.bad:TN.ok}]});
+      const blocked = t.status==='pending' && t.depends_on.some(d=>{const x=st.tasks.find(y=>y.id===d); return x&&(x.status==='failed'||x.status==='cancelled');});
+      return Object.assign(base,{kicker:(this.all?t.pid+' · ':'')+'task #'+this.lid(t.id),title:t.title,color:s?this.gcolor(s.provider):'#8b95a5',badge:blocked?'blocked':t.status,...tone(blocked?'bad':this.TASK_TONE[t.status]),
+        rows:rows([['Depends on',t.depends_on.length?t.depends_on.map(d=>'#'+this.lid(d)).join(', '):'none'],['Provider',t.provider?'pinned · '+t.provider+(t.model?' ('+t.model+')':''):'any · failover'],['Session',t.session||'not started'],['Attempts',t.attempts+' of 2'],['File',t.file]]),blocks,actions:acts});
+    }
+    if (ty==='g') {
+      const g=this.STAGES.find(x=>x.id===key); if(!g) return null; const act=this.activeStages&&this.activeStages.has(id);
+      const users=st.tasks.filter(t=>(g.phase==='verify'&&t.status==='verifying')||(g.phase==='audit'&&t.status==='auditing'));
+      const done=st.tasks.filter(t=>t.status==='done').slice(-4).map(t=>({text:'✓ #'+t.id+' '+t.title,color:TN.ok}));
+      return Object.assign(base,{kicker:'pipeline · '+g.phase,title:g.label,color:act?TN.info:'#d6dde6',badge:act?'running':'idle',...tone(act?'info':'idle'),
+        rows:rows([['Phase',g.phase],['Running for',users.map(t=>'#'+t.id).join(', ')||'—']]),blocks:(g.phase==='verify'||g.phase==='audit'||g.phase==='post_done')&&done.length?[{label:'recent passes',lines:done}]:[],actions:[flyBtn]});
+    }
+    if (ty==='r') {
+      const n=this.nodes.get(id); if(!n) return null; const sname=n.ref.session;
+      return Object.assign(base,{kicker:'run artifact',title:'.map/runs/'+sname+'/',color:n.color,badge:'run',...tone('idle'),rows:rows([['Session',sname],['Holds','prompt · launch script · result file · final pane']]),actions:[btn('Open '+sname,()=>this.select('s:'+sname)),flyBtn]});
+    }
+    return null;
+  }
+
+  renderVals() {
+    const st=this.state, now=st.now, A=this.A, TN=this.TONES, sel=st.selected;
+    const tone = k => { const c=TN[k]||TN.idle; return {tc:c,tb:this.rgba(c,.1),td:this.rgba(c,.35)}; };
+    const live = st.sessions.filter(s=>s.state!=='exited');
+    const active = st.tasks.filter(t=>['running','verifying','auditing'].includes(t.status)).length;
+    const selBg = id => sel===id ? 'rgba(255,122,26,.08)' : 'transparent';
+    const providerRows = this.ORDER.map((p,i) => { const info=this.PROV[p]; const n=live.filter(s=>s.provider===p).length; const rl=live.some(s=>s.provider===p&&s.state==='rate_limited'); const au=!!st.auth[p]; const so=info.available&&!au; return Object.assign({idx:String(i+1),name:p,color:info.color,model:info.def,live:n+' live',status:!info.available?'missing':rl?'rate limited':'ready',showSignIn:so,showBadge:!so,onSignIn:e=>{ e.stopPropagation(); this.openAuth(p); },onClick:()=>this.select('p:'+p),bg:selBg('p:'+p)},tone(!info.available?'idle':rl?'warn':'ok')); });
+    const counts = {}; st.tasks.forEach(t=>counts[t.status]=(counts[t.status]||0)+1);
+    const taskSummary = ['running','verifying','auditing','pending','done','failed'].filter(s=>counts[s]).map(s=>counts[s]+' '+s).join(' · ');
+    const taskRows = st.tasks.map(t => Object.assign({id:'#'+this.lid(t.id),title:t.title,deps:(this.all?t.pid+' · ':'')+(t.depends_on.length?'after '+t.depends_on.map(d=>'#'+this.lid(d)).join(', '):'no deps')+(t.provider?' · '+t.provider:'')+(t.attempts>1?' · try '+t.attempts:''),status:t.status,onClick:()=>this.select('t:'+t.id),bg:sel==='t:'+t.id?'rgba(255,122,26,.08)':'rgba(255,255,255,.015)',border:sel==='t:'+t.id?'rgba(255,122,26,.45)':'rgba(255,255,255,.05)',opacity:t.status==='cancelled'?'.5':'1'},tone(this.TASK_TONE[t.status])));
+    const order = {error:0,needs_auth:0,waiting_input:0,stalled:1,rate_limited:1,working:2,starting:2,idle:3,exited:4};
+    const sessionRows = [...st.sessions].sort((a,b)=>order[a.state]-order[b.state]).map(s => Object.assign({name:s.name,meta:s.provider+' · '+s.model+' · '+s.role+(s.task_id!=null?' · #'+this.lid(s.task_id):''),state:s.state.replace('_',' '),dot:this.gcolor(s.provider),last:s.state==='rate_limited'&&s.reset_at?'wakes '+this.rel(s.reset_at,now):(s.last_line?'› '+s.last_line:''),onClick:()=>this.select('s:'+s.name),bg:selBg('s:'+s.name),opacity:s.state==='exited'?'.5':'1'},tone(this.SESSION_TONE[s.state])));
+    const needs = [];
+    st.sessions.forEach(s => { if(['waiting_input','needs_auth','stalled','error'].includes(s.state)) needs.push(Object.assign({title:s.name,reason:s.detail||s.state,tag:{waiting_input:'input',needs_auth:'sign in',stalled:'stalled',error:'error'}[s.state],onClick:()=>this.select('s:'+s.name)},tone(this.SESSION_TONE[s.state]))); });
+    st.tasks.forEach(t => { if(t.status==='failed') needs.push(Object.assign({title:(this.all?t.pid+' ':'')+'#'+this.lid(t.id)+' '+t.title,reason:t.result||'failed',tag:'failed',onClick:()=>this.select('t:'+t.id)},tone('bad'))); });
+    const lvl = {info:'info',success:'ok',warn:'warn',error:'bad'};
+    const eventRows = st.events.slice(0,40).map(e => Object.assign({time:this.hms(e.at),kind:e.kind,msg:e.message,who:(this.all?e.pid+' · ':'')+(e.session?e.session.split('/').pop():(e.task_id!=null?'#'+this.lid(e.task_id):'orchestrator')),onClick:()=>this.select(e.session&&st.sessions.some(s=>s.name===e.session)?'s:'+e.session:e.task_id!=null?'t:'+e.task_id:'orch')},tone(lvl[e.level])));
+    const tabs = this.VIEWS.map(v => ({label:v[1],onClick:()=>this.setState({view:v[0]}),bg:st.view===v[0]?A:'transparent',color:st.view===v[0]?'#0b0c10':'#c5ccd6'}));
+    const gc = this.gcount || {};
+    const chips = [{key:'all',label:'all',count:String(st.sessions.length+st.tasks.length),dot:'#e6e9ef'}].concat(this.GROUPS.map(g=>({key:g,label:g,count:String(gc[g]||0),dot:this.gcolor(g)}))).map(c => Object.assign(c,{onClick:()=>this.setState({filter:st.filter===c.key&&c.key!=='all'?'all':c.key}),border:st.filter===c.key?c.dot:'rgba(255,255,255,.1)',bg:st.filter===c.key?this.rgba(c.dot,.12):'transparent'}));
+    const types = [['task','◇','task'],['session','○','session'],['stage','⬡','stage'],['run','•','run']].map(x => ({glyph:x[1],label:x[2],onClick:()=>this.setState(s=>({hidden:Object.assign({},s.hidden,{[x[0]]:!s.hidden[x[0]]})})),opacity:st.hidden[x[0]]?'.35':'1',deco:st.hidden[x[0]]?'line-through':'none'}));
+    const tg = (label,on,fn) => ({label,onClick:fn,border:on?A:'rgba(255,255,255,.12)',color:on?'#ffb37a':'#c5ccd6'});
+    const toggles = [tg('names',st.names,()=>this.setState({names:!st.names})),tg('motion',st.motion,()=>this.setState({motion:!st.motion}))];
+    const det = this.detail(sel, active);
+    if (this.all && det) { det.isLive=false; const nd=this.nodes.get(sel); const pid=nd&&nd.ref&&nd.ref.pid; det.actions=det.actions.filter(a=>/^(Fly to|Open )/.test(a.label)); if (pid) det.actions.unshift({label:'Open in '+pid+' →',onClick:()=>this.setScope('project',pid),bg:A,color:'#0b0c10',border:A}); }
+    const projRows = this.all ? this.GROUPS.map(g=>{ const P=this.projSummary(g); const c=P.c; return Object.assign({name:g,color:this.gcolor(g),state:P.state,sub:P.ss.length+' live · '+(c.running||0)+' running · '+(c.done||0)+'/'+P.ts.length+' done'+(P.need?' · '+P.need+' need you':''),onClick:()=>this.select('p:'+g),onOpen:e=>{ e.stopPropagation(); this.setScope('project',g); },bg:selBg('p:'+g)},tone(P.state==='running'?'ok':P.state==='paused'?'warn':'idle')); }) : [];
+    const f = st.form;
+    const chip = (on) => ({bg:on?this.rgba(A,.14):'transparent',border:on?A:'rgba(255,255,255,.12)',color:on?'#ffb37a':'#c5ccd6'});
+    const provChips = [['','any · failover']].concat(this.ORDER.filter(p=>this.PROV[p].available).map(p=>[p,p])).map(x => Object.assign({label:x[1],onClick:()=>this.setForm({provider:x[0],model:''})},chip(f.provider===x[0])));
+    const modelChips = f.provider ? [['','default · '+this.PROV[f.provider].def]].concat(this.PROV[f.provider].models.map(m=>[m,m])).map(x => Object.assign({label:x[1],onClick:()=>this.setForm({model:x[0]})},chip(f.model===x[0]))) : [];
+    const depChips = st.tasks.filter(t=>t.status!=='cancelled').map(t => Object.assign({label:'#'+t.id+' '+t.title,onClick:()=>this.setForm({deps:f.deps.includes(t.id)?f.deps.filter(d=>d!==t.id):[...f.deps,t.id]})},chip(f.deps.includes(t.id))));
+    const hints = {orbit:'DRAG = ORBIT · CLICK = CARD · WHEEL = ZOOM · CHIP ISOLATES A PROVIDER',graph:'LEFT → RIGHT · ORCHESTRATOR · PROVIDERS · SESSIONS · TASKS BY DEPENDENCY DEPTH · PIPELINE',rings:'CENTRE OUT · PROVIDERS · SESSIONS · TASKS · RUNS · PIPELINE',circle:'EVERY SESSION AND TASK ON ONE RING · PIPELINE IN THE MIDDLE · LINKS ACROSS'};
+    const sf = st.sesForm; const sch = on => ({bg:on?this.rgba(A,.14):'transparent',border:on?A:'rgba(255,255,255,.12)',color:on?'#ffb37a':'#c5ccd6'});
+    const d = new Date(now);
+    return {
+      ...this.authVals(), ...this.dropVals(st.project),
+      projectName: this.all ? 'All projects' : st.project,
+      projItems: [{name:'All projects',dot:'#e6e9ef',mark:this.all?'✓':'',bg:this.all?'rgba(255,122,26,.1)':'transparent',onClick:()=>this.setScope('all')}].concat(this.projList().map(x=>({name:x[0],dot:x[1],mark:!this.all&&x[0]===st.project?'✓':'',bg:!this.all&&x[0]===st.project?'rgba(255,122,26,.1)':'transparent',onClick:()=>this.setScope('project',x[0])}))),
+      scopes: [{label:st.project,onClick:()=>{ if(this.all) this.setScope('project'); },bg:this.all?'transparent':A,color:this.all?'#c5ccd6':'#0b0c10'},{label:'All projects',onClick:()=>{ if(!this.all) this.setScope('all'); },bg:this.all?A:'transparent',color:this.all?'#0b0c10':'#c5ccd6'}],
+      isAll: this.all, notAll: !this.all, projRows, queueTitle: this.all ? 'All tasks' : 'Task queue',
+      allBig: Object.values(this.projRunning||{}).filter(Boolean).length+' / '+this.GROUPS.length+' running', allMeta: st.sessions.filter(x=>x.state!=='exited').length+' live sessions', orderLine: 'order '+this.ORDER.filter(p=>this.PROV[p].available).join(' → '),
+      openSes: () => this.setState({sesModal:true,sesForm:{provider:this.ORDER.find(p=>this.PROV[p].available&&st.auth[p])||'claude',model:'',name:'',prompt:'',supervisor:false}}),
+      sesOpen: st.sesModal, closeSes: () => this.setState({sesModal:false}), createSession: this.createSession, sesForm: sf, sesName: this.sesName(),
+      sesProvChips: this.ORDER.filter(p=>this.PROV[p].available).map(p=>Object.assign({label:p+(st.auth[p]?'':' · sign in'),onClick:()=>{ if(!st.auth[p]) this.openAuth(p); else this.setState({sesForm:Object.assign({},sf,{provider:p,model:''})}); }},sch(sf.provider===p))),
+      sesModelChips: [['','default · '+this.PROV[sf.provider].def]].concat(this.PROV[sf.provider].models.map(m=>[m,m])).map(x=>Object.assign({label:x[1],onClick:()=>this.setState({sesForm:Object.assign({},sf,{model:x[0]})})},sch(sf.model===x[0]))),
+      onSesName: e => this.setState({sesForm:Object.assign({},this.state.sesForm,{name:e.target.value})}), onSesPrompt: e => this.setState({sesForm:Object.assign({},this.state.sesForm,{prompt:e.target.value})}),
+      toggleSup: () => this.setState({sesForm:Object.assign({},sf,{supervisor:!sf.supervisor})}), supBox: {border:sf.supervisor?A:'rgba(255,255,255,.25)',bg:sf.supervisor?A:'transparent',mark:sf.supervisor?'✓':''},
+      canvasRef:this.canvasRef,
+      clock: String(d.getDate()).padStart(2,'0')+'.'+String(d.getMonth()+1).padStart(2,'0')+' '+this.hms(now),
+      orchDot: st.running ? A : TN.idle, orchWord: this.all ? Object.values(this.projRunning||{}).filter(Boolean).length+'/'+this.GROUPS.length+' running' : st.running ? 'running' : 'paused',
+      orchBig: st.running ? 'Running' : 'Paused', orchColor: st.running ? A : TN.idle,
+      activeLabel: active+'/'+st.maxPar+' active',
+      runBtn: st.running ? {label:'❚❚ Pause',bg:'transparent',color:'#e6e9ef',border:'rgba(255,255,255,.16)'} : {label:'▶ Run',bg:A,color:'#0b0c10',border:A},
+      toggleRun:this.toggleRun, providerRows, taskSummary, taskRows, openModal:this.openModal,
+      statsLine: (this.all?this.GROUPS.length+' projects · ':'')+st.tasks.length+' tasks · '+live.length+' live sessions · '+this.links.length+' links · '+this.runs.length+' runs',
+      tabs, toggles, chips, types, search:st.search,
+      onSearch: e => this.setState({search:e.target.value}),
+      onSearchKey: e => { if(e.key==='Enter'){ const q=st.search.trim().toLowerCase(); if(!q) return; const n=[...this.nodes.values()].find(n=>n.type!=='run'&&n.label.toLowerCase().includes(q)); if(n){ this.setState({selected:n.id}); this.fly(n.id); } } },
+      fit: () => { this.cam.zoomT=1; this.cam.pxT=0; this.cam.pyT=0; this.flyTo=null; },
+      toggleFocus: () => this.setState({focus:!st.focus}),
+      focusBtn: st.focus ? {label:'⤡ exit full',border:A,color:'#ffb37a'} : {label:'⤢ full',border:'rgba(255,255,255,.12)',color:'#c5ccd6'},
+      showSides: !st.focus, hint: this.all ? 'ALL PROJECTS · READ-ONLY OVERVIEW · CLICK A NODE, THEN OPEN ITS PROJECT TO ACT' : hints[st.view],
+      hasDetail: !!det, detail: det || {kicker:'',title:'',color:'transparent',badge:'',tc:'transparent',tb:'transparent',td:'transparent',rows:[],blocks:[],actions:[],isLive:false}, clearSel: () => this.setState({selected:null}),
+      termInput: st.termInput, onTermInput: e => this.setState({termInput:e.target.value}), onTermKey: e => { if(e.key==='Enter') this.sendPrompt(); }, sendPrompt:this.sendPrompt,
+      keys: ['C-c','Escape','Enter','Up','Down','Tab','y','n'].map(k => ({label:k,onClick:()=>this.sendKey(k)})),
+      needs, needsCount: String(needs.length), needsLabel: needs.length===1?'item blocked on you':'items blocked on you',
+      sessionRows, liveLabel: live.length+' live · '+(st.sessions.length-live.length)+' exited', eventRows,
+      modalOpen: st.modal, closeModal:this.closeModal, stop: e => e.stopPropagation(), form: f,
+      nextId: String(Math.max(0,...st.tasks.map(t=>t.id))+1),
+      onTitle: e => this.setForm({title:e.target.value}), onPrompt: e => this.setForm({prompt:e.target.value}),
+      provChips, modelChips, hasModels: modelChips.length>0, depChips, addTask:this.addTask,
+      addOpacity: f.title.trim()&&f.prompt.trim() ? '1' : '.45',
+    };
+  }
+}
+</script>
+</body>
+</html>
