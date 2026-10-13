@@ -157,9 +157,13 @@ docker compose up -d --build
 docker compose logs -f map                  # open http://127.0.0.1:4400 and paste the token once
 ```
 
-- Mounted from the host: `~/.claude`, `~/.claude.json`, `~/.codex`, `~/.gemini` (read-write: sign-ins, history,
-  transcripts for Usage and Skills) and the CLIs in `~/.local/bin`, `~/.local/share/claude` and the Node install
-  (read-only). Adjust `docker-compose.yml` if yours live elsewhere.
+- Mounted from the host: `~/.claude`, `~/.codex`, `~/.gemini` (read-write: sign-ins, history, transcripts for Usage
+  and Skills) and the CLIs in `~/.local/bin`, `~/.local/share/claude` and the Node install (read-only). Adjust
+  `docker-compose.yml` if yours live elsewhere.
+- Claude Code in the container uses `CLAUDE_CONFIG_DIR=~/.claude`, so its settings file is `~/.claude/.claude.json`
+  (the host rewrites `~/.claude.json` by renaming over it, which a single-file mount cannot follow). Set
+  `"hasCompletedOnboarding": true` in that file once, or the first interactive session stops at the setup screens.
+  Each new folder still asks "trust this folder?" once; answer it in the session console.
 - State lives in `MAP_DIR/data` (database, run files, project repos, workspaces); config in `MAP_DIR/map.toml`.
 - Agent sessions are tmux sessions inside the container, so `docker compose restart` ends them (the watcher marks
   them exited and the orchestrator retries their tasks).
