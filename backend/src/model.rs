@@ -424,3 +424,25 @@ pub struct FitResult {
     pub applied: bool,
     pub cases: Vec<FitCaseResult>,
 }
+
+// ---- command centre
+
+/// The task pipeline from `[orchestrator]` in `map.toml`, for the command centre's PIPELINE column and its
+/// orchestrator card: which providers it tries, what proves a task done, and what runs after.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct PipelineInfo {
+    pub provider_order: Vec<String>,
+    #[ts(type = "number")]
+    pub max_attempts: i64,
+    #[ts(type = "number")]
+    pub task_timeout_minutes: u64,
+    /// Shell commands run after the worker reports done; all must exit 0.
+    pub verify: Vec<String>,
+    pub audit_enabled: bool,
+    pub audit_required: bool,
+    /// Auditors tried in order; the first that gives a verdict decides.
+    pub audit_chain: Vec<String>,
+    /// Shell commands run after a task passes (e.g. a commit), as templates.
+    pub post_done: Vec<String>,
+}

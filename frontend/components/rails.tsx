@@ -1,300 +1,273 @@
 "use client";
 
 import clsx from "clsx";
-import { Pause, Play, RotateCw } from "lucide-react";
-import { useState } from "react";
+import { CircleDot, Flag, Hexagon } from "lucide-react";
+import type { ReactNode } from "react";
 
-import { api } from "@/lib/api";
+import { providerColor } from "@/lib/colors";
+import type { Event } from "@/lib/generated/Event";
 import type { OrchestratorStatus } from "@/lib/generated/OrchestratorStatus";
-import type { ProjectInfo } from "@/lib/generated/ProjectInfo";
-import type { ProviderInfo } from "@/lib/generated/ProviderInfo";
-import type { ReflexState } from "@/lib/generated/ReflexState";
-import type { Session } from "@/lib/generated/Session";
-import type { Task } from "@/lib/generated/Task";
 
-import { Dot, Meter, Section, relative, type Tone } from "./ui";
+import type { Command } from "./command-data";
+import { Btn, Pill, SideTitle, TONE_TEXT } from "./command-ui";
+import { EventLog } from "./events";
+import { SessionRows } from "./sessions";
+import { TaskRows } from "./tasks";
 
-const pad = (n: number) => String(n).padStart(2, "0");
+/** The command centre's side columns (design: the two `<aside>`s of Agent Command Centre.dc.html). */
 
-function isoWeek(d: Date): number {
-  const t = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
-  const day = t.getUTCDay() || 7;
-  t.setUTCDate(t.getUTCDate() + 4 - day);
-  const start = new Date(Date.UTC(t.getUTCFullYear(), 0, 1));
-  return Math.ceil(((t.getTime() - start.getTime()) / 86400000 + 1) / 7);
-}
-
-function Clock({ now }: { now: number }) {
-  const d = new Date(now);
-  const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
-  const offset = -d.getTimezoneOffset() / 60;
-  const angle = (deg: number) => ({ transform: `rotate(${deg}deg)` });
+function Column({ children, side }: { children: ReactNode; side: "left" | "right" }) {
   return (
-    <div className="flex items-center gap-4">
-      <div className="relative size-14 shrink-0 rounded-full border border-line">
-        <span className="absolute bottom-1/2 left-1/2 h-4 w-0.5 origin-bottom -translate-x-1/2 bg-text" style={angle((d.getHours() % 12) * 30 + d.getMinutes() / 2)} />
-        <span className="absolute bottom-1/2 left-1/2 h-5.5 w-px origin-bottom -translate-x-1/2 bg-text" style={angle(d.getMinutes() * 6)} />
-        <span className="absolute bottom-1/2 left-1/2 h-6 w-px origin-bottom -translate-x-1/2 bg-accent" style={angle(d.getSeconds() * 6)} />
-      </div>
-      <div>
-        <p className="text-4xl leading-none font-semibold tracking-tight tabular-nums">
-          {pad(d.getHours())}:{pad(d.getMinutes())}
-          <span className="text-lg text-accent">:{pad(d.getSeconds())}</span>
-        </p>
-        <p className="label mt-1">
-          {tz.split("/").pop()?.replace("_", " ")} · UTC{offset >= 0 ? "+" : ""}
-          {offset}
-        </p>
-        <p className="mt-0.5 text-[11px] text-muted">
-          UTC {pad(d.getUTCHours())}:{pad(d.getUTCMinutes())}
-        </p>
-      </div>
-    </div>
+    <aside
+      className={clsx(
+        "flex min-w-0 flex-col gap-7 border-line px-5 pt-5 pb-7 lg:min-h-0 lg:overflow-auto",
+        side === "left" ? "lg:border-r" : "border-t lg:border-t-0 lg:border-l",
+      )}
+    >
+      {children}
+    </aside>
   );
 }
 
-export function LeftRail({
-  now,
-  tasks,
-  sessions,
-  projects,
+const big = "font-sans text-[36px] leading-none font-semibold tracking-[-0.02em]";
+const sub = "font-mono text-[10.5px] leading-[1.4] tracking-[0.04em] text-muted";
+
+export function LeftColumn({
+  cmd,
   orchestrator,
-  onOpenTask,
+  selected,
+  select,
+  onNewTask,
+  onToggleRun,
+  onSignIn,
+  onOpenProject,
+  now,
 }: {
-  now: number;
-  tasks: Task[];
-  sessions: Session[];
-  projects: ProjectInfo[];
+  cmd: Command;
   orchestrator: OrchestratorStatus | null;
-  onOpenTask: (id: number) => void;
+  selected: string | null;
+  select: (id: string) => void;
+  onNewTask: () => void;
+  onToggleRun: () => void;
+  onSignIn: (provider: string) => void;
+  onOpenProject: (slug: string | null) => void;
+  now: number;
 }) {
-  const d = new Date(now);
-  const count = (s: string) => tasks.filter((t) => t.status === s).length;
-  const finished = tasks.filter((t) => ["done", "failed", "cancelled"].includes(t.status)).length;
-  const decisions = projects.reduce((acc, p) => ({ total: acc.total + p.stats.total, reflex: acc.reflex + p.stats.reflex }), { total: 0, reflex: 0 });
-  const backlog = tasks.filter((t) => t.status === "pending" || t.status === "failed");
-  const live = sessions.filter((s) => s.state !== "exited");
+  const running = !!orchestrator?.running;
+  const counts: Record<string, number> = {};
+  for (const t of cmd.tasks) counts[t.status] = (counts[t.status] ?? 0) + 1;
+  const taskSummary = ["running", "verifying", "auditing", "pending", "done", "failed"]
+    .filter((s) => counts[s])
+    .map((s) => `${counts[s]} ${s}`)
+    .join(" · ");
+  const rowBg = (id: string) => (selected === id ? "bg-accent/[0.08]" : "hover:bg-white/[0.025]");
 
   return (
-    <aside className="flex min-w-0 flex-col border-line lg:border-r">
-      <Section title="Today" note={`Wk${isoWeek(d)} · ${d.toLocaleDateString(undefined, { weekday: "short", day: "2-digit", month: "short", year: "numeric" })}`}>
-        <Clock now={now} />
-      </Section>
-
-      <Section title="Orchestrator">
-        <div className="flex items-center justify-between gap-2">
-          <p className="text-[15px]">
-            {orchestrator?.running ? "Running" : "Paused"}
-            <span className="ml-2 text-[11px] text-muted">
-              {orchestrator?.active ?? 0}/{orchestrator?.max_parallel ?? 1} slots
+    <Column side="left">
+      {cmd.all ? (
+        <section className="flex flex-col gap-3.5">
+          <SideTitle glyph={<CircleDot className="size-3" />} note={`${cmd.sessions.filter((s) => s.state !== "exited").length} live sessions`}>
+            All projects
+          </SideTitle>
+          <div className="flex flex-col gap-2">
+            <span className={clsx(big, "text-accent")}>
+              {cmd.projectOrder.filter((slug) => cmd.summary(slug).state === "running").length} / {cmd.projectOrder.length} running
             </span>
-          </p>
-          {orchestrator && (
-            <button
-              onClick={() => api.setOrchestrator(!orchestrator.running)}
-              className={clsx("flex h-7 items-center gap-1.5 rounded border px-2 text-[11px]", orchestrator.running ? "border-line hover:border-muted" : "border-accent text-accent")}
-            >
-              {orchestrator.running ? <Pause className="size-3.5" /> : <Play className="size-3.5" />}
-              {orchestrator.running ? "pause" : "run"}
-            </button>
-          )}
-        </div>
-        <div className="mt-3 grid grid-cols-[4.5rem_1fr] items-center gap-x-2 gap-y-1.5 text-[11px] text-muted">
-          {(["pending", "running", "verifying", "done", "failed"] as const).map((s) => (
-            <div key={s} className="contents">
-              <span>{s}</span>
-              <span className="flex items-center gap-1">
-                {Array.from({ length: Math.min(24, Math.max(1, count(s))) }, (_, i) => (
-                  <span key={i} className={clsx("h-2 w-2.5 rounded-[1px]", count(s) === 0 ? "bg-panel-2" : s === "failed" ? "bg-bad" : s === "done" ? "bg-muted" : "bg-accent")} />
-                ))}
-                <span className="ml-1 tabular-nums">{count(s)}</span>
-              </span>
-            </div>
-          ))}
-        </div>
-      </Section>
-
-      <Section title="Activity record" note="since this database was created">
-        <div className="grid gap-2.5 text-[13px]">
-          <div>
-            <div className="flex justify-between">
-              <span>tasks finished</span>
-              <span className="tabular-nums">
-                {finished} / {tasks.length}
-              </span>
-            </div>
-            <Meter value={finished} max={tasks.length} tone="info" />
+            <span className={sub}>read-only overview · open a project to act</span>
           </div>
-          <div>
-            <div className="flex justify-between">
-              <span>answered by Reflex</span>
-              <span className="tabular-nums">
-                {decisions.reflex} / {decisions.total}
+          <div className="flex flex-col overflow-hidden rounded-[10px] border border-line">
+            {cmd.projectOrder.map((slug) => {
+              const p = cmd.summary(slug);
+              return (
+                <div
+                  key={p.key}
+                  onClick={() => select(`p:${p.key}`)}
+                  className={clsx("grid cursor-pointer grid-cols-[8px_minmax(0,1fr)_auto] items-center gap-2.5 border-b border-line px-3 py-2.5 last:border-b-0", rowBg(`p:${p.key}`))}
+                >
+                  <span className="size-2 rounded-full" style={{ background: p.color }} />
+                  <span className="flex min-w-0 flex-col gap-1">
+                    <span className="flex min-w-0 items-center gap-2">
+                      <span className="truncate text-[13px] leading-[1.1] font-medium">{p.name}</span>
+                      <Pill tone={p.state === "running" ? "ok" : p.state === "paused" ? "warn" : "idle"} small>
+                        {p.state}
+                      </Pill>
+                    </span>
+                    <span className="font-mono text-[10.5px] leading-[1.35] text-muted">
+                      {p.live} live · {p.running} running · {p.done}/{p.total} done{p.need ? ` · ${p.need} need you` : ""}
+                    </span>
+                  </span>
+                  <Btn
+                    size="sm"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onOpenProject(p.slug);
+                    }}
+                  >
+                    Open →
+                  </Btn>
+                </div>
+              );
+            })}
+          </div>
+        </section>
+      ) : (
+        <section className="flex flex-col gap-3.5">
+          <SideTitle glyph={<Hexagon className="size-3" strokeWidth={2.5} />} note={`${cmd.active}/${orchestrator?.max_parallel ?? 1} active`}>
+            Orchestrator
+          </SideTitle>
+          <div className="flex items-end justify-between gap-3">
+            <div className="flex min-w-0 flex-col gap-2">
+              <span className={clsx(big, running ? "text-accent" : "text-idle")}>{running ? "Running" : "Paused"}</span>
+              <span className={sub}>
+                order{" "}
+                {(cmd.pipeline?.provider_order ?? cmd.providers.map((p) => p.name)).filter((n) => cmd.providers.find((p) => p.name === n)?.available).join(" → ") || "none available"}
               </span>
             </div>
-            <Meter value={decisions.reflex} max={decisions.total} tone="ok" />
+            <Btn kind={running ? "ghost" : "primary"} className="h-[34px] px-3.5" onClick={onToggleRun} disabled={!orchestrator}>
+              {running ? "❚❚ Pause" : "▶ Run"}
+            </Btn>
           </div>
-          <p className="text-[11px] text-muted">
-            sessions live {live.length} · projects {projects.length} · LLM calls avoided{" "}
-            {decisions.total ? Math.round((100 * decisions.reflex) / decisions.total) : 0}%
-          </p>
-        </div>
-      </Section>
+          <div className="flex flex-col overflow-hidden rounded-[10px] border border-line">
+            {cmd.providers.map((p, i) => {
+              const st = cmd.providerState(p, now);
+              const live = cmd.sessions.filter((s) => s.provider === p.name && s.state !== "exited").length;
+              return (
+                <div
+                  key={p.name}
+                  onClick={() => select(`p:${p.name}`)}
+                  className={clsx("grid cursor-pointer grid-cols-[12px_8px_minmax(0,1fr)_auto] items-center gap-2.5 border-b border-line px-3 py-2.5 text-text last:border-b-0", rowBg(`p:${p.name}`))}
+                >
+                  <span className="font-mono text-[10px] leading-none text-muted/70">{i + 1}</span>
+                  <span className="size-2 rounded-full" style={{ background: providerColor(p.name) }} />
+                  <span className="flex min-w-0 flex-col gap-1">
+                    <span className="text-[13px] leading-[1.1] font-medium">{p.name}</span>
+                    <span className="truncate font-mono text-[10.5px] leading-[1.2] text-muted">
+                      {p.default_model} · {live} live{st.signedIn ? " · signed in" : ""}
+                    </span>
+                  </span>
+                  {st.signIn ? (
+                    <Btn
+                      size="sm"
+                      kind="accent-ghost"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onSignIn(p.name);
+                      }}
+                    >
+                      Sign in
+                    </Btn>
+                  ) : (
+                    <Pill tone={st.tone}>{st.word}</Pill>
+                  )}
+                </div>
+              );
+            })}
+            {cmd.providers.length === 0 && <p className="px-3 py-2.5 font-mono text-[11px] text-muted">No providers configured.</p>}
+          </div>
+        </section>
+      )}
 
-      <Section title="Backlog" note="pending and failed tasks" className="border-b-0">
-        <div className="flex items-end gap-3">
-          <span className="text-5xl leading-none font-light text-accent tabular-nums">{backlog.length}</span>
-          <span className="label pb-1 leading-tight">
-            waiting
-            <br />
-            actions
-          </span>
-        </div>
-        <ul className="mt-3 grid gap-1.5">
-          {backlog.slice(0, 8).map((t) => (
-            <li key={t.id}>
-              <button className="flex w-full items-baseline gap-2 text-left text-[12px] hover:text-accent" onClick={() => onOpenTask(t.id)}>
-                <span className="text-muted">#{t.id}</span>
-                <span className="truncate">{t.title}</span>
-                <span className={clsx("ml-auto shrink-0 text-[10px] uppercase", t.status === "failed" ? "text-bad" : "text-muted")}>{t.status}</span>
-              </button>
-            </li>
-          ))}
-        </ul>
-      </Section>
-    </aside>
+      <section id="cc-tasks" className="flex flex-col gap-3">
+        <SideTitle
+          glyph="◇"
+          note={
+            !cmd.all && (
+              <Btn size="sm" kind="primary" className="h-[26px] rounded-md" onClick={onNewTask}>
+                + New task
+              </Btn>
+            )
+          }
+        >
+          {cmd.all ? "All tasks" : "Task queue"}
+        </SideTitle>
+        {taskSummary && <span className="font-mono text-[10.5px] leading-none text-muted">{taskSummary}</span>}
+        <TaskRows tasks={cmd.tasks} label={(t) => `#${t.id}`} selected={selected} onSelect={select} projectOf={cmd.all ? (t) => cmd.projectName(t.project) : undefined} />
+      </section>
+    </Column>
   );
 }
 
-const reflexTone: Record<ReflexState, Tone> = { running: "ok", starting: "info", no_corpus: "warn", error: "bad", stopped: "idle" };
-const attention = ["waiting_input", "rate_limited", "needs_auth", "stalled", "error"];
-
-export function RightRail({
+export function RightColumn({
+  cmd,
+  selected,
+  select,
+  onNewSession,
+  onOpenEvent,
   now,
-  sessions,
-  providers,
-  projects,
-  onOpenSession,
-  onStartSession,
-  onOpenProject,
 }: {
+  cmd: Command;
+  selected: string | null;
+  select: (id: string) => void;
+  onNewSession: () => void;
+  onOpenEvent: (e: Event) => void;
   now: number;
-  sessions: Session[];
-  providers: ProviderInfo[];
-  projects: ProjectInfo[];
-  onOpenSession: (name: string) => void;
-  onStartSession: (provider: string) => void;
-  onOpenProject: (slug: string) => void;
 }) {
-  const [busy, setBusy] = useState<string | null>(null);
-  const waiting = sessions.filter((s) => attention.includes(s.state));
-  const working = sessions.filter((s) => s.state === "working" || s.state === "starting");
-  const totals = projects.reduce((a, p) => ({ reflex: a.reflex + p.stats.reflex, llm: a.llm + p.stats.llm, abstain: a.abstain + p.stats.abstain }), { reflex: 0, llm: 0, abstain: 0 });
-
-  const restart = async (slug: string) => {
-    setBusy(slug);
-    try {
-      await api.restartReflex(slug);
-    } finally {
-      setBusy(null);
-    }
+  const live = cmd.sessions.filter((s) => s.state !== "exited").length;
+  const who = (e: Event) => {
+    const p = cmd.all ? cmd.eventProject(e) : undefined;
+    const head = cmd.all && p !== undefined ? `${cmd.projectName(p)} · ` : "";
+    return head + (e.session ?? (e.task_id != null ? `#${e.task_id}` : "orchestrator"));
   };
-
   return (
-    <aside className="flex min-w-0 flex-col border-line lg:border-l">
-      <Section title="Now working">
-        <p className="text-4xl leading-none font-semibold tabular-nums">
-          {working.length}
-          <span className="ml-2 text-base font-normal text-muted">agent{working.length === 1 ? "" : "s"}</span>
-        </p>
-        <ul className="mt-2 grid gap-1">
-          {working.slice(0, 4).map((s) => (
-            <li key={s.name}>
-              <button className="w-full truncate text-left text-[12px] text-muted hover:text-text" onClick={() => onOpenSession(s.name)}>
-                › {s.name} <span className="opacity-70">{s.last_line ?? ""}</span>
-              </button>
-            </li>
-          ))}
-        </ul>
-      </Section>
-
-      <Section title="Waiting">
-        {waiting.length === 0 ? (
-          <p className="text-[12px] text-muted">No session needs you.</p>
-        ) : (
-          <ul className="grid gap-1.5">
-            {waiting.map((s) => (
-              <li key={s.name}>
-                <button className="flex w-full items-center gap-2 text-left text-[12px] hover:text-accent" onClick={() => onOpenSession(s.name)}>
-                  <Dot tone={s.state === "rate_limited" || s.state === "stalled" ? "warn" : s.state === "waiting_input" ? "accent" : "bad"} />
-                  <span className="truncate">{s.name}</span>
-                  <span className="ml-auto shrink-0 text-[10px] text-muted uppercase">
-                    {s.state === "rate_limited" && s.rate_limit_reset_at ? relative(s.rate_limit_reset_at, now) : s.state.replace("_", " ")}
-                  </span>
-                </button>
-              </li>
-            ))}
-          </ul>
-        )}
-      </Section>
-
-      <Section title="Agents deck" note="start a session">
-        <div className="grid grid-cols-3 gap-2">
-          {providers.map((p) => (
-            <button
-              key={p.name}
-              disabled={!p.available}
-              onClick={() => onStartSession(p.name)}
-              title={p.available ? `Start ${p.name}` : `${p.name} is not installed`}
-              className="group flex flex-col items-center gap-1.5 disabled:opacity-40"
-            >
-              <span className="flex size-9 items-center justify-center rounded border border-line bg-panel-2 text-accent group-hover:border-accent group-disabled:text-muted">
-                <Play className="size-3.5 fill-current" />
+    <Column side="right">
+      <section className="flex flex-col gap-3">
+        <SideTitle glyph={<Flag className="size-3" />} note="watcher can't fix these">
+          Needs you
+        </SideTitle>
+        <div className="flex items-center gap-3.5">
+          <span className="font-sans text-[46px] leading-none font-semibold tracking-[-0.02em] text-accent">{cmd.needs.length}</span>
+          <span className="font-mono text-[10px] leading-[1.5] font-medium tracking-[0.14em] text-muted uppercase">{cmd.needs.length === 1 ? "item blocked on you" : "items blocked on you"}</span>
+        </div>
+        <div className="flex flex-col gap-0.5">
+          {cmd.needs.map((n) => (
+            <button key={n.id} onClick={() => select(n.id)} className="grid cursor-pointer grid-cols-[14px_minmax(0,1fr)] gap-2.5 border-t border-line py-[9px] text-left text-text">
+              <Flag className={clsx("mt-0.5 size-3", TONE_TEXT[n.tone])} />
+              <span className="flex min-w-0 flex-col gap-[3px]">
+                <span className="flex items-baseline justify-between gap-2">
+                  <span className="truncate font-mono text-[12.5px] leading-[1.2] font-medium">{n.title}</span>
+                  <span className={clsx("flex-none font-mono text-[9.5px] leading-none font-medium tracking-[0.1em] uppercase", TONE_TEXT[n.tone])}>{n.tag}</span>
+                </span>
+                <span className="line-clamp-3 text-[12px] leading-[1.4] text-pretty text-text-2">{n.reason}</span>
               </span>
-              <span className="text-[10px] text-muted">/{p.name}</span>
-              {p.cooldown_until && <span className="text-[9px] text-warn">back {relative(p.cooldown_until, now)}</span>}
             </button>
           ))}
         </div>
-      </Section>
+      </section>
 
-      <Section title="Projects" note={`${projects.filter((p) => p.reflex.state === "running").length}/${projects.length} Reflex engines running`} className="border-b-0">
-        <table className="w-full text-[12px]">
-          <thead>
-            <tr className="label text-left">
-              <th className="w-6 pb-1.5 font-medium" />
-              <th className="pb-1.5 font-medium">project</th>
-              <th className="pb-1.5 text-right font-medium">reflex</th>
-            </tr>
-          </thead>
-          <tbody>
-            {projects.map(({ project: p, reflex }) => (
-              <tr key={p.slug} className="border-t border-line/60">
-                <td className="py-1.5">
-                  <button onClick={() => restart(p.slug)} disabled={busy === p.slug} title="Restart Reflex" className="text-muted hover:text-accent disabled:animate-spin">
-                    <RotateCw className="size-3.5" />
-                  </button>
-                </td>
-                <td className="py-1.5">
-                  <button className="truncate hover:text-accent" onClick={() => onOpenProject(p.slug)}>
-                    {p.slug}
-                  </button>
-                </td>
-                <td className="py-1.5 text-right">
-                  <span className="inline-flex items-center gap-1.5 text-[10px] uppercase">
-                    <Dot tone={reflexTone[reflex.state]} />
-                    {reflex.state.replace("_", " ")}
-                  </span>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        {projects.length === 0 && <p className="text-[12px] text-muted">No projects yet.</p>}
-        <p className="label mt-4">
-          decisions · reflex {totals.reflex} · llm {totals.llm} · abstain {totals.abstain}
-        </p>
-      </Section>
-    </aside>
+      <section className="flex flex-col gap-2.5">
+        <SideTitle
+          glyph="○"
+          note={
+            <>
+              <span>
+                {live} live · {cmd.sessions.length - live} exited
+              </span>
+              {!cmd.all && (
+                <Btn size="sm" className="rounded-md" onClick={onNewSession}>
+                  + New
+                </Btn>
+              )}
+            </>
+          }
+        >
+          Sessions
+        </SideTitle>
+        <SessionRows
+          sessions={cmd.sessions}
+          selected={selected}
+          onSelect={select}
+          now={now}
+          color={cmd.all ? (s) => cmd.colorOfProject(s.project) : undefined}
+          prefix={cmd.all ? (s) => cmd.projectName(s.project) : undefined}
+        />
+      </section>
+
+      <section className="flex flex-col gap-2.5">
+        <SideTitle glyph="≡" note="newest first">
+          Event log
+        </SideTitle>
+        <EventLog events={cmd.events} who={who} onOpen={onOpenEvent} />
+      </section>
+    </Column>
   );
 }
