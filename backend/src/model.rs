@@ -217,6 +217,8 @@ pub enum ServerMessage {
     ProjectRemoved { slug: String },
     /// The client fell behind and missed messages; reload `/api/overview`.
     Resync,
+    /// A new usage reading (every `usage.interval_secs`, or after `POST /api/usage/refresh`).
+    Usage { report: UsageReport },
 }
 
 // ---- projects and decisions
@@ -816,4 +818,142 @@ pub struct LoginState {
     pub signed_in: Option<bool>,
     /// The newest change to a credential file.
     pub credentials_updated_at: Option<DateTime<Utc>>,
+}
+
+// ---- usage
+
+/// How a provider's plan usage was read on the last poll.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum UsageStatus {
+    /// Not read yet (the first poll runs at startup).
+    Pending,
+    /// Read just now from the provider's account endpoint.
+    Live,
+    /// The newest snapshot the CLI wrote on its last run (Codex); `read_at` is when that was.
+    Snapshot,
+    /// The CLI is not signed in on this machine; windows are the last snapshot, if any.
+    SignedOut,
+    /// There is no local source for this provider's limits, so nothing is shown rather than a guess.
+    NoReader,
+    /// Turned off in `[usage.providers.<name>]`.
+    Disabled,
+    /// The reader failed; `error` says why. Windows are the last good reading, if there was one.
+    Error,
+}
+
+/// One plan limit, e.g. Claude's 5-hour session or Codex's weekly limit.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct UsageWindow {
+    /// Stable key within the provider (`session`, `weekly_all`, `primary`…); samples are stored under it.
+    pub id: String,
+    /// "Current session", "Weekly · all models".
+    pub label: String,
+    /// Compact label for the top-bar widget: "5h session", "7d all".
+    pub short: String,
+    /// "5-hour window", "7-day window".
+    pub kind: String,
+    /// Percent of the limit used, 0–100. `None` when unknown (e.g. the window reset after the last snapshot).
+    pub used_pct: Option<f64>,
+    /// Count-based limits (requests): used and cap. `None` for percent-only limits.
+    pub used: Option<f64>,
+    pub cap: Option<f64>,
+    pub resets_at: Option<DateTime<Utc>>,
+    #[ts(type = "number | null")]
+    pub window_minutes: Option<u64>,
+    /// Percentage points per hour over the last hour of stored readings; `None` until there are enough.
+    pub rate_per_hour: Option<f64>,
+    /// Estimated use at reset if the last hour's pace continues (may exceed 100).
+    pub projected_pct: Option<f64>,
+    /// Anything the reader wants to say about this number.
+    pub note: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct TokenTotals {
+    /// Input tokens that were not cache reads.
+    #[ts(type = "number")]
+    pub input: u64,
+    #[ts(type = "number")]
+    pub output: u64,
+    #[ts(type = "number")]
+    pub cache_read: u64,
+    #[ts(type = "number")]
+    pub cache_write: u64,
+}
+
+impl TokenTotals {
+    pub fn add(&mut self, other: &TokenTotals) {
+        self.input += other.input;
+        self.output += other.output;
+        self.cache_read += other.cache_read;
+        self.cache_write += other.cache_write;
+    }
+
+    /// What a by-project share counts: everything but cache reads, which are cheap and would drown the rest.
+    pub fn weight(&self) -> u64 {
+        self.input + self.output + self.cache_write
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum ShareKind {
+    /// A MAP project's workspace (or its other files under the data directory).
+    Project,
+    /// `workspace.dir`.
+    Workspace,
+    /// Anything else on this machine.
+    Other,
+}
+
+/// Tokens a provider used in one place since `ProviderUsage::by_project_since`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct ProjectShare {
+    pub kind: ShareKind,
+    /// The project's slug for `project`; `None` otherwise.
+    pub slug: Option<String>,
+    pub name: String,
+    /// Input + output + cache writes (cache reads excluded).
+    #[ts(type = "number")]
+    pub tokens: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct ProviderUsage {
+    pub provider: String,
+    /// The account's plan, e.g. "Max 20x" or "Plus", when the source says.
+    pub plan: Option<String>,
+    /// Where the numbers come from, for "read via …".
+    pub source: String,
+    pub status: UsageStatus,
+    pub error: Option<String>,
+    /// When the numbers were measured (for a snapshot, when the CLI wrote it).
+    pub read_at: Option<DateTime<Utc>>,
+    pub windows: Vec<UsageWindow>,
+    /// Since local midnight, from the CLI's own session logs; `None` when there is no log reader.
+    pub tokens_today: Option<TokenTotals>,
+    pub by_project: Vec<ProjectShare>,
+    /// Start of the window `by_project` covers (the provider's shortest window).
+    pub by_project_since: Option<DateTime<Utc>>,
+    /// The orchestrator gives this provider no new tasks: a window is at or above `skip_pct`.
+    pub skipped: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct UsageReport {
+    /// When the last poll finished; `None` before the first.
+    pub read_at: Option<DateTime<Utc>>,
+    /// `usage.skip_pct`: no new tasks for a provider with a window at or above this.
+    pub skip_pct: f64,
+    #[ts(type = "number")]
+    pub interval_secs: u64,
+    pub providers: Vec<ProviderUsage>,
 }

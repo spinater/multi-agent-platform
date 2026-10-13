@@ -48,6 +48,16 @@ nothing is tied to one repository, session name or provider.
   in a helper session `<session_prefix>login-<provider>`, and shows the URL and one-time code from its pane. Note that
   `codex login` signs the current account out as soon as it starts. API keys are never taken through the dashboard:
   set them in `[workspace.env]`.
+- **Usage.** Plan limits per provider account, on the Usage screen and in a pill on every screen's top bar
+  (`[usage]` in `map.toml`, polled every `interval_secs`).
+  - **Claude**: the account endpoint the CLI's `/usage` reads, with Claude Code's own sign-in from
+    `claude_credentials`. The token is sent only to api.anthropic.com; it is never logged, stored or returned.
+  - **Codex**: the newest `rate_limits` snapshot in its session logs, shown with its age (and "signed out" when
+    `codex_auth` is missing). Other CLIs (`agy`) have no local source, so they show "no reader" rather than a guess.
+  - **Tokens** today and by project (from each session's working directory), from the CLIs' session logs.
+  - **Pace.** Readings are stored, and the last hour's rate projects the use at reset.
+  - **Skip line.** No new tasks for a provider while any of its windows is at or above `skip_pct` (default 90),
+    until that window resets. It shows as the provider's cooldown.
 - **History.** Sessions, tasks and events live in SQLite. Every run keeps its prompt, launch script, result file and
   final pane under `.map/runs/<session>/`.
 
@@ -79,6 +89,7 @@ nothing is tied to one repository, session name or provider.
 | `backend/src/login.rs` | Provider sign-in state from credential files, the helper login session, URL and code parsing |
 | `backend/src/repo.rs` | Bare repos written with git plumbing, imports (`clone --bare`), corpus export, the workspace checkout |
 | `backend/src/reflex.rs` | One Reflex process per project: export the corpus, start, health-check, restart |
+| `backend/src/usage.rs` | Plan-usage readers (Claude endpoint, Codex logs), token scans, pace, the skip line |
 | `backend/src/decide.rs` | The decision gate (Reflex, threshold, fallback), answer parsing, threshold fitting |
 | `backend/src/api/git.rs` | Git smart HTTP through `git http-backend`; a corpus push restarts Reflex |
 | `backend/src/api/` | REST and WebSocket, token, Host and Origin checks |
@@ -238,6 +249,8 @@ All routes are under `/api`. When `server.api_token` is set, send `Authorization
 | POST | `/projects/{slug}/feedback` | `{"p": <Reflex's confidence>, "outcome": bool}` for Reflex's calibrator |
 | POST | `/projects/{slug}/fit` | Labeled `cases`, `rho`, `apply`: fit the threshold |
 | GET | `/projects/{slug}/decisions?limit=` | Decision log, newest first |
+| GET | `/usage` | The latest usage report: windows, pace, tokens today, by project, skip state per provider |
+| POST | `/usage/refresh` | `{}`: read every provider now and return the report |
 | POST | `/projects/{slug}/reflex/restart`, GET `…/reflex/log` | Restart Reflex, read its log |
 | GET | `/tasks/{id}/trace?limit=` | The task's orchestrator decisions (`decision.*` events), newest first |
 | GET | `/decisions/model` | The decision graph (nodes with their rules, edges, event kinds) and the config its rules read |
@@ -279,6 +292,6 @@ in-memory terminal.
 
 - Git worktree per task, so `max_parallel > 1` workers cannot edit the same files.
 - Fail over a rate-limited task to another provider when its reset is far away.
-- Usage and quota panels per provider (the watcher's `/usage` readers).
+- A usage reader for `agy` once it exposes its quota locally.
 - Agent-to-agent messages: a supervisor session that creates and reviews tasks through the API.
 - Activity feed parsed from agent panes (prompts, tool calls, replies), as the watcher's live feed did.

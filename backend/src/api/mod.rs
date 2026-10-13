@@ -85,6 +85,10 @@ pub fn router(hub: Arc<Hub>) -> Router {
         .route("/projects/defaults", get(projects::defaults))
         .route("/projects/inspect", post(projects::inspect))
         .route("/providers/{name}/login", get(projects::login_state).post(projects::login_start))
+        // ---- usage: plan limits per provider (usage.rs)
+        .route("/usage", get(usage))
+        .route("/usage/refresh", post(refresh_usage))
+        // ----
         .route("/ws", get(ws::handler))
         .layer(middleware::from_fn_with_state(hub.clone(), require_token))
         .with_state(hub.clone());
@@ -412,6 +416,19 @@ async fn pipeline(State(hub): State<Arc<Hub>>) -> ApiResult<PipelineInfo> {
         audit_chain: o.audit.chain.clone(),
         post_done: o.post_done.clone(),
     }))
+}
+
+// ---- usage
+
+/// The latest reading (polled every `usage.interval_secs`).
+async fn usage(State(hub): State<Arc<Hub>>) -> Json<crate::model::UsageReport> {
+    Json(hub.usage.report())
+}
+
+/// Reads every provider now (a read in the last few seconds is returned as is). Takes a JSON body (`{}`) like the
+/// other state-changing routes, so a cross-site form cannot trigger it.
+async fn refresh_usage(State(hub): State<Arc<Hub>>, Json(_): Json<Value>) -> Json<crate::model::UsageReport> {
+    Json(crate::usage::refresh(&hub).await)
 }
 
 #[cfg(test)]

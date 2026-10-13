@@ -11,6 +11,7 @@ import type { ServerInfo } from "./generated/ServerInfo";
 import type { ServerMessage } from "./generated/ServerMessage";
 import type { Session } from "./generated/Session";
 import type { Task } from "./generated/Task";
+import { setUsageReport } from "./use-usage";
 
 export type Connection = "connecting" | "live" | "offline" | "unauthorized";
 
@@ -100,6 +101,9 @@ export function useDashboard(): DashboardState {
           break;
         case "project_removed":
           setProjects((list) => list.filter((p) => p.project.slug !== msg.slug));
+          break;
+        case "usage":
+          setUsageReport(msg.report);
           break;
         case "resync":
           void reload().catch(() => {});
