@@ -5,6 +5,7 @@ import type { DecisionModel } from "./generated/DecisionModel";
 import type { Event } from "./generated/Event";
 import type { FitResult } from "./generated/FitResult";
 import type { Overview } from "./generated/Overview";
+import type { PipelineInfo } from "./generated/PipelineInfo";
 import type { ProjectInfo } from "./generated/ProjectInfo";
 import type { Question } from "./generated/Question";
 import type { ReflexStatus } from "./generated/ReflexStatus";
@@ -82,6 +83,8 @@ export const api = {
   taskAction: (id: number, action: "retry" | "cancel") => request<Task>("PATCH", `/tasks/${id}`, { action }),
   deleteTask: (id: number) => request("DELETE", `/tasks/${id}`),
   setOrchestrator: (running: boolean) => request("POST", "/orchestrator", { running }),
+  /** The orchestrator's verify / audit / post_done settings (command centre). */
+  pipeline: () => request<PipelineInfo>("GET", "/pipeline"),
 
   createProject: (body: { name: string; slug?: string; description?: string; fallback?: string; model?: string }) =>
     request<ProjectInfo>("POST", "/projects", body),

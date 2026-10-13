@@ -109,13 +109,26 @@ cd frontend && bun dev                               # dashboard on :3000, /api 
 
 ## Dashboard
 
-A dark operator console in the style of the AI OS "MAPS" dashboard: a status bar (orchestrator, link, Reflex
-engines, providers), a left rail (clock, orchestrator, activity, backlog), a right rail (working and waiting
-sessions, an agents deck to start sessions, the projects table with Reflex status and restart), and in the middle
-a graph of the whole platform (projects, corpus domains, tasks, sessions, providers) with six views: rings, circle,
-areas, links, timeline and 3D orbit. Clicking a node opens a card whose buttons act on it (open the console,
-the task, the project; restart Reflex; start a session). Every number of the graph lives in `TUNING` at the top of
-`frontend/components/graph/layouts.ts`. Deep links: `#tasks`, `#sessions/<name>`, `#projects/<slug>`.
+A dark operator console. The **command centre** watches and steers the orchestrator for the current project (or
+all projects, read-only):
+
+- **Status bar:** core running/paused, watcher interval, WebSocket, database, workspace.
+- **Left:** orchestrator state with Run/Pause, providers in `provider_order` with their state (ready, rate limited,
+  cooldown, missing, signed out with a Sign in button), and the task queue with "+ New task".
+- **Centre:** a canvas with two views. **3D orbit**: drag to orbit, wheel to zoom. **Graph**: columns ORCH ·
+  PROVIDERS · SESSIONS · TASKS by dependency depth · PIPELINE (each `verify` command, the audit, each `post_done`
+  hook, from `GET /api/pipeline`). ◇ task, ○ session, ⬡ stage, • run (one dot per recent event of a session).
+  Active links carry moving dots. Provider chips isolate a provider, and type toggles hide node kinds.
+- **Card:** clicking a node opens a card with its facts and real actions: retry, cancel or delete a task; type to a
+  live session, send keys, open its full console, close it; sign in; start a session; pause the orchestrator.
+- **Right:** "Needs you" (sessions waiting for input, signed out, stalled or in error, and failed tasks), sessions
+  with "+ New", and the event log.
+- **All projects:** the providers column becomes one hub per project, and IDs read `<project> #<id>`. The left
+  column lists projects with "Open →", and cards offer only "Open in <project> →".
+
+Deep links: `#command/tasks`, `#command/tasks/<id>`, `#command/tasks/new`, `#command/sessions/<name>`,
+`#command/sessions/new`, `#projects/<slug>`. Every layout number lives in `TUNING` in
+`frontend/components/graph/layouts.ts`.
 
 ### Skills (`#skills`, `#skills/<name>`)
 
@@ -199,6 +212,7 @@ All routes are under `/api`. When `server.api_token` is set, send `Authorization
 | PATCH | `/tasks/{id}` | `{"action": "retry"}` or `{"action": "cancel"}` |
 | DELETE | `/tasks/{id}` | Delete a pending or finished task |
 | GET/POST | `/orchestrator` | Status, or `{"running": true}` |
+| GET | `/pipeline` | `provider_order`, `verify`, audit, `post_done` and retry settings from `[orchestrator]` |
 | GET/POST | `/projects` | List, or create (`name`, `slug`, `description`, `fallback`, `model`) |
 | GET/PATCH/DELETE | `/projects/{slug}` | Info (settings, Reflex status, decision counts), change (`threshold`, `fallback`, `model`, `questions`…), delete |
 | GET | `/projects/{slug}/repos/{code\|corpus}` | Files and recent commits |

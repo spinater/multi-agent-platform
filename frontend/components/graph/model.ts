@@ -1,121 +1,166 @@
-import type { ProjectInfo } from "@/lib/generated/ProjectInfo";
-import type { ProviderInfo } from "@/lib/generated/ProviderInfo";
+import type { Event } from "@/lib/generated/Event";
+import type { PipelineInfo } from "@/lib/generated/PipelineInfo";
 import type { Session } from "@/lib/generated/Session";
 import type { Task } from "@/lib/generated/Task";
 
-/** What a node is. Shape follows kind; colour follows area. */
-export type Kind = "root" | "project" | "domain" | "task" | "session" | "provider";
+/** The command centre's graph (design: Agent Command Centre.dc.html, `sync()`): the orchestrator, one hub per
+ * provider (or per project in all-projects mode), sessions, tasks, the pipeline stages from `map.toml`, and one dot
+ * per recent event of a session ("runs"). Colours are CSS colour strings; the canvas resolves `var(...)`. */
 
-/** Concentric ring a node sits on in the rings view, innermost first. */
-export const LAYERS = ["core", "projects", "corpus", "tasks", "sessions", "providers"] as const;
-export type Layer = (typeof LAYERS)[number];
+export type NodeType = "orch" | "group" | "session" | "task" | "stage" | "run";
+export type LinkKind = "hub" | "own" | "work" | "dep" | "stage" | "infra";
+export type Phase = "verify" | "audit" | "post_done" | "terminal" | "store" | "hub";
 
-export const LAYER_OF: Record<Kind, Layer> = {
-  root: "core",
-  project: "projects",
-  domain: "corpus",
-  task: "tasks",
-  session: "sessions",
-  provider: "providers",
+/** A provider hub, the queue of unassigned tasks, or (all projects) a project. */
+export type Group = { key: string; label: string; color: string; kind: "provider" | "queue" | "project"; available?: boolean };
+
+export type Stage = { id: string; label: string; glyph: string; phase: Phase; command?: string };
+
+export type Ref =
+  | { kind: "orch" }
+  | { kind: "group"; group: Group }
+  | { kind: "session"; session: Session }
+  | { kind: "task"; task: Task }
+  | { kind: "stage"; stage: Stage }
+  | { kind: "run"; event: Event };
+
+export type GraphNode = { id: string; type: NodeType; group: string | null; label: string; color: string; parent: string | null; ref: Ref };
+export type GraphLink = { id: string; a: string; b: string; kind: LinkKind; active: boolean };
+
+export type Graph = {
+  nodes: GraphNode[];
+  links: GraphLink[];
+  groups: Group[];
+  /** Sessions and tasks per group, for the chips and the hub labels. */
+  count: Record<string, number>;
+  activeStages: Set<string>;
+  /** Dependency depth of each task id (0 = no dependencies in view), for the graph view's columns. */
+  depth: Record<number, number>;
+  stages: Stage[];
 };
 
-/** The area of tasks and sessions that run in `workspace.dir` rather than a project. */
-export const WORKSPACE_AREA = "workspace";
-export const PROVIDER_AREA = "providers";
+export const QUEUE = "queue";
+const WORKING = new Set(["working", "starting"]);
 
-export type GraphNode = {
-  id: string;
-  kind: Kind;
-  label: string;
-  area: string;
-  layer: Layer;
-  note: string;
-  /** Epoch ms, for the timeline view. */
-  at: number;
-  /** Status word shown on the card (task status, session state, Reflex state…). */
-  status?: string;
-  /** The record behind the node, for card actions. */
-  ref: string;
-};
-
-export type GraphLink = { s: string; t: string };
-
-export type Graph = { nodes: GraphNode[]; links: GraphLink[]; areas: string[] };
-
-const ms = (iso: string | null | undefined) => (iso ? new Date(iso).getTime() : 0);
-
-/** Builds one graph of the whole platform: the core, projects and their corpus domains, tasks, sessions, providers. */
-export function buildGraph(projects: ProjectInfo[], tasks: Task[], sessions: Session[], providers: ProviderInfo[]): Graph {
-  const nodes: GraphNode[] = [];
-  const links: GraphLink[] = [];
-  const ids = new Set<string>();
-  const add = (n: GraphNode) => {
-    if (ids.has(n.id)) return;
-    ids.add(n.id);
-    nodes.push(n);
-  };
-  const link = (s: string, t: string) => {
-    if (ids.has(s) && ids.has(t)) links.push({ s, t });
-  };
-
-  const first = Math.min(...[...projects.map((p) => ms(p.project.created_at)), ...tasks.map((t) => ms(t.created_at)), Date.now()]);
-  add({ id: "root", kind: "root", label: "map", area: "core", layer: "core", note: "The platform: orchestrator, watcher and decision gate", at: first, ref: "" });
-
-  for (const { project: p, reflex, stats } of projects) {
-    const id = `project:${p.slug}`;
-    add({
-      id,
-      kind: "project",
-      label: p.slug,
-      area: p.slug,
-      layer: "projects",
-      note: `${p.description || p.name} · ${stats.total} decisions, ${stats.reflex} by Reflex`,
-      at: ms(p.created_at),
-      status: reflex.state,
-      ref: p.slug,
-    });
-    link("root", id);
-    for (const d of reflex.domains) {
-      const did = `domain:${p.slug}:${d}`;
-      add({ id: did, kind: "domain", label: d, area: p.slug, layer: "corpus", note: `Corpus domain of ${p.slug}`, at: ms(reflex.since), ref: `${p.slug}/${d}` });
-      link(id, did);
+/** A short glyph for a command: `bun run typecheck` → `Ty`, `git commit -am …` → `C`. Unique within `taken`. */
+function glyphFor(command: string, taken: Set<string>): string {
+  const words = command
+    .split(/\s+/)
+    .filter((w) => /^[a-z]/i.test(w) && !["bun", "npm", "pnpm", "yarn", "run", "cargo", "git", "make", "npx", "bunx", "uv", "python", "python3", "sh", "bash", "-c"].includes(w));
+  const word = (words[0] ?? command.replace(/[^a-z]/gi, "") ?? "x").replace(/[^a-z]/gi, "") || "x";
+  for (let n = 1; n <= Math.min(3, word.length); n++) {
+    const g = word[0].toUpperCase() + word.slice(1, n).toLowerCase();
+    if (!taken.has(g)) {
+      taken.add(g);
+      return g;
     }
   }
+  let i = 2;
+  while (taken.has(`${word[0].toUpperCase()}${i}`)) i++;
+  taken.add(`${word[0].toUpperCase()}${i}`);
+  return `${word[0].toUpperCase()}${i}`;
+}
 
-  for (const t of tasks) {
-    const area = t.project ?? WORKSPACE_AREA;
-    const id = `task:${t.id}`;
-    add({ id, kind: "task", label: `#${t.id} ${t.title}`, area, layer: "tasks", note: t.result?.split("\n")[0] ?? t.prompt.slice(0, 140), at: ms(t.created_at), status: t.status, ref: String(t.id) });
-    link(t.project ? `project:${t.project}` : "root", id);
-  }
-  for (const t of tasks) for (const d of t.depends_on) link(`task:${d}`, `task:${t.id}`);
+/** The pipeline column: each verify command, the audit, each post_done hook, then the platform's own plumbing. */
+export function buildStages(pipeline: PipelineInfo | null, database: string | undefined): Stage[] {
+  const taken = new Set<string>(["A", "tm", "db", "ws"]);
+  const out: Stage[] = [];
+  const verify = pipeline?.verify ?? [];
+  if (verify.length === 0) out.push({ id: "verify", label: "verify · none configured", glyph: "V", phase: "verify" });
+  verify.forEach((c, i) => out.push({ id: `verify-${i}`, label: c, glyph: glyphFor(c, taken), phase: "verify", command: c }));
+  if (pipeline?.audit_enabled) out.push({ id: "audit", label: `audit · ${pipeline.audit_chain.join(" → ")}`, glyph: "A", phase: "audit" });
+  (pipeline?.post_done ?? []).forEach((c, i) => out.push({ id: `post-${i}`, label: c, glyph: glyphFor(c, taken), phase: "post_done", command: c }));
+  out.push({ id: "tmux", label: "tmux · send-keys / capture-pane", glyph: "tm", phase: "terminal" });
+  out.push({ id: "sqlite", label: `sqlite · ${database ?? ".map/map.db"}`, glyph: "db", phase: "store" });
+  out.push({ id: "ws", label: "/api/ws push", glyph: "ws", phase: "hub" });
+  return out;
+}
 
-  for (const p of providers) {
-    const id = `provider:${p.name}`;
-    add({ id, kind: "provider", label: p.name, area: PROVIDER_AREA, layer: "providers", note: `${p.models.join(", ") || p.default_model}`, at: first, status: !p.available ? "missing" : p.cooldown_until ? "cooldown" : "ready", ref: p.name });
-    link("root", id);
-  }
+export function taskDepths(tasks: Task[]): Record<number, number> {
+  const memo: Record<number, number> = {};
+  const byId = new Map(tasks.map((t) => [t.id, t]));
+  const depth = (id: number, guard: number): number => {
+    if (memo[id] != null) return memo[id];
+    const t = byId.get(id);
+    if (!t || guard > 30) return 0;
+    const deps = t.depends_on.filter((d) => byId.has(d));
+    const d = deps.length ? 1 + Math.max(...deps.map((x) => depth(x, guard + 1))) : 0;
+    memo[id] = d;
+    return d;
+  };
+  tasks.forEach((t) => depth(t.id, 0));
+  return memo;
+}
 
+export type BuildInput = {
+  sessions: Session[];
+  tasks: Task[];
+  events: Event[];
+  groups: Group[];
+  stages: Stage[];
+  /** Group key of a session (its provider, or its project in all-projects mode). */
+  groupOfSession: (s: Session) => string;
+  /** Group key of a task without a known session (the queue, or its project). */
+  groupOfLooseTask: (t: Task) => string;
+  taskLabel: (t: Task) => string;
+  sessionLabel: (s: Session) => string;
+  /** At most this many run dots, newest first. */
+  maxRuns?: number;
+};
+
+export function buildGraph(input: BuildInput): Graph {
+  const { sessions, tasks, events, groups, stages } = input;
+  const color = new Map(groups.map((g) => [g.key, g.color]));
+  const gcolor = (g: string) => color.get(g) ?? "var(--p-other)";
+  const byName = new Map(sessions.map((s) => [s.name, s]));
+  const nodes: GraphNode[] = [{ id: "orch", type: "orch", group: null, label: "MAP · ORCHESTRATOR", color: "var(--accent)", parent: null, ref: { kind: "orch" } }];
+  for (const g of groups) nodes.push({ id: `p:${g.key}`, type: "group", group: g.key, label: g.label.toUpperCase(), color: g.color, parent: "orch", ref: { kind: "group", group: g } });
   for (const s of sessions) {
-    const id = `session:${s.name}`;
-    add({ id, kind: "session", label: s.name, area: s.project ?? WORKSPACE_AREA, layer: "sessions", note: s.last_line ?? s.detail ?? `${s.provider} · ${s.model}`, at: ms(s.created_at), status: s.state, ref: s.name });
-    if (s.task_id !== null) link(`task:${s.task_id}`, id);
-    else link(s.project ? `project:${s.project}` : "root", id);
-    link(id, `provider:${s.provider}`);
+    const g = input.groupOfSession(s);
+    nodes.push({ id: `s:${s.name}`, type: "session", group: g, label: input.sessionLabel(s), color: gcolor(g), parent: `p:${g}`, ref: { kind: "session", session: s } });
+  }
+  const taskGroup = (t: Task) => {
+    const s = t.session ? byName.get(t.session) : undefined;
+    return s ? input.groupOfSession(s) : input.groupOfLooseTask(t);
+  };
+  for (const t of tasks) {
+    const s = t.session ? byName.get(t.session) : undefined;
+    const g = taskGroup(t);
+    nodes.push({ id: `t:${t.id}`, type: "task", group: g, label: `${input.taskLabel(t)} ${t.title}`, color: gcolor(g), parent: s ? `s:${s.name}` : `p:${g}`, ref: { kind: "task", task: t } });
+  }
+  for (const st of stages) nodes.push({ id: `g:${st.id}`, type: "stage", group: null, label: st.label, color: "var(--text-2)", parent: "orch", ref: { kind: "stage", stage: st } });
+  let runs = 0;
+  for (const e of events) {
+    if (runs >= (input.maxRuns ?? 320)) break;
+    const s = e.session ? byName.get(e.session) : undefined;
+    if (!s) continue;
+    const g = input.groupOfSession(s);
+    nodes.push({ id: `r:${e.id}`, type: "run", group: g, label: `${e.kind} · ${s.name}`, color: gcolor(g), parent: `s:${s.name}`, ref: { kind: "run", event: e } });
+    runs++;
   }
 
-  const areas = [...new Set(nodes.filter((n) => n.kind !== "root").map((n) => n.area))].sort((a, b) => rank(a) - rank(b) || a.localeCompare(b));
-  return { nodes, links, areas };
-}
+  const links: GraphLink[] = [];
+  const add = (a: string, b: string, kind: LinkKind, active: boolean) => links.push({ id: `${a}>${b}`, a, b, kind, active });
+  const working = new Set(sessions.filter((s) => WORKING.has(s.state)).map((s) => s.name));
+  const activeGroups = new Set(sessions.filter((s) => working.has(s.name)).map(input.groupOfSession));
+  const taskIds = new Set(tasks.map((t) => t.id));
+  for (const g of groups) add("orch", `p:${g.key}`, "hub", activeGroups.has(g.key));
+  for (const s of sessions) add(`p:${input.groupOfSession(s)}`, `s:${s.name}`, "own", working.has(s.name));
+  for (const s of sessions) if (s.task_id != null && taskIds.has(s.task_id)) add(`s:${s.name}`, `t:${s.task_id}`, "work", working.has(s.name));
+  for (const t of tasks) if (!t.session || !byName.has(t.session)) add(`p:${taskGroup(t)}`, `t:${t.id}`, "own", false);
+  for (const t of tasks) for (const d of t.depends_on) if (taskIds.has(d)) add(`t:${d}`, `t:${t.id}`, "dep", false);
+  const activeStages = new Set<string>();
+  for (const t of tasks) {
+    const phase = t.status === "verifying" ? "verify" : t.status === "auditing" ? "audit" : null;
+    if (!phase) continue;
+    for (const st of stages.filter((x) => x.phase === phase)) {
+      add(`t:${t.id}`, `g:${st.id}`, "stage", true);
+      activeStages.add(`g:${st.id}`);
+    }
+  }
+  for (const st of stages) if (st.phase === "terminal" || st.phase === "store" || st.phase === "hub") add("orch", `g:${st.id}`, "infra", false);
 
-/** Projects first, then the shared workspace, then providers. */
-function rank(area: string) {
-  return area === PROVIDER_AREA ? 2 : area === WORKSPACE_AREA ? 1 : 0;
-}
-
-/** CSS variable for an area's colour; providers and the workspace use the neutral hue. */
-export function areaVar(areas: string[], area: string): string {
-  if (area === PROVIDER_AREA || area === WORKSPACE_AREA || area === "core") return "--area-0";
-  const i = areas.filter((a) => a !== PROVIDER_AREA && a !== WORKSPACE_AREA).indexOf(area);
-  return `--area-${(i % 8) + 1}`;
+  const count: Record<string, number> = {};
+  for (const n of nodes) if ((n.type === "session" || n.type === "task") && n.group) count[n.group] = (count[n.group] ?? 0) + 1;
+  return { nodes, links, groups, count, activeStages, depth: taskDepths(tasks), stages };
 }

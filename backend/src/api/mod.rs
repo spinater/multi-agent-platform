@@ -20,7 +20,7 @@ use tower_http::services::{ServeDir, ServeFile};
 
 use crate::detect::{EndDecision, strip_ansi};
 use crate::hub::{Hub, LaunchRequest};
-use crate::model::{Event, Level, Overview, Role, Session, Task};
+use crate::model::{Event, Level, Overview, PipelineInfo, Role, Session, Task};
 use crate::orchestrator::Orchestrator;
 use crate::store::NewTask;
 
@@ -58,6 +58,8 @@ pub fn router(hub: Arc<Hub>) -> Router {
         .route("/tasks", get(tasks).post(create_task))
         .route("/tasks/{id}", axum::routing::patch(update_task).delete(delete_task))
         .route("/orchestrator", get(orchestrator).post(set_orchestrator))
+        // ---- command centre
+        .route("/pipeline", get(pipeline))
         .route("/projects", get(projects::list).post(projects::create))
         .route("/projects/{slug}", get(projects::get).patch(projects::update).delete(projects::delete))
         .route("/projects/{slug}/repos/{repo}", get(projects::repo_listing))
@@ -390,6 +392,22 @@ async fn orchestrator_step(State(hub): State<Arc<Hub>>) -> ApiResult<crate::mode
     let decisions = hub.store.decision_events_after(before).await?;
     hub.event(Level::Info, "orchestrator.step", None, None, format!("Stepped one tick: {} decisions", decisions.len())).await;
     Ok(Json(crate::model::StepResult { decisions }))
+}
+
+// ---- command centre
+
+async fn pipeline(State(hub): State<Arc<Hub>>) -> ApiResult<PipelineInfo> {
+    let o = &hub.config.orchestrator;
+    Ok(Json(PipelineInfo {
+        provider_order: o.provider_order.clone(),
+        max_attempts: o.max_attempts,
+        task_timeout_minutes: o.task_timeout_minutes,
+        verify: o.verify.clone(),
+        audit_enabled: o.audit.enabled,
+        audit_required: o.audit.required,
+        audit_chain: o.audit.chain.clone(),
+        post_done: o.post_done.clone(),
+    }))
 }
 
 #[cfg(test)]

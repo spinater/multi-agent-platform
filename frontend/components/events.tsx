@@ -1,41 +1,38 @@
 "use client";
 
-import clsx from "clsx";
+import { useState } from "react";
 
 import type { Event } from "@/lib/generated/Event";
-import type { Level } from "@/lib/generated/Level";
 
-import { Empty, Panel } from "./ui";
+import { LEVEL_TONE, Pill, hms } from "./command-ui";
 
-const dot: Record<Level, string> = { info: "bg-info", success: "bg-ok", warning: "bg-warn", error: "bg-bad" };
-
-export function EventFeed({ events, onOpenSession }: { events: Event[]; onOpenSession: (name: string) => void }) {
+/** The event log of the right column, newest first: time · kind · who · message (design: `eventRows`). */
+export function EventLog({ events, who, onOpen }: { events: Event[]; who: (e: Event) => string; onOpen: (e: Event) => void }) {
+  const [limit, setLimit] = useState(40);
+  if (events.length === 0) return <p className="font-mono text-[11px] text-muted">Nothing yet.</p>;
   return (
-    <Panel title="Activity">
-      {events.length === 0 ? (
-        <Empty>Nothing yet.</Empty>
-      ) : (
-        <ol className="max-h-[520px] divide-y divide-line overflow-auto">
-          {events.map((e) => (
-            <li key={`${e.id}-${e.at}`} className="flex gap-2.5 px-4 py-2 text-xs">
-              <span className={clsx("mt-1.5 size-1.5 shrink-0 rounded-full", dot[e.level])} aria-label={e.level} />
-              <div className="min-w-0 flex-1">
-                <p className="break-words">{e.message}</p>
-                <p className="mt-0.5 flex flex-wrap gap-x-2 text-muted">
-                  <time dateTime={e.at}>{new Date(e.at).toLocaleTimeString()}</time>
-                  {e.session && (
-                    <button className="font-mono hover:underline" onClick={() => onOpenSession(e.session!)}>
-                      {e.session}
-                    </button>
-                  )}
-                  {e.task_id !== null && <span>task #{e.task_id}</span>}
-                  <span className="opacity-70">{e.kind}</span>
-                </p>
-              </div>
-            </li>
-          ))}
-        </ol>
+    <div className="flex flex-col gap-0.5">
+      {events.slice(0, limit).map((e) => (
+        <button key={`${e.id}-${e.at}`} onClick={() => onOpen(e)} className="grid cursor-pointer grid-cols-[58px_minmax(0,1fr)] gap-2.5 py-1.5 text-left text-text">
+          <time dateTime={e.at} className="font-mono text-[10.5px] leading-[1.6] text-muted/80">
+            {hms(e.at)}
+          </time>
+          <span className="flex min-w-0 flex-col gap-1">
+            <span className="flex flex-wrap items-center gap-1.5">
+              <Pill tone={LEVEL_TONE[e.level]} small>
+                {e.kind}
+              </Pill>
+              <span className="font-mono text-[10.5px] leading-none text-muted">{who(e)}</span>
+            </span>
+            <span className="text-[12px] leading-[1.4] break-words text-nav">{e.message}</span>
+          </span>
+        </button>
+      ))}
+      {events.length > limit && (
+        <button onClick={() => setLimit(limit + 60)} className="mt-1 cursor-pointer self-start font-mono text-[11px] text-link hover:text-link-hover">
+          show {Math.min(60, events.length - limit)} more
+        </button>
       )}
-    </Panel>
+    </div>
   );
 }
