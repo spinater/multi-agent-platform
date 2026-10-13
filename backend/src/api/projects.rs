@@ -11,9 +11,11 @@ use serde_json::{Value, json};
 use super::{ApiError, ApiResult, not_found};
 use crate::decide::{self, Route};
 use crate::hub::Hub;
-use crate::model::{DecideResponse, Decision, FitResult, Project, ProjectInfo, Question, ReflexStatus, RepoListing};
+use crate::model::{
+    DecideResponse, Decision, FitResult, Project, ProjectCreated, ProjectDefaults, ProjectInfo, ProjectSettings, Question, ReflexStatus, RepoListing, SourceInspection, SourceKind,
+};
 use crate::projects::{self, NewProject, validate_fallback, validate_questions, validate_repo_path};
-use crate::{reflex, repo};
+use crate::{project_settings, reflex, repo};
 
 async fn load(hub: &Hub, slug: &str) -> Result<Project, ApiError> {
     hub.store.project(slug).await?.ok_or_else(|| not_found("project"))
@@ -31,11 +33,15 @@ pub struct CreateBody {
     description: String,
     fallback: Option<String>,
     model: Option<String>,
+    /// Source, providers, verify, audit, paused; missing fields use the defaults.
+    #[serde(default)]
+    settings: ProjectSettings,
 }
 
-pub async fn create(State(hub): State<Arc<Hub>>, Json(b): Json<CreateBody>) -> Result<(StatusCode, Json<ProjectInfo>), ApiError> {
-    let p = projects::create(&hub, NewProject { name: b.name, slug: b.slug, description: b.description, fallback: b.fallback, model: b.model }).await?;
-    Ok((StatusCode::CREATED, Json(hub.project_info(p).await?)))
+pub async fn create(State(hub): State<Arc<Hub>>, Json(b): Json<CreateBody>) -> Result<(StatusCode, Json<ProjectCreated>), ApiError> {
+    let new = NewProject { name: b.name, slug: b.slug, description: b.description, fallback: b.fallback, model: b.model };
+    let (p, checks) = projects::create_with(&hub, new, b.settings).await?;
+    Ok((StatusCode::CREATED, Json(ProjectCreated { project: hub.project_info(p).await?, checks })))
 }
 
 pub async fn get(State(hub): State<Arc<Hub>>, UrlPath(slug): UrlPath<String>) -> ApiResult<ProjectInfo> {
@@ -58,6 +64,10 @@ pub struct UpdateBody {
     #[serde(default, deserialize_with = "present")]
     model: Option<Option<String>>,
     questions: Option<Vec<Question>>,
+    /// Replaces providers, verify, audit and paused; the source is kept (it records how the repo was made).
+    settings: Option<ProjectSettings>,
+    /// Pauses or resumes the project without sending the rest of its settings.
+    paused: Option<bool>,
 }
 
 pub async fn update(State(hub): State<Arc<Hub>>, UrlPath(slug): UrlPath<String>, Json(b): Json<UpdateBody>) -> ApiResult<ProjectInfo> {
@@ -84,6 +94,14 @@ pub async fn update(State(hub): State<Arc<Hub>>, UrlPath(slug): UrlPath<String>,
     if let Some(q) = b.questions {
         validate_questions(&q)?;
         p.questions = q;
+    }
+    if let Some(s) = b.settings {
+        let s = ProjectSettings { source: p.settings.source.clone(), ..project_settings::normalize(s) };
+        project_settings::validate(&hub, &s)?;
+        p.settings = s;
+    }
+    if let Some(paused) = b.paused {
+        p.settings.paused = paused;
     }
     hub.put_project(&p).await?;
     Ok(Json(hub.project_info(p).await?))
@@ -207,4 +225,39 @@ pub struct LimitQuery {
 pub async fn decisions(State(hub): State<Arc<Hub>>, UrlPath(slug): UrlPath<String>, Query(q): Query<LimitQuery>) -> ApiResult<Vec<Decision>> {
     load(&hub, &slug).await?;
     Ok(Json(hub.store.decisions(&slug, q.limit.unwrap_or(200).clamp(1, 1000)).await?))
+}
+
+// ---- project settings: defaults, source inspection, provider sign-in
+
+pub async fn defaults(State(hub): State<Arc<Hub>>) -> ApiResult<ProjectDefaults> {
+    Ok(Json(project_settings::defaults(&hub)))
+}
+
+#[derive(Deserialize)]
+pub struct InspectBody {
+    kind: SourceKind,
+    location: String,
+    branch: Option<String>,
+}
+
+/// Looks at a git URL or a local repo before it is imported. Problems come back as `ok: false` with `error`, so the
+/// wizard can show them next to the field.
+pub async fn inspect(Json(b): Json<InspectBody>) -> ApiResult<SourceInspection> {
+    let branch = b.branch.filter(|x| !x.trim().is_empty());
+    let failed = |err: anyhow::Error| SourceInspection { error: Some(format!("{err:#}")), ..Default::default() };
+    if let Err(err) = project_settings::validate_location(b.kind, Some(&b.location)).and_then(|_| project_settings::validate_branch(branch.as_deref())) {
+        return Ok(Json(failed(err)));
+    }
+    let local = b.kind == SourceKind::Local;
+    let source = if local { crate::login::expand_home(b.location.trim()).display().to_string() } else { b.location.trim().to_string() };
+    Ok(Json(repo::inspect(&source, local, branch.as_deref()).await.unwrap_or_else(failed)))
+}
+
+pub async fn login_start(State(hub): State<Arc<Hub>>, UrlPath(name): UrlPath<String>) -> ApiResult<crate::model::LoginState> {
+    crate::login::start(&hub, &name).await?;
+    Ok(Json(crate::login::state(&hub, &name).await?))
+}
+
+pub async fn login_state(State(hub): State<Arc<Hub>>, UrlPath(name): UrlPath<String>) -> ApiResult<crate::model::LoginState> {
+    Ok(Json(crate::login::state(&hub, &name).await?))
 }

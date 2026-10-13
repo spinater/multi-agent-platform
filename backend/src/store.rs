@@ -201,9 +201,9 @@ impl Store {
 
     pub async fn save_project(&self, p: &Project) -> Result<()> {
         sqlx::query(
-            "INSERT INTO projects (slug, name, description, port, threshold, fallback, model, questions, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            "INSERT INTO projects (slug, name, description, port, threshold, fallback, model, questions, created_at, settings) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
              ON CONFLICT(slug) DO UPDATE SET name = excluded.name, description = excluded.description, threshold = excluded.threshold,
-               fallback = excluded.fallback, model = excluded.model, questions = excluded.questions",
+               fallback = excluded.fallback, model = excluded.model, questions = excluded.questions, settings = excluded.settings",
         )
         .bind(&p.slug)
         .bind(&p.name)
@@ -214,6 +214,7 @@ impl Store {
         .bind(&p.model)
         .bind(serde_json::to_string(&p.questions)?)
         .bind(p.created_at)
+        .bind(serde_json::to_string(&p.settings)?)
         .execute(&self.pool)
         .await?;
         Ok(())
@@ -230,6 +231,7 @@ impl Store {
             model: row.get("model"),
             questions: serde_json::from_str(row.get("questions"))?,
             created_at: row.get("created_at"),
+            settings: serde_json::from_str(row.get("settings"))?,
         })
     }
 
@@ -477,12 +479,17 @@ mod tests {
             model: None,
             questions: vec![Question { id: "q".into(), kind: QuestionKind::Noul, prompt: "Urgent?".into(), options: None, criteria: None }],
             created_at: Utc::now(),
+            settings: Default::default(),
         };
         store.save_project(&p).await.unwrap();
         assert_eq!(store.free_port(7400).await.unwrap(), 7401);
         p.threshold = Some(1e-5);
+        p.settings.paused = true;
+        p.settings.verify = Some(vec!["cargo test".into()]);
         store.save_project(&p).await.unwrap();
-        assert_eq!(store.project("support").await.unwrap().unwrap().threshold, Some(1e-5));
+        let back = store.project("support").await.unwrap().unwrap();
+        assert_eq!(back.threshold, Some(1e-5));
+        assert_eq!(back.settings, p.settings);
 
         let d = Decision {
             id: 0,

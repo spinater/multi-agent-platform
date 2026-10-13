@@ -26,10 +26,9 @@ const NEED_TAG: Record<string, string> = { waiting_input: "input", needs_auth: "
 
 export type ProviderState = { word: string; tone: Tone; signIn: boolean; signedIn: boolean | null };
 
-/** `signed_in` is being added to `ProviderInfo` by the sign-in work; until then it is unknown (`null`). */
+/** From the provider's credential file; `null` when this provider has no known one. */
 export function signedIn(p: ProviderInfo): boolean | null {
-  const v = (p as ProviderInfo & { signed_in?: boolean | null }).signed_in;
-  return typeof v === "boolean" ? v : null;
+  return p.signed_in;
 }
 
 export type Need = { id: string; title: string; reason: string; tag: string; tone: Tone };

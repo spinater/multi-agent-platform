@@ -131,13 +131,14 @@ pub fn ready_detail(task: &Task, active: usize, max_parallel: usize) -> String {
 }
 
 /// Why each candidate before `chosen` was skipped, e.g. "order claude → codex · claude cooling down until 14:05 → codex".
-pub fn pick_detail(hub: &Hub, task: &Task, chosen: Option<&str>) -> String {
-    let (head, candidates) = match &task.provider {
-        Some(p) => (format!("pinned: {p}"), vec![p.clone()]),
-        None => {
-            let order = &hub.config.orchestrator.provider_order;
-            (format!("order {}", order.join(" → ")), order.clone())
-        }
+pub async fn pick_detail(hub: &Hub, task: &Task, chosen: Option<&str>) -> String {
+    // The same candidates as `pick_provider`: pinned, else the project's providers, else `provider_order`, minus
+    // providers at the project's session limit.
+    let candidates = crate::project_settings::candidates(hub, task).await;
+    let head = match &task.provider {
+        Some(p) => format!("pinned: {p}"),
+        None if candidates.is_empty() => "no candidate provider (all at the project's session limit)".to_string(),
+        None => format!("order {}", candidates.join(" → ")),
     };
     let mut parts = vec![head];
     for p in candidates.iter().take_while(|p| Some(p.as_str()) != chosen) {
@@ -181,7 +182,7 @@ pub fn model(hub: &Hub, tick_secs: u64) -> DecisionModel {
     let cfg = &hub.config.orchestrator;
     let nodes = vec![
         point(N::Ready, "Ready?", "Are all depends_on tasks done, and is a worker slot free?", "every depends_on task is done && active < max_parallel; a failed or cancelled dependency blocks", "Orchestrator::tick · orchestrator.max_parallel", false),
-        point(N::Pick, "Pick provider", "Which provider takes this task?", "task.provider if pinned, else the first of provider_order that is on PATH and not cooling down", "pick_provider() · orchestrator.provider_order", false),
+        point(N::Pick, "Pick provider", "Which provider takes this task?", "task.provider if pinned, else the first of the project's providers (or provider_order) that is on PATH, not cooling down and under its session limit", "pick_provider() · project settings · orchestrator.provider_order", false),
         point(N::Launch, "Launch", "Did the worker session start?", "hub.launch(LaunchRequest) returns Ok; an error cools the provider down for 5m", "start() · hub.launch", false),
         point(N::Watch, "Watch", "What has the worker reported?", "$MAP_RESULT_FILE status done | failed; session exited or needs_auth; started > task_timeout_minutes ago", "check_running() · orchestrator.task_timeout_minutes", false),
         point(N::Verify, "Verify", "Does every verify command exit 0?", "each cfg.verify command, in order, exits 0 (30m limit each)", "finish() · orchestrator.verify", false),

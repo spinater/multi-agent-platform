@@ -156,6 +156,11 @@ pub struct ProviderInfo {
     pub available: bool,
     /// Set while the orchestrator avoids the provider after a quota or auth failure.
     pub cooldown_until: Option<DateTime<Utc>>,
+    /// From the provider's credential files (existence and parse-ability only) or its API key variable;
+    /// `None` when the platform has no way to tell.
+    pub signed_in: Option<bool>,
+    /// How the provider signs in; `POST /api/providers/{name}/login` runs it in a helper session.
+    pub login: LoginInfo,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
@@ -261,6 +266,9 @@ pub struct Project {
     /// Saved questions for the playground and for callers.
     pub questions: Vec<Question>,
     pub created_at: DateTime<Utc>,
+    /// Where the code came from and how the orchestrator treats the project's tasks.
+    #[serde(default)]
+    pub settings: ProjectSettings,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -317,6 +325,8 @@ pub struct ProjectInfo {
     pub project: Project,
     pub reflex: ReflexStatus,
     pub stats: DecisionStats,
+    /// The checkout of the code repo that the project's agents work in.
+    pub workspace: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
@@ -657,4 +667,153 @@ pub struct PipelineInfo {
     pub audit_chain: Vec<String>,
     /// Shell commands run after a task passes (e.g. a commit), as templates.
     pub post_done: Vec<String>,
+}
+
+// ---- project settings
+
+/// Where a project's code repo came from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum SourceKind {
+    /// A new repo with the platform's seed files.
+    #[default]
+    Empty,
+    /// `git clone --bare` of a URL.
+    Git,
+    /// `git clone --bare` of a git repo on this machine.
+    Local,
+}
+
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct ProjectSource {
+    pub kind: SourceKind,
+    /// The git URL (`git`) or the path of the repo on this machine (`local`).
+    #[serde(default)]
+    pub location: Option<String>,
+    /// The branch imported as the platform repo's `main`; `None` is the source's default branch.
+    #[serde(default)]
+    pub branch: Option<String>,
+}
+
+/// One provider a project's tasks may use, in order of preference.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct ProjectProvider {
+    pub name: String,
+    /// Used when the task does not pick a model; `None` is the provider's default.
+    #[serde(default)]
+    pub model: Option<String>,
+    /// Most worker sessions of this provider running for the project at once; `None` is no limit beyond
+    /// `orchestrator.max_parallel`.
+    #[serde(default)]
+    pub max_parallel: Option<u32>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct ProjectAudit {
+    pub enabled: bool,
+    /// The auditor; `None` uses `orchestrator.audit.chain`.
+    #[serde(default)]
+    pub provider: Option<String>,
+}
+
+/// A project's own settings, stored in the platform database (not in `map.toml`).
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, TS)]
+#[serde(default)]
+#[ts(export)]
+pub struct ProjectSettings {
+    pub source: ProjectSource,
+    /// Empty: `orchestrator.provider_order`.
+    pub providers: Vec<ProjectProvider>,
+    /// `None`: `orchestrator.verify`.
+    pub verify: Option<Vec<String>>,
+    /// `None`: `orchestrator.audit`.
+    pub audit: Option<ProjectAudit>,
+    /// The orchestrator starts none of the project's pending tasks while set.
+    pub paused: bool,
+}
+
+/// One line of what creating a project did, for the dashboard to reveal in order.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct CheckLine {
+    pub level: Level,
+    pub text: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct ProjectCreated {
+    pub project: ProjectInfo,
+    pub checks: Vec<CheckLine>,
+}
+
+/// The `map.toml` values a project falls back to when it does not set its own.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct ProjectDefaults {
+    pub provider_order: Vec<String>,
+    pub verify: Vec<String>,
+    pub audit_enabled: bool,
+    pub audit_chain: Vec<String>,
+    #[ts(type = "number")]
+    pub max_parallel: usize,
+    pub post_done: Vec<String>,
+    pub session_prefix: String,
+}
+
+/// What the wizard found at a project source before importing it.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct SourceInspection {
+    pub ok: bool,
+    pub error: Option<String>,
+    pub default_branch: Option<String>,
+    pub branches: Vec<String>,
+    /// Marker files at the top of a local repo's branch (`Cargo.toml`, `package.json`, `CLAUDE.md`, …).
+    pub files: Vec<String>,
+    #[ts(type = "number | null")]
+    pub commits: Option<u64>,
+}
+
+/// How a provider signs in, from its spec in `map.toml`. Never carries a secret.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct LoginInfo {
+    /// The command line run in the helper session; empty when the provider has no `login` command.
+    pub command: String,
+    /// Text typed into the helper session after it starts (e.g. `/login` for a TUI).
+    pub send: Option<String>,
+    /// The helper session's name.
+    pub session: String,
+    /// Files the CLI keeps its credentials in, `~` expanded.
+    pub credentials: Vec<String>,
+    /// The environment variable that can hold an API key instead.
+    pub api_key_env: Option<String>,
+    /// That variable is set in `workspace.env` or the server's environment.
+    pub api_key_set: bool,
+    /// A caution shown before starting (e.g. the login signs out the current account first).
+    pub warning: Option<String>,
+}
+
+/// The helper login session as the sign-in modal sees it.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct LoginState {
+    pub session: Option<Session>,
+    /// The last lines of the pane, ANSI stripped.
+    pub text: String,
+    pub url: Option<String>,
+    /// A one-time code to enter in the browser.
+    pub code: Option<String>,
+    /// The CLI asks for an authorization code to be pasted back into it.
+    pub wants_code: bool,
+    /// The pane reports a successful sign-in.
+    pub success: bool,
+    pub signed_in: Option<bool>,
+    /// The newest change to a credential file.
+    pub credentials_updated_at: Option<DateTime<Utc>>,
 }

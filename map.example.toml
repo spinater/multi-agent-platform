@@ -54,19 +54,40 @@ timeout_secs = 600
 # Built-in providers: claude, codex, gemini (the `agy` CLI). Any field below overrides the built-in value.
 # Templates substitute {binary}, {model}, {session} and, for headless, {prompt}.
 
+#
+# Sign-in (the dashboard's sign-in modal, POST /api/providers/<name>/login):
+#   login         command run in a helper tmux session `<session_prefix>login-<name>` ({binary} substituted)
+#   login_send    text typed into that session after startup_secs, for CLIs that sign in from their TUI
+#   login_warning shown before a sign-in starts
+#   credentials   files the CLI keeps its sign-in in (~/ is $HOME); only whether they exist and parse is checked,
+#                 their contents are never read out. Empty: the dashboard shows the sign-in state as unknown.
+#   api_key_env   variable that holds an API key instead; set it in [workspace.env] (the dashboard never takes keys)
+
 [providers.claude]
 # Unattended workers need this, or they stop at every permission prompt (the watcher shows them as waiting).
 # extra_args = ["--dangerously-skip-permissions"]
 # models = ["opus", "sonnet", "haiku", "fable"]
 # default_model = "sonnet"
+# login = ["{binary}", "auth", "login"]
+# credentials = ["~/.claude/.credentials.json"]
+# api_key_env = "ANTHROPIC_API_KEY"
 
 [providers.codex]
 # extra_args = ["--dangerously-bypass-approvals-and-sandbox"]
 # default_model = "gpt-6-sol"
+# Device-code sign-in. codex signs out the current account as soon as it starts.
+# login = ["{binary}", "login", "--device-auth"]
+# credentials = ["~/.codex/auth.json"]
+# api_key_env = "OPENAI_API_KEY"
 
 [providers.gemini]
 # binary = "agy"
 # default_model = "gemini-3.8-flash-high"
+# agy signs in from its TUI; it may keep the token in the system keyring instead of the file below.
+# login = ["{binary}"]
+# login_send = "/login"
+# credentials = ["~/.gemini/jetski-standalone-oauth-token"]
+# api_key_env = "GEMINI_API_KEY"
 
 # A provider that is not built in needs at least binary and interactive:
 # [providers.aider]

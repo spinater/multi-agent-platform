@@ -4,9 +4,15 @@ import type { DecisionCounts } from "./generated/DecisionCounts";
 import type { DecisionModel } from "./generated/DecisionModel";
 import type { Event } from "./generated/Event";
 import type { FitResult } from "./generated/FitResult";
+import type { LoginState } from "./generated/LoginState";
 import type { Overview } from "./generated/Overview";
 import type { PipelineInfo } from "./generated/PipelineInfo";
+import type { ProjectCreated } from "./generated/ProjectCreated";
+import type { ProjectDefaults } from "./generated/ProjectDefaults";
 import type { ProjectInfo } from "./generated/ProjectInfo";
+import type { ProjectSettings } from "./generated/ProjectSettings";
+import type { SourceInspection } from "./generated/SourceInspection";
+import type { SourceKind } from "./generated/SourceKind";
 import type { Question } from "./generated/Question";
 import type { ReflexStatus } from "./generated/ReflexStatus";
 import type { RepoListing } from "./generated/RepoListing";
@@ -86,8 +92,8 @@ export const api = {
   /** The orchestrator's verify / audit / post_done settings (command centre). */
   pipeline: () => request<PipelineInfo>("GET", "/pipeline"),
 
-  createProject: (body: { name: string; slug?: string; description?: string; fallback?: string; model?: string }) =>
-    request<ProjectInfo>("POST", "/projects", body),
+  createProject: (body: { name: string; slug?: string; description?: string; fallback?: string; model?: string; settings?: ProjectSettings }) =>
+    request<ProjectCreated>("POST", "/projects", body),
   updateProject: (slug: string, body: ProjectUpdate) => request<ProjectInfo>("PATCH", `/projects/${slug}`, body),
   deleteProject: (slug: string) => request("DELETE", `/projects/${slug}`),
   repo: (slug: string, repo: RepoName) => request<RepoListing>("GET", `/projects/${slug}/repos/${repo}`),
@@ -112,6 +118,12 @@ export const api = {
   /** Only ids the scanner returned are readable. */
   skillFile: (project: string | null, id: string) =>
     request<SkillFile>("GET", `/skills/file?project=${encodeURIComponent(project ?? "")}&path=${encodeURIComponent(id)}`),
+  // ---- project settings and provider sign-in
+  projectDefaults: () => request<ProjectDefaults>("GET", "/projects/defaults"),
+  inspectSource: (body: { kind: SourceKind; location: string; branch?: string }) => request<SourceInspection>("POST", "/projects/inspect", body),
+  /** Starts (or returns the running) helper session that runs the provider's login command. */
+  loginStart: (provider: string) => request<LoginState>("POST", `/providers/${encodeURIComponent(provider)}/login`),
+  loginState: (provider: string) => request<LoginState>("GET", `/providers/${encodeURIComponent(provider)}/login`),
 };
 
 export type RepoName = "code" | "corpus";
@@ -123,6 +135,9 @@ export type ProjectUpdate = {
   fallback?: string;
   model?: string | null;
   questions?: Question[];
+  /** Providers, verify, audit and paused; the source is kept. */
+  settings?: ProjectSettings;
+  paused?: boolean;
 };
 
 /** Clone URL for a project repo; git asks for the API token as the password when one is set. */

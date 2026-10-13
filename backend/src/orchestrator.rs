@@ -96,7 +96,8 @@ impl Orchestrator {
 
         let tasks = self.hub.store.tasks().await?;
         let mut active = tasks.iter().filter(|t| matches!(t.status, TaskStatus::Running | TaskStatus::Verifying | TaskStatus::Auditing)).count();
-        for task in tasks.iter().filter(|t| t.status == TaskStatus::Pending) {
+        let paused = crate::project_settings::paused(&self.hub).await;
+        for task in tasks.iter().filter(|t| t.status == TaskStatus::Pending && !crate::project_settings::is_paused(&paused, t)) {
             if active >= self.hub.config.orchestrator.max_parallel {
                 break;
             }
@@ -123,17 +124,13 @@ impl Orchestrator {
         Ok(())
     }
 
-    fn pick_provider(&self, task: &Task) -> Option<String> {
-        let candidates: Vec<String> = match &task.provider {
-            Some(p) => vec![p.clone()],
-            None => self.hub.config.orchestrator.provider_order.clone(),
-        };
+    async fn pick_provider(&self, task: &Task) -> Option<String> {
+        let candidates = crate::project_settings::candidates(&self.hub, task).await;
         candidates.into_iter().find(|p| self.hub.provider_available(p) && self.hub.cooldown_until(p).is_none())
     }
 
-    fn build_prompt(&self, task: &Task, session: &str, previous_failure: Option<&str>) -> String {
+    fn build_prompt(&self, task: &Task, session: &str, previous_failure: Option<&str>, verify: &[String]) -> String {
         let result_file = self.hub.result_file(session);
-        let verify = &self.hub.config.orchestrator.verify;
         let mut p = format!("{}\n\n---\nPlatform protocol (multi-agent-platform)\n", task.prompt.trim());
         p.push_str(&format!("- You are worker session `{session}` on task #{}: {}.\n", task.id, task.title));
         p.push_str("- Work autonomously in this repository; only stop to ask when you are truly blocked.\n");
@@ -158,19 +155,19 @@ impl Orchestrator {
 
     /// Returns true when a worker session was started.
     async fn start(&self, mut task: Task) -> Result<bool> {
-        let Some(provider) = self.pick_provider(&task) else {
+        let Some(provider) = self.pick_provider(&task).await else {
             let note = "Waiting: no provider is available (missing binary, quota or auth cooldown)".to_string();
             if task.result.as_deref() != Some(note.as_str()) {
-                record(&self.hub, Kind::PICK_NONE, &task, dec::pick_detail(&self.hub, &task, None)).await;
+                record(&self.hub, Kind::PICK_NONE, &task, dec::pick_detail(&self.hub, &task, None).await).await;
                 task.result = Some(note);
                 self.hub.put_task(&mut task).await?;
             }
             return Ok(false);
         };
-        record(&self.hub, Kind::PICK_CHOSEN, &task, dec::pick_detail(&self.hub, &task, Some(&provider))).await;
+        record(&self.hub, Kind::PICK_CHOSEN, &task, dec::pick_detail(&self.hub, &task, Some(&provider)).await).await;
         let spec = self.hub.spec(&provider)?;
         // A model only carries over when it belongs to the chosen provider.
-        let model = task.model.clone().filter(|m| spec.models.contains(m));
+        let model = task.model.clone().filter(|m| spec.models.contains(m)).or(crate::project_settings::model(&self.hub, &task, &provider).await);
         task.attempts += 1;
         let session = format!("{}task-{}-{}", self.hub.config.workspace.session_prefix, task.id, task.attempts);
         let previous_failure = if task.attempts > 1 { task.result.clone() } else { None };
@@ -192,7 +189,7 @@ impl Orchestrator {
                 }
             }
         }
-        let prompt = self.build_prompt(&task, &session, previous_failure.as_deref());
+        let prompt = self.build_prompt(&task, &session, previous_failure.as_deref(), &crate::project_settings::verify(&self.hub, &task).await);
         let req = LaunchRequest {
             name: Some(session.clone()),
             provider: provider.clone(),
@@ -344,8 +341,9 @@ impl Orchestrator {
         let dir = hub.work_dir(task.project.as_deref());
 
         if task.status == TaskStatus::Verifying {
-            for (i, command) in cfg.verify.iter().enumerate() {
-                let of = format!("{} of {}", i + 1, cfg.verify.len());
+            let verify = crate::project_settings::verify(hub, &task).await;
+            for (i, command) in verify.iter().enumerate() {
+                let of = format!("{} of {}", i + 1, verify.len());
                 record(hub, Kind::VERIFY_CMD_START, &task, format!("`{command}` · {of}")).await;
                 let started = std::time::Instant::now();
                 let (ok, output) = shell(hub, &dir, command, Duration::from_secs(30 * 60)).await?;
@@ -355,8 +353,8 @@ impl Orchestrator {
                 }
                 record(hub, Kind::VERIFY_CMD_PASS, &task, format!("`{command}` exit 0 · {of} · {}", dec::secs(started.elapsed()))).await;
             }
-            record(hub, Kind::VERIFY_PASS, &task, if cfg.verify.is_empty() { "no verify commands".to_string() } else { format!("all {} exit 0", cfg.verify.len()) }).await;
-            if cfg.audit.enabled {
+            record(hub, Kind::VERIFY_PASS, &task, if verify.is_empty() { "no verify commands".to_string() } else { format!("all {} exit 0", verify.len()) }).await;
+            if crate::project_settings::audit_enabled(hub, &task).await {
                 task.status = TaskStatus::Auditing;
                 hub.put_task(&mut task).await?;
             } else {
@@ -428,7 +426,7 @@ impl Orchestrator {
             body = task.prompt.trim(),
             summary = task.result.as_deref().unwrap_or("(none)"),
         );
-        for provider in &hub.config.orchestrator.audit.chain {
+        for provider in &crate::project_settings::audit_chain(hub, task).await {
             if !hub.provider_available(provider) || hub.cooldown_until(provider).is_some() {
                 record(hub, Kind::AUDIT_UNAVAILABLE, task, format!("{provider} · not found or cooling down")).await;
                 continue;

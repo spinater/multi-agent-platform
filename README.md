@@ -34,8 +34,20 @@ nothing is tied to one repository, session name or provider.
     to use it.
   - **Corpus.** One top-level folder per Reflex domain (1–8), prose `.md` files inside. A push or an edit restarts
     the project's Reflex on the new corpus.
+  - **Import.** A project's code repo starts empty (README and CLAUDE.md), or is imported from a git URL or a local
+    repo with `git clone --bare` (one branch, renamed `main`). Creating a project returns check lines: repos created,
+    commits imported, workspace checked out, Reflex started or why not, each provider found and signed in.
+  - **Settings.** Each project can set its own provider order (with a model and a session limit per provider), verify
+    commands and audit (on, off, or a given auditor), and can be paused so the orchestrator starts none of its pending
+    tasks. Unset fields fall back to `[orchestrator]` in `map.toml`. They live in the database, not in a file.
   - **Calibration.** The threshold is fitted from labeled cases (the ρ-quantile of Reflex's confidence on the cases
     it got right), and Reflex's own calibrator learns from `feedback`. Every decision is logged with its lane.
+- **Sign-in.** Each provider shows whether it is signed in, from its credential files (`credentials` in its spec: only
+  whether they exist and parse is checked, never their contents) or its API key variable (`api_key_env`). The sign-in
+  modal runs the provider's own `login` command (`claude auth login`, `codex login --device-auth`, `agy` + `/login`)
+  in a helper session `<session_prefix>login-<provider>`, and shows the URL and one-time code from its pane. Note that
+  `codex login` signs the current account out as soon as it starts. API keys are never taken through the dashboard:
+  set them in `[workspace.env]`.
 - **History.** Sessions, tasks and events live in SQLite. Every run keeps its prompt, launch script, result file and
   final pane under `.map/runs/<session>/`.
 
@@ -62,8 +74,10 @@ nothing is tied to one repository, session name or provider.
 | `backend/src/orchestrator.rs` | Task scheduling, provider failover, verify, audit, retry |
 | `backend/src/hub.rs` | Launching and closing sessions; the single place that writes state and broadcasts it |
 | `backend/src/terminal/` | `Terminal` trait; `tmux.rs` in production, `fake.rs` in tests |
-| `backend/src/projects.rs` | Creating and deleting projects; repo and corpus path rules |
-| `backend/src/repo.rs` | Bare repos written with git plumbing, corpus export, the agents' workspace checkout |
+| `backend/src/projects.rs` | Creating (new or imported) and deleting projects; repo and corpus path rules |
+| `backend/src/project_settings.rs` | Per-project providers, verify, audit and pause, as the orchestrator asks for them |
+| `backend/src/login.rs` | Provider sign-in state from credential files, the helper login session, URL and code parsing |
+| `backend/src/repo.rs` | Bare repos written with git plumbing, imports (`clone --bare`), corpus export, the workspace checkout |
 | `backend/src/reflex.rs` | One Reflex process per project: export the corpus, start, health-check, restart |
 | `backend/src/decide.rs` | The decision gate (Reflex, threshold, fallback), answer parsing, threshold fitting |
 | `backend/src/api/git.rs` | Git smart HTTP through `git http-backend`; a corpus push restarts Reflex |
@@ -213,8 +227,11 @@ All routes are under `/api`. When `server.api_token` is set, send `Authorization
 | DELETE | `/tasks/{id}` | Delete a pending or finished task |
 | GET/POST | `/orchestrator` | Status, or `{"running": true}` |
 | GET | `/pipeline` | `provider_order`, `verify`, audit, `post_done` and retry settings from `[orchestrator]` |
-| GET/POST | `/projects` | List, or create (`name`, `slug`, `description`, `fallback`, `model`) |
-| GET/PATCH/DELETE | `/projects/{slug}` | Info (settings, Reflex status, decision counts), change (`threshold`, `fallback`, `model`, `questions`…), delete |
+| GET/POST | `/projects` | List, or create (`name`, `slug`, `description`, `fallback`, `model`, `settings`); returns the project and `checks` |
+| GET/PATCH/DELETE | `/projects/{slug}` | Info (settings, Reflex status, decision counts), change (`threshold`, `fallback`, `model`, `questions`, `settings`, `paused`…), delete |
+| GET | `/projects/defaults` | The `map.toml` values projects inherit (provider order, verify, audit, max_parallel, post_done) |
+| POST | `/projects/inspect` | `{"kind": "git"\|"local", "location", "branch"}`: branches, commits and top-level files before an import |
+| GET/POST | `/providers/{name}/login` | Sign-in state (parsed URL, one-time code, credential check), or start the helper login session |
 | GET | `/projects/{slug}/repos/{code\|corpus}` | Files and recent commits |
 | GET/PUT | `/projects/{slug}/repos/{repo}/file` | `?path=` read; `{"path", "content", "message"}` commit (`content: null` deletes) |
 | POST | `/projects/{slug}/decide` | `{"state", "questions", "route": "auto"\|"reflex"\|"llm"}`; each answer has `lane` |

@@ -81,6 +81,10 @@ pub fn router(hub: Arc<Hub>) -> Router {
         .route("/skills", get(skills::overview))
         .route("/skills/enabled", axum::routing::patch(skills::set_enabled))
         .route("/skills/file", get(skills::file))
+        // ---- project settings and provider sign-in
+        .route("/projects/defaults", get(projects::defaults))
+        .route("/projects/inspect", post(projects::inspect))
+        .route("/providers/{name}/login", get(projects::login_state).post(projects::login_start))
         .route("/ws", get(ws::handler))
         .layer(middleware::from_fn_with_state(hub.clone(), require_token))
         .with_state(hub.clone());
