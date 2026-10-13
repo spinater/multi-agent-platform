@@ -209,7 +209,7 @@ mod tests {
     }
 
     async fn launch(hub: &Arc<Hub>) -> String {
-        let req = LaunchRequest { name: Some("a".into()), provider: "claude".into(), model: None, role: Role::Manual, task_id: None, prompt: None };
+        let req = LaunchRequest { name: Some("a".into()), provider: "claude".into(), model: None, role: Role::Manual, task_id: None, project: None, prompt: None };
         hub.launch(req).await.unwrap().name
     }
 

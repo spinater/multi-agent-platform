@@ -16,6 +16,8 @@ pub struct Config {
     pub watcher: WatcherConfig,
     #[serde(default)]
     pub orchestrator: OrchestratorConfig,
+    #[serde(default)]
+    pub reflex: ReflexConfig,
     /// Overrides merged onto the built-in `claude`, `codex` and `gemini` specs; new names add providers.
     #[serde(default, rename = "providers")]
     provider_overrides: BTreeMap<String, ProviderOverride>,
@@ -144,6 +146,26 @@ pub struct AuditConfig {
 impl Default for AuditConfig {
     fn default() -> Self {
         Self { enabled: false, required: false, chain: vec!["gemini".into(), "claude".into(), "codex".into()], timeout_secs: 600 }
+    }
+}
+
+/// Projects' decision engines: one `reflex` process per project, fed by its corpus repo.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct ReflexConfig {
+    /// The Reflex binary (https://reflex.gist.rs). Missing binary: projects still work, decisions go to the fallback.
+    pub binary: String,
+    /// Each project's Reflex listens on loopback at the first free port from here.
+    pub port_base: u16,
+    /// Environment variable holding the Anthropic API key for projects whose fallback is `api`.
+    pub api_key_env: String,
+    /// Model for the `api` fallback when a project does not set one.
+    pub api_model: String,
+}
+
+impl Default for ReflexConfig {
+    fn default() -> Self {
+        Self { binary: "reflex".into(), port_base: 7400, api_key_env: "ANTHROPIC_API_KEY".into(), api_model: "claude-haiku-5-5".into() }
     }
 }
 
@@ -309,6 +331,9 @@ impl Config {
         config.server.static_dir = resolve(&config.server.static_dir);
         config.server.data_dir = resolve(&config.server.data_dir);
         config.workspace.dir = resolve(&config.workspace.dir);
+        if config.reflex.binary.contains('/') {
+            config.reflex.binary = resolve(Path::new(&config.reflex.binary)).to_string_lossy().into_owned();
+        }
 
         if config.server.api_token.as_deref() == Some("") {
             config.server.api_token = None;
@@ -340,6 +365,7 @@ mod tests {
         let c = Config::parse(include_str!("../../map.example.toml"), Path::new("/srv/map")).unwrap();
         assert_eq!(c.server.static_dir, PathBuf::from("/srv/map/frontend/out"));
         assert!(c.orchestrator.audit.enabled);
+        assert_eq!(c.reflex.port_base, 7400);
     }
 
     #[test]

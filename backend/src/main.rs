@@ -1,9 +1,13 @@
 mod api;
 mod config;
+mod decide;
 mod detect;
 mod hub;
 mod model;
 mod orchestrator;
+mod projects;
+mod reflex;
+mod repo;
 mod store;
 mod terminal;
 mod watcher;
@@ -62,6 +66,9 @@ async fn check(config: Config) -> Result<()> {
     let hub = open(config).await?;
     println!("workspace: {}", hub.config.workspace.dir.display());
     println!("dashboard: {}", hub.config.server.static_dir.display());
+    let reflex = &hub.config.reflex.binary;
+    let found = if reflex.contains('/') { std::path::Path::new(reflex).exists() } else { std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default()).any(|d| d.join(reflex).is_file()) };
+    println!("reflex:    {reflex} ({})", if found { "ok" } else { "missing: projects answer through their fallback only" });
     for p in hub.providers() {
         let mark = if p.available { "ok     " } else { "missing" };
         println!("  {mark} {:<8} {} (default {})", p.name, hub.spec(&p.name)?.binary, p.default_model);
@@ -77,13 +84,22 @@ async fn serve(config: Config) -> Result<()> {
     let hub = open(config).await?;
     tokio::spawn(watcher::run(hub.clone()));
     tokio::spawn(orchestrator::run(hub.clone()));
+    for project in hub.store.projects().await? {
+        let hub = hub.clone();
+        tokio::spawn(async move {
+            if let Err(err) = hub.restart_reflex(&project.slug).await {
+                tracing::warn!("reflex for {}: {err:#}", project.slug);
+            }
+        });
+    }
 
     let listener = tokio::net::TcpListener::bind(addr).await.with_context(|| format!("binding {addr}"))?;
     tracing::info!("multi-agent platform on http://{addr}");
-    axum::serve(listener, api::router(hub))
+    axum::serve(listener, api::router(hub.clone()))
         .with_graceful_shutdown(async {
             let _ = tokio::signal::ctrl_c().await;
         })
         .await?;
+    hub.reflex.stop_all().await;
     Ok(())
 }

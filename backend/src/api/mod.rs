@@ -1,5 +1,7 @@
 //! HTTP API under `/api` and the dashboard's static files.
 
+mod git;
+mod projects;
 mod ws;
 
 use std::sync::Arc;
@@ -8,7 +10,8 @@ use axum::extract::{Path as UrlPath, Query, Request, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
-use axum::routing::{get, post};
+use axum::extract::DefaultBodyLimit;
+use axum::routing::{any, get, post};
 use axum::{Json, Router};
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -54,11 +57,23 @@ pub fn router(hub: Arc<Hub>) -> Router {
         .route("/tasks", get(tasks).post(create_task))
         .route("/tasks/{id}", axum::routing::patch(update_task).delete(delete_task))
         .route("/orchestrator", get(orchestrator).post(set_orchestrator))
+        .route("/projects", get(projects::list).post(projects::create))
+        .route("/projects/{slug}", get(projects::get).patch(projects::update).delete(projects::delete))
+        .route("/projects/{slug}/repos/{repo}", get(projects::repo_listing))
+        .route("/projects/{slug}/repos/{repo}/file", get(projects::read_file).put(projects::write_file))
+        .route("/projects/{slug}/reflex/restart", post(projects::restart))
+        .route("/projects/{slug}/reflex/log", get(projects::reflex_log))
+        .route("/projects/{slug}/decide", post(projects::decide))
+        .route("/projects/{slug}/feedback", post(projects::feedback))
+        .route("/projects/{slug}/fit", post(projects::fit))
+        .route("/projects/{slug}/decisions", get(projects::decisions))
         .route("/ws", get(ws::handler))
         .layer(middleware::from_fn_with_state(hub.clone(), require_token))
         .with_state(hub.clone());
 
-    let mut app = Router::new().nest("/api", api);
+    // Pushes carry whole packfiles, far above axum's default 2 MB body limit.
+    let git = Router::new().route("/git/{slug}/{*rest}", any(git::handler)).layer(DefaultBodyLimit::max(1 << 30)).with_state(hub.clone());
+    let mut app = Router::new().nest("/api", api).merge(git);
     let static_dir = &hub.config.server.static_dir;
     if static_dir.join("index.html").exists() {
         app = app.fallback_service(ServeDir::new(static_dir).fallback(ServeFile::new(static_dir.join("index.html"))));
@@ -90,7 +105,7 @@ async fn require_known_host(State(hub): State<Arc<Hub>>, headers: HeaderMap, req
 }
 
 /// Length-independent comparison so the token cannot be guessed byte by byte from response times.
-fn same(a: &str, b: &str) -> bool {
+pub(crate) fn same(a: &str, b: &str) -> bool {
     a.len() == b.len() && a.bytes().zip(b.bytes()).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
 }
 
@@ -117,6 +132,7 @@ async fn overview(State(hub): State<Arc<Hub>>) -> ApiResult<Overview> {
         tasks: hub.store.tasks().await?,
         providers: hub.providers(),
         orchestrator: hub.orchestrator_status().await,
+        projects: hub.projects().await?,
     }))
 }
 
@@ -146,12 +162,14 @@ struct CreateSession {
     prompt: Option<String>,
     #[serde(default)]
     supervisor: bool,
+    project: Option<String>,
 }
 
 async fn create_session(State(hub): State<Arc<Hub>>, Json(body): Json<CreateSession>) -> ApiResult<Session> {
     let role = if body.supervisor { Role::Supervisor } else { Role::Manual };
     let prompt = body.prompt.filter(|p| !p.trim().is_empty());
-    let session = hub.launch(LaunchRequest { name: body.name, provider: body.provider, model: body.model, role, task_id: None, prompt }).await?;
+    let project = known_project(&hub, body.project).await?;
+    let session = hub.launch(LaunchRequest { name: body.name, provider: body.provider, model: body.model, role, task_id: None, project, prompt }).await?;
     Ok(Json(session))
 }
 
@@ -234,6 +252,14 @@ struct CreateTask {
     depends_on: Vec<i64>,
     provider: Option<String>,
     model: Option<String>,
+    project: Option<String>,
+}
+
+/// An empty project means `workspace.dir`; a named one must exist.
+async fn known_project(hub: &Hub, project: Option<String>) -> Result<Option<String>, ApiError> {
+    let Some(slug) = project.filter(|p| !p.is_empty()) else { return Ok(None) };
+    hub.store.project(&slug).await?.ok_or_else(|| ApiError(StatusCode::BAD_REQUEST, format!("project `{slug}` does not exist")))?;
+    Ok(Some(slug))
 }
 
 async fn create_task(State(hub): State<Arc<Hub>>, Json(body): Json<CreateTask>) -> ApiResult<Task> {
@@ -244,12 +270,13 @@ async fn create_task(State(hub): State<Arc<Hub>>, Json(body): Json<CreateTask>) 
     if let Some(p) = &provider {
         hub.spec(p)?;
     }
+    let project = known_project(&hub, body.project).await?;
     for dep in &body.depends_on {
         hub.store.task(*dep).await?.ok_or_else(|| ApiError(StatusCode::BAD_REQUEST, format!("dependency #{dep} does not exist")))?;
     }
     let task = hub
         .store
-        .create_task(NewTask { title: body.title.trim().into(), prompt: body.prompt, depends_on: body.depends_on, provider, model: body.model.filter(|m| !m.is_empty()) })
+        .create_task(NewTask { title: body.title.trim().into(), prompt: body.prompt, depends_on: body.depends_on, provider, model: body.model.filter(|m| !m.is_empty()), project })
         .await?;
     hub.announce_task(&task);
     hub.event(Level::Info, "task.created", None, Some(task.id), format!("Task #{} created: {}", task.id, task.title)).await;

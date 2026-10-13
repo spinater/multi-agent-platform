@@ -5,7 +5,11 @@ export type Task = { id: number, title: string, prompt: string, depends_on: numb
 /**
  * Pin the task to one provider; `None` lets the orchestrator pick by `provider_order`.
  */
-provider: string | null, model: string | null, status: TaskStatus, session: string | null, attempts: number, 
+provider: string | null, model: string | null, 
+/**
+ * Runs in this project's workspace; `None` is `workspace.dir`.
+ */
+project: string | null, status: TaskStatus, session: string | null, attempts: number, 
 /**
  * Summary from the agent's result file, or the reason the task failed.
  */

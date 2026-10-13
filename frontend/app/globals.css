@@ -1,14 +1,45 @@
 @import "tailwindcss";
 
-/* Operator console palette. Status hues are paired with text labels everywhere, never color alone. */
+/* Operator console in the "AI OS" style: near-black panels, hairline borders, small spaced capitals for labels,
+   one warm accent. Status hues are always paired with text labels, never color alone.
+   Dark is the default; `data-theme="light"` on <html> switches to the light palette. */
 :root {
-  --bg: #f6f7f9;
+  --bg: #0a0d12;
+  --panel: #0d1117;
+  --panel-2: #121821;
+  --line: #1f2733;
+  --text: #dfe5ee;
+  --muted: #7d8899;
+  --accent: #f08a3c;
+  --accent-text: #0a0d12;
+  --ok: #4ade80;
+  --warn: #fbbf24;
+  --bad: #f87171;
+  --info: #60a5fa;
+  --idle: #8b95a5;
+  --term-bg: #06080b;
+  --term-text: #d6dde6;
+  /* Graph areas, in order of first appearance. */
+  --area-1: #6c8cff;
+  --area-2: #f0a24a;
+  --area-3: #4fb88f;
+  --area-4: #8f7cff;
+  --area-5: #ef6f5e;
+  --area-6: #9ccc3c;
+  --area-7: #4cc3d9;
+  --area-8: #e46fb0;
+  --area-0: #9aa3b0;
+  color-scheme: dark;
+}
+
+:root[data-theme="light"] {
+  --bg: #f4f5f7;
   --panel: #ffffff;
   --panel-2: #f0f2f5;
   --line: #dde1e7;
   --text: #15181d;
   --muted: #5d6673;
-  --accent: #4f46e5;
+  --accent: #c2621b;
   --accent-text: #ffffff;
   --ok: #15803d;
   --warn: #b45309;
@@ -17,26 +48,16 @@
   --idle: #64748b;
   --term-bg: #0d1117;
   --term-text: #d6dde6;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #0b0d11;
-    --panel: #12151b;
-    --panel-2: #181c24;
-    --line: #262c37;
-    --text: #e6e9ef;
-    --muted: #8b95a5;
-    --accent: #818cf8;
-    --accent-text: #0b0d11;
-    --ok: #4ade80;
-    --warn: #fbbf24;
-    --bad: #f87171;
-    --info: #38bdf8;
-    --idle: #94a3b8;
-    --term-bg: #07090c;
-    --term-text: #d6dde6;
-  }
+  --area-1: #3d5bd9;
+  --area-2: #c46f12;
+  --area-3: #24855f;
+  --area-4: #6650d6;
+  --area-5: #c6402f;
+  --area-6: #6a9214;
+  --area-7: #1a8aa0;
+  --area-8: #b83f85;
+  --area-0: #6b7280;
+  color-scheme: light;
 }
 
 @theme inline {
@@ -55,7 +76,7 @@
   --color-idle: var(--idle);
   --color-term-bg: var(--term-bg);
   --color-term-text: var(--term-text);
-  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-sans: var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo, monospace;
   --font-mono: var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 
@@ -66,4 +87,18 @@ body {
 
 ::selection {
   background: color-mix(in srgb, var(--accent) 35%, transparent);
+}
+
+/* Small spaced capitals: section titles, chips, table heads. */
+.label {
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--line) transparent;
 }

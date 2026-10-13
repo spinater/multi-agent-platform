@@ -5,6 +5,7 @@ import { Plus, X } from "lucide-react";
 import { useState } from "react";
 
 import { api } from "@/lib/api";
+import type { ProjectInfo } from "@/lib/generated/ProjectInfo";
 import type { ProviderInfo } from "@/lib/generated/ProviderInfo";
 import type { Session } from "@/lib/generated/Session";
 
@@ -56,6 +57,7 @@ export function SessionList({
                   </span>
                   <Badge>{s.role}</Badge>
                   {s.task_id !== null && <Badge tone="accent">task #{s.task_id}</Badge>}
+                  {s.project && <Badge tone="info">{s.project}</Badge>}
                   {s.attached && <Badge tone="info">attached</Badge>}
                   {s.wakeups > 0 && <span>{s.wakeups} wake-up{s.wakeups === 1 ? "" : "s"}</span>}
                 </div>
@@ -73,9 +75,22 @@ export function SessionList({
   );
 }
 
-export function NewSessionForm({ providers, onDone, onClose }: { providers: ProviderInfo[]; onDone: (name: string) => void; onClose: () => void }) {
+export function NewSessionForm({
+  providers,
+  projects,
+  initialProvider,
+  onDone,
+  onClose,
+}: {
+  providers: ProviderInfo[];
+  projects: ProjectInfo[];
+  initialProvider?: string;
+  onDone: (name: string) => void;
+  onClose: () => void;
+}) {
   const usable = providers.filter((p) => p.available);
-  const [provider, setProvider] = useState(usable[0]?.name ?? providers[0]?.name ?? "");
+  const [provider, setProvider] = useState(initialProvider ?? usable[0]?.name ?? providers[0]?.name ?? "");
+  const [project, setProject] = useState("");
   const info = providers.find((p) => p.name === provider);
   const [model, setModel] = useState(info?.default_model ?? "");
   const [name, setName] = useState("");
@@ -88,7 +103,7 @@ export function NewSessionForm({ providers, onDone, onClose }: { providers: Prov
     setBusy(true);
     setError("");
     try {
-      const s = await api.createSession({ provider, model, name: name || undefined, prompt: prompt || undefined, supervisor });
+      const s = await api.createSession({ provider, model, name: name || undefined, prompt: prompt || undefined, supervisor, project: project || undefined });
       onDone(s.name);
     } catch (err) {
       setError((err as Error).message);
@@ -128,6 +143,16 @@ export function NewSessionForm({ providers, onDone, onClose }: { providers: Prov
             {info?.models.map((m) => (
               <option key={m} value={m}>
                 {m}
+              </option>
+            ))}
+          </Select>
+        </Label>
+        <Label text="Project">
+          <Select value={project} onChange={(e) => setProject(e.target.value)}>
+            <option value="">Shared workspace</option>
+            {projects.map(({ project: p }) => (
+              <option key={p.slug} value={p.slug}>
+                {p.slug}
               </option>
             ))}
           </Select>

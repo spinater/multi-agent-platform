@@ -11,7 +11,7 @@ use serde::de::DeserializeOwned;
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions, SqliteRow};
 use sqlx::{Row, SqlitePool};
 
-use crate::model::{Event, Level, Session, Task, TaskStatus};
+use crate::model::{Decision, DecisionStats, Event, Lane, Level, Project, Session, Task, TaskStatus};
 
 #[derive(Clone)]
 pub struct Store {
@@ -37,6 +37,7 @@ pub struct NewTask {
     pub depends_on: Vec<i64>,
     pub provider: Option<String>,
     pub model: Option<String>,
+    pub project: Option<String>,
 }
 
 impl Store {
@@ -60,10 +61,10 @@ impl Store {
 
     pub async fn save_session(&self, s: &Session) -> Result<()> {
         sqlx::query(
-            "INSERT INTO sessions (name, provider, model, role, task_id, state, detail, rate_limit_reset_at, wakeups, last_line, attached, created_at, last_activity_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            "INSERT INTO sessions (name, provider, model, role, task_id, state, detail, rate_limit_reset_at, wakeups, last_line, attached, created_at, last_activity_at, project)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
              ON CONFLICT(name) DO UPDATE SET provider = excluded.provider, model = excluded.model, role = excluded.role,
-               task_id = excluded.task_id, state = excluded.state, detail = excluded.detail,
+               task_id = excluded.task_id, project = excluded.project, state = excluded.state, detail = excluded.detail,
                rate_limit_reset_at = excluded.rate_limit_reset_at, wakeups = excluded.wakeups, last_line = excluded.last_line,
                attached = excluded.attached, last_activity_at = excluded.last_activity_at",
         )
@@ -80,6 +81,7 @@ impl Store {
         .bind(s.attached)
         .bind(s.created_at)
         .bind(s.last_activity_at)
+        .bind(&s.project)
         .execute(&self.pool)
         .await?;
         Ok(())
@@ -92,6 +94,7 @@ impl Store {
             model: row.get("model"),
             role: parse_enum(row.get("role"))?,
             task_id: row.get("task_id"),
+            project: row.get("project"),
             state: parse_enum(row.get("state"))?,
             detail: row.get("detail"),
             rate_limit_reset_at: row.get("rate_limit_reset_at"),
@@ -124,13 +127,14 @@ impl Store {
     pub async fn create_task(&self, t: NewTask) -> Result<Task> {
         let now = Utc::now();
         let id: i64 = sqlx::query(
-            "INSERT INTO tasks (title, prompt, depends_on, provider, model, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?) RETURNING id",
+            "INSERT INTO tasks (title, prompt, depends_on, provider, model, project, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id",
         )
         .bind(&t.title)
         .bind(&t.prompt)
         .bind(serde_json::to_string(&t.depends_on)?)
         .bind(&t.provider)
         .bind(&t.model)
+        .bind(&t.project)
         .bind(TaskStatus::Pending.as_str())
         .bind(now)
         .bind(now)
@@ -168,6 +172,7 @@ impl Store {
             depends_on: serde_json::from_str(row.get("depends_on"))?,
             provider: row.get("provider"),
             model: row.get("model"),
+            project: row.get("project"),
             status: parse_enum(row.get("status"))?,
             session: row.get("session"),
             attempts: row.get("attempts"),
@@ -190,6 +195,123 @@ impl Store {
     pub async fn delete_task(&self, id: i64) -> Result<()> {
         sqlx::query("DELETE FROM tasks WHERE id = ?").bind(id).execute(&self.pool).await?;
         Ok(())
+    }
+
+    // ---- projects
+
+    pub async fn save_project(&self, p: &Project) -> Result<()> {
+        sqlx::query(
+            "INSERT INTO projects (slug, name, description, port, threshold, fallback, model, questions, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+             ON CONFLICT(slug) DO UPDATE SET name = excluded.name, description = excluded.description, threshold = excluded.threshold,
+               fallback = excluded.fallback, model = excluded.model, questions = excluded.questions",
+        )
+        .bind(&p.slug)
+        .bind(&p.name)
+        .bind(&p.description)
+        .bind(p.port)
+        .bind(p.threshold)
+        .bind(&p.fallback)
+        .bind(&p.model)
+        .bind(serde_json::to_string(&p.questions)?)
+        .bind(p.created_at)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    fn project_row(row: &SqliteRow) -> Result<Project> {
+        Ok(Project {
+            slug: row.get("slug"),
+            name: row.get("name"),
+            description: row.get("description"),
+            port: row.get("port"),
+            threshold: row.get("threshold"),
+            fallback: row.get("fallback"),
+            model: row.get("model"),
+            questions: serde_json::from_str(row.get("questions"))?,
+            created_at: row.get("created_at"),
+        })
+    }
+
+    pub async fn project(&self, slug: &str) -> Result<Option<Project>> {
+        let row = sqlx::query("SELECT * FROM projects WHERE slug = ?").bind(slug).fetch_optional(&self.pool).await?;
+        row.as_ref().map(Self::project_row).transpose()
+    }
+
+    pub async fn projects(&self) -> Result<Vec<Project>> {
+        let rows = sqlx::query("SELECT * FROM projects ORDER BY created_at").fetch_all(&self.pool).await?;
+        rows.iter().map(Self::project_row).collect()
+    }
+
+    /// The lowest port at or above `base` that no project uses.
+    pub async fn free_port(&self, base: u16) -> Result<u16> {
+        let used: Vec<u16> = sqlx::query("SELECT port FROM projects").fetch_all(&self.pool).await?.iter().map(|r| r.get("port")).collect();
+        (base..=u16::MAX).find(|p| !used.contains(p)).context("no free port for Reflex")
+    }
+
+    pub async fn delete_project(&self, slug: &str) -> Result<()> {
+        sqlx::query("DELETE FROM decisions WHERE project = ?").bind(slug).execute(&self.pool).await?;
+        sqlx::query("DELETE FROM projects WHERE slug = ?").bind(slug).execute(&self.pool).await?;
+        Ok(())
+    }
+
+    // ---- decisions
+
+    pub async fn insert_decision(&self, d: &Decision) -> Result<i64> {
+        let id = sqlx::query(
+            "INSERT INTO decisions (project, at, state, question, answer, lane, confidence, reflex_answer, ms, error) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id",
+        )
+        .bind(&d.project)
+        .bind(d.at)
+        .bind(&d.state)
+        .bind(serde_json::to_string(&d.question)?)
+        .bind(d.answer.to_string())
+        .bind(enum_str(&d.lane))
+        .bind(d.confidence)
+        .bind(d.reflex_answer.to_string())
+        .bind(d.ms)
+        .bind(&d.error)
+        .fetch_one(&self.pool)
+        .await?
+        .get("id");
+        Ok(id)
+    }
+
+    /// Newest first.
+    pub async fn decisions(&self, project: &str, limit: i64) -> Result<Vec<Decision>> {
+        let rows = sqlx::query("SELECT * FROM decisions WHERE project = ? ORDER BY id DESC LIMIT ?").bind(project).bind(limit).fetch_all(&self.pool).await?;
+        rows.iter()
+            .map(|row| {
+                Ok(Decision {
+                    id: row.get("id"),
+                    project: row.get("project"),
+                    at: row.get("at"),
+                    state: row.get("state"),
+                    question: serde_json::from_str(row.get("question"))?,
+                    answer: serde_json::from_str(row.get("answer"))?,
+                    lane: parse_enum(row.get("lane"))?,
+                    confidence: row.get("confidence"),
+                    reflex_answer: serde_json::from_str(row.get("reflex_answer"))?,
+                    ms: row.get("ms"),
+                    error: row.get("error"),
+                })
+            })
+            .collect()
+    }
+
+    pub async fn decision_stats(&self, project: &str) -> Result<DecisionStats> {
+        let rows = sqlx::query("SELECT lane, COUNT(*) AS n FROM decisions WHERE project = ? GROUP BY lane").bind(project).fetch_all(&self.pool).await?;
+        let mut stats = DecisionStats::default();
+        for row in rows {
+            let n: i64 = row.get("n");
+            stats.total += n;
+            match parse_enum::<Lane>(row.get("lane"))? {
+                Lane::Reflex => stats.reflex = n,
+                Lane::Llm => stats.llm = n,
+                Lane::Abstain => stats.abstain = n,
+            }
+        }
+        Ok(stats)
     }
 
     // ---- events
@@ -247,6 +369,7 @@ mod tests {
             model: "sonnet".into(),
             role: Role::Manual,
             task_id: None,
+            project: None,
             state: SessionState::Starting,
             detail: None,
             rate_limit_reset_at: None,
@@ -265,7 +388,7 @@ mod tests {
         assert!(got.rate_limit_reset_at.is_some());
 
         let t = store
-            .create_task(NewTask { title: "T".into(), prompt: "P".into(), depends_on: vec![3, 4], provider: None, model: None })
+            .create_task(NewTask { title: "T".into(), prompt: "P".into(), depends_on: vec![3, 4], provider: None, model: None, project: None })
             .await
             .unwrap();
         assert_eq!(t.depends_on, vec![3, 4]);
@@ -275,5 +398,50 @@ mod tests {
         store.insert_event(Level::Info, "y", None, Some(t.id), "two").await.unwrap();
         assert_eq!(store.events(10, None).await.unwrap()[0].message, "two");
         assert_eq!(store.events(10, Some("map-a")).await.unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn round_trips_projects_and_decisions() {
+        use crate::model::{Question, QuestionKind};
+        let store = Store::memory().await.unwrap();
+        let mut p = Project {
+            slug: "support".into(),
+            name: "Support".into(),
+            description: String::new(),
+            port: store.free_port(7400).await.unwrap(),
+            threshold: None,
+            fallback: "api".into(),
+            model: None,
+            questions: vec![Question { id: "q".into(), kind: QuestionKind::Noul, prompt: "Urgent?".into(), options: None, criteria: None }],
+            created_at: Utc::now(),
+        };
+        store.save_project(&p).await.unwrap();
+        assert_eq!(store.free_port(7400).await.unwrap(), 7401);
+        p.threshold = Some(1e-5);
+        store.save_project(&p).await.unwrap();
+        assert_eq!(store.project("support").await.unwrap().unwrap().threshold, Some(1e-5));
+
+        let d = Decision {
+            id: 0,
+            project: "support".into(),
+            at: Utc::now(),
+            state: "s".into(),
+            question: p.questions[0].clone(),
+            answer: serde_json::Value::Bool(true),
+            lane: Lane::Reflex,
+            confidence: Some(0.5),
+            reflex_answer: serde_json::Value::Bool(true),
+            ms: 1,
+            error: None,
+        };
+        store.insert_decision(&d).await.unwrap();
+        store.insert_decision(&Decision { lane: Lane::Llm, ..d.clone() }).await.unwrap();
+        let stats = store.decision_stats("support").await.unwrap();
+        assert_eq!((stats.total, stats.reflex, stats.llm), (2, 1, 1));
+        assert_eq!(store.decisions("support", 10).await.unwrap()[0].lane, Lane::Llm);
+
+        store.delete_project("support").await.unwrap();
+        assert!(store.project("support").await.unwrap().is_none());
+        assert_eq!(store.decision_stats("support").await.unwrap().total, 0);
     }
 }

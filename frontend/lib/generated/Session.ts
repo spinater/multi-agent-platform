@@ -6,7 +6,11 @@ export type Session = {
 /**
  * The tmux session name; always starts with the configured prefix.
  */
-name: string, provider: string, model: string, role: Role, task_id: number | null, state: SessionState, 
+name: string, provider: string, model: string, role: Role, task_id: number | null, 
+/**
+ * The project whose workspace the agent runs in; `None` is `workspace.dir`.
+ */
+project: string | null, state: SessionState, 
 /**
  * Human-readable reason for the state (error line, rate-limit text, stall duration).
  */

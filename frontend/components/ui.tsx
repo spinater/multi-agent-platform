@@ -6,9 +6,9 @@ import type { TaskStatus } from "@/lib/generated/TaskStatus";
 
 export function Panel({ title, actions, children, className }: { title: ReactNode; actions?: ReactNode; children: ReactNode; className?: string }) {
   return (
-    <section className={clsx("flex min-w-0 flex-col rounded-lg border border-line bg-panel", className)}>
-      <header className="flex items-center justify-between gap-2 border-b border-line px-4 py-2.5">
-        <h2 className="text-sm font-semibold tracking-tight">{title}</h2>
+    <section className={clsx("flex min-w-0 flex-col rounded-md border border-line bg-panel", className)}>
+      <header className="flex items-center justify-between gap-2 border-b border-line px-4 py-2">
+        <h2 className="label">{title}</h2>
         <div className="flex items-center gap-1.5">{actions}</div>
       </header>
       <div className="min-h-0 flex-1">{children}</div>
@@ -23,9 +23,9 @@ export function Button({ variant = "ghost", size = "md", className, ...props }: 
     <button
       {...props}
       className={clsx(
-        "inline-flex items-center justify-center gap-1.5 rounded-md font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50",
+        "inline-flex items-center justify-center gap-1.5 rounded font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50",
         "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent",
-        size === "sm" ? "h-7 px-2 text-xs" : "h-9 px-3 text-sm",
+        size === "sm" ? "h-6 px-2 text-[11px]" : "h-8 px-3 text-xs",
         variant === "primary" && "bg-accent text-accent-text hover:opacity-90",
         variant === "ghost" && "border border-line bg-panel-2 text-text hover:border-muted",
         variant === "danger" && "border border-line bg-panel-2 text-bad hover:border-bad",
@@ -35,10 +35,10 @@ export function Button({ variant = "ghost", size = "md", className, ...props }: 
   );
 }
 
-const field = "w-full rounded-md border border-line bg-panel-2 px-2.5 text-sm text-text placeholder:text-muted focus:border-accent focus:outline-none";
+const field = "w-full rounded border border-line bg-panel-2 px-2.5 text-[13px] text-text placeholder:text-muted focus:border-accent focus:outline-none";
 
 export function Input(props: InputHTMLAttributes<HTMLInputElement>) {
-  return <input {...props} className={clsx(field, "h-9", props.className)} />;
+  return <input {...props} className={clsx(field, "h-8", props.className)} />;
 }
 
 export function Textarea(props: TextareaHTMLAttributes<HTMLTextAreaElement>) {
@@ -46,12 +46,12 @@ export function Textarea(props: TextareaHTMLAttributes<HTMLTextAreaElement>) {
 }
 
 export function Select(props: SelectHTMLAttributes<HTMLSelectElement>) {
-  return <select {...props} className={clsx(field, "h-9", props.className)} />;
+  return <select {...props} className={clsx(field, "h-8", props.className)} />;
 }
 
 export function Label({ text, children }: { text: string; children: ReactNode }) {
   return (
-    <label className="flex flex-col gap-1 text-xs font-medium text-muted">
+    <label className="flex flex-col gap-1 text-[11px] font-medium tracking-wide text-muted uppercase">
       {text}
       {children}
     </label>
@@ -127,3 +127,36 @@ export function relative(iso: string | null | undefined, now: number): string {
   const text = abs < 60 ? `${abs}s` : abs < 3600 ? `${Math.floor(abs / 60)}m ${abs % 60}s` : `${Math.floor(abs / 3600)}h ${Math.floor((abs % 3600) / 60)}m`;
   return diff >= 0 ? `in ${text}` : `${text} ago`;
 }
+
+/** A titled block of a side rail: spaced-capital title, optional note, hairline rule below. */
+export function Section({ title, note, actions, children, className }: { title: ReactNode; note?: ReactNode; actions?: ReactNode; children: ReactNode; className?: string }) {
+  return (
+    <section className={clsx("border-b border-line px-4 py-3.5", className)}>
+      <header className="mb-2 flex items-center justify-between gap-2">
+        <h2 className="label text-text">{title}</h2>
+        {actions}
+      </header>
+      {note && <p className="-mt-1 mb-2 text-[11px] text-muted">{note}</p>}
+      {children}
+    </section>
+  );
+}
+
+/** A thin progress bar for "n of m" rows. */
+export function Meter({ value, max, tone = "accent" }: { value: number; max: number; tone?: "accent" | "ok" | "bad" | "info" }) {
+  const pct = max > 0 ? Math.min(100, (100 * value) / max) : 0;
+  const color = { accent: "bg-accent", ok: "bg-ok", bad: "bg-bad", info: "bg-info" }[tone];
+  return (
+    <span className="block h-1 w-full overflow-hidden rounded-full bg-panel-2">
+      <span className={clsx("block h-full rounded-full", color)} style={{ width: `${pct}%` }} />
+    </span>
+  );
+}
+
+/** A dot that reads as the state's colour; always shown next to the state's name. */
+export function Dot({ tone }: { tone: Tone }) {
+  const color = { ok: "bg-ok", warn: "bg-warn", bad: "bg-bad", info: "bg-info", idle: "bg-idle", accent: "bg-accent" }[tone];
+  return <span className={clsx("inline-block size-1.5 shrink-0 rounded-full", color)} />;
+}
+
+export type { Tone };

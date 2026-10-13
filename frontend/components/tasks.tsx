@@ -4,14 +4,33 @@ import { Plus, RotateCcw, Square, Trash2, X } from "lucide-react";
 import { useState } from "react";
 
 import { api } from "@/lib/api";
+import type { ProjectInfo } from "@/lib/generated/ProjectInfo";
 import type { ProviderInfo } from "@/lib/generated/ProviderInfo";
 import type { Task } from "@/lib/generated/Task";
 
 import { Button, Empty, Input, Label, Panel, Select, TaskBadge, Textarea } from "./ui";
 
-export function TaskBoard({ tasks, onOpenSession, onCreate }: { tasks: Task[]; onOpenSession: (name: string) => void; onCreate: () => void }) {
+export function TaskBoard({
+  tasks,
+  onOpenSession,
+  onCreate,
+  focus,
+}: {
+  tasks: Task[];
+  onOpenSession: (name: string) => void;
+  onCreate: () => void;
+  /** A task to show expanded, e.g. one picked on the graph or in the backlog. */
+  focus?: number | null;
+}) {
   const [error, setError] = useState("");
-  const [open, setOpen] = useState<number | null>(null);
+  const [picked, setPicked] = useState<number | null>(null);
+  const [lastFocus, setLastFocus] = useState(focus);
+  if (focus !== lastFocus) {
+    setLastFocus(focus);
+    setPicked(focus ?? null);
+  }
+  const open = picked;
+  const setOpen = setPicked;
 
   const act = async (action: () => Promise<unknown>) => {
     setError("");
@@ -46,6 +65,7 @@ export function TaskBoard({ tasks, onOpenSession, onCreate }: { tasks: Task[]; o
                 <button className="min-w-0 flex-1 truncate text-left text-sm font-medium hover:underline" onClick={() => setOpen(open === t.id ? null : t.id)}>
                   {t.title}
                 </button>
+                {t.project && <span className="hidden text-xs text-accent sm:inline">{t.project}</span>}
                 {t.depends_on.length > 0 && <span className="hidden text-xs text-muted sm:inline">after {t.depends_on.map((d) => `#${d}`).join(", ")}</span>}
                 {t.attempts > 1 && <span className="text-xs text-muted">try {t.attempts}</span>}
                 <TaskBadge status={t.status} />
@@ -98,8 +118,9 @@ export function TaskBoard({ tasks, onOpenSession, onCreate }: { tasks: Task[]; o
   );
 }
 
-export function NewTaskForm({ tasks, providers, onClose }: { tasks: Task[]; providers: ProviderInfo[]; onClose: () => void }) {
+export function NewTaskForm({ tasks, providers, projects, onClose }: { tasks: Task[]; providers: ProviderInfo[]; projects: ProjectInfo[]; onClose: () => void }) {
   const [title, setTitle] = useState("");
+  const [project, setProject] = useState("");
   const [prompt, setPrompt] = useState("");
   const [provider, setProvider] = useState("");
   const [model, setModel] = useState("");
@@ -113,7 +134,7 @@ export function NewTaskForm({ tasks, providers, onClose }: { tasks: Task[]; prov
     setBusy(true);
     setError("");
     try {
-      await api.createTask({ title, prompt, depends_on: deps, provider: provider || undefined, model: model || undefined });
+      await api.createTask({ title, prompt, depends_on: deps, provider: provider || undefined, model: model || undefined, project: project || undefined });
       onClose();
     } catch (err) {
       setError((err as Error).message);
@@ -140,6 +161,18 @@ export function NewTaskForm({ tasks, providers, onClose }: { tasks: Task[]; prov
         <div className="sm:col-span-2">
           <Label text="Prompt for the worker">
             <Textarea rows={7} value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder="What to build, which files matter, and how to prove it works." />
+          </Label>
+        </div>
+        <div className="sm:col-span-2">
+          <Label text="Project (where the agent works)">
+            <Select value={project} onChange={(e) => setProject(e.target.value)}>
+              <option value="">Shared workspace (workspace.dir)</option>
+              {projects.map(({ project: p }) => (
+                <option key={p.slug} value={p.slug}>
+                  {p.slug}: {p.name}
+                </option>
+              ))}
+            </Select>
           </Label>
         </div>
         <Label text="Provider">

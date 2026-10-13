@@ -52,6 +52,8 @@ pub struct Session {
     pub role: Role,
     #[ts(type = "number | null")]
     pub task_id: Option<i64>,
+    /// The project whose workspace the agent runs in; `None` is `workspace.dir`.
+    pub project: Option<String>,
     pub state: SessionState,
     /// Human-readable reason for the state (error line, rate-limit text, stall duration).
     pub detail: Option<String>,
@@ -108,6 +110,8 @@ pub struct Task {
     /// Pin the task to one provider; `None` lets the orchestrator pick by `provider_order`.
     pub provider: Option<String>,
     pub model: Option<String>,
+    /// Runs in this project's workspace; `None` is `workspace.dir`.
+    pub project: Option<String>,
     pub status: TaskStatus,
     pub session: Option<String>,
     #[ts(type = "number")]
@@ -171,6 +175,7 @@ pub struct Overview {
     pub tasks: Vec<Task>,
     pub providers: Vec<ProviderInfo>,
     pub orchestrator: OrchestratorStatus,
+    pub projects: Vec<ProjectInfo>,
 }
 
 /// Messages pushed to dashboard clients over `/api/ws`.
@@ -187,6 +192,220 @@ pub enum ServerMessage {
         id: i64,
     },
     Orchestrator { status: OrchestratorStatus },
+    /// A project was created or changed, its Reflex engine changed state, or it recorded a decision.
+    Project { project: ProjectInfo },
+    ProjectRemoved { slug: String },
     /// The client fell behind and missed messages; reload `/api/overview`.
     Resync,
+}
+
+// ---- projects and decisions
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum QuestionKind {
+    /// Pick one of `options`.
+    Choice,
+    /// Rate against `options`, ordered lowest level first.
+    Score,
+    /// Yes or no; takes no `options`.
+    Noul,
+}
+
+/// A typed question, in Reflex's wire format.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct Question {
+    pub id: String,
+    pub kind: QuestionKind,
+    pub prompt: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub options: Option<Vec<String>>,
+    /// What decides between the options.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub criteria: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct Project {
+    pub slug: String,
+    pub name: String,
+    pub description: String,
+    /// Loopback port of the project's Reflex process.
+    pub port: u16,
+    /// Lowest Reflex confidence accepted without the fallback. `None` sends every question to the fallback.
+    pub threshold: Option<f64>,
+    /// Who answers when Reflex is unsure: `none`, `api` (Anthropic API) or a provider name run headless.
+    pub fallback: String,
+    /// Model for the fallback; `None` uses `reflex.api_model` or the provider's default.
+    pub model: Option<String>,
+    /// Saved questions for the playground and for callers.
+    pub questions: Vec<Question>,
+    pub created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum ReflexState {
+    Stopped,
+    Starting,
+    Running,
+    /// The corpus repo has no domains yet.
+    NoCorpus,
+    Error,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct ReflexStatus {
+    pub state: ReflexState,
+    pub message: String,
+    /// Top-level folders (or `.md` files) of the corpus, one per Reflex domain.
+    pub domains: Vec<String>,
+    pub since: DateTime<Utc>,
+}
+
+/// Which path produced an answer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum Lane {
+    /// Reflex answered at or above the threshold: no LLM call.
+    Reflex,
+    /// Reflex abstained or was below the threshold, and the fallback answered.
+    Llm,
+    /// Nobody answered (no fallback, or the fallback failed).
+    Abstain,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct DecisionStats {
+    #[ts(type = "number")]
+    pub total: i64,
+    #[ts(type = "number")]
+    pub reflex: i64,
+    #[ts(type = "number")]
+    pub llm: i64,
+    #[ts(type = "number")]
+    pub abstain: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct ProjectInfo {
+    pub project: Project,
+    pub reflex: ReflexStatus,
+    pub stats: DecisionStats,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct Answer {
+    pub question_id: String,
+    /// The chosen option text (choice, score), a boolean (noul), or `null` when nobody answered.
+    #[ts(type = "string | boolean | null")]
+    pub answer: serde_json::Value,
+    pub lane: Lane,
+    pub confidence: Option<f64>,
+    pub probabilities: Option<Vec<f64>>,
+    /// What Reflex chose, even when it was below the threshold.
+    #[ts(type = "string | boolean | null")]
+    pub reflex_answer: serde_json::Value,
+    pub llm_raw: Option<String>,
+    pub error: Option<String>,
+    #[ts(type = "number")]
+    pub ms: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct DecideResponse {
+    pub answers: Vec<Answer>,
+    pub threshold: Option<f64>,
+    /// Reflex's own explanation of its routing, when it answered.
+    pub reflex_reason: Option<String>,
+    pub reflex_error: Option<String>,
+    #[ts(type = "number")]
+    pub ms: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct Decision {
+    #[ts(type = "number")]
+    pub id: i64,
+    pub project: String,
+    pub at: DateTime<Utc>,
+    pub state: String,
+    pub question: Question,
+    #[ts(type = "string | boolean | null")]
+    pub answer: serde_json::Value,
+    pub lane: Lane,
+    pub confidence: Option<f64>,
+    #[ts(type = "string | boolean | null")]
+    pub reflex_answer: serde_json::Value,
+    #[ts(type = "number")]
+    pub ms: i64,
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct RepoFile {
+    pub path: String,
+    #[ts(type = "number")]
+    pub size: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct Commit {
+    pub sha: String,
+    pub author: String,
+    pub at: DateTime<Utc>,
+    pub subject: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct RepoListing {
+    pub files: Vec<RepoFile>,
+    /// Newest first.
+    pub commits: Vec<Commit>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct FitCaseResult {
+    #[ts(type = "string | boolean | null")]
+    pub answer: serde_json::Value,
+    pub confidence: f64,
+    pub correct: bool,
+}
+
+/// Result of fitting a project's threshold from labeled cases.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct FitResult {
+    pub threshold: Option<f64>,
+    pub rho: f64,
+    #[ts(type = "number")]
+    pub n: usize,
+    #[ts(type = "number")]
+    pub n_answered: usize,
+    #[ts(type = "number")]
+    pub n_correct: usize,
+    /// Cases at or above the threshold, which Reflex would now answer alone.
+    #[ts(type = "number")]
+    pub n_pass: usize,
+    pub pass_precision: Option<f64>,
+    pub coverage: f64,
+    pub applied: bool,
+    pub cases: Vec<FitCaseResult>,
 }

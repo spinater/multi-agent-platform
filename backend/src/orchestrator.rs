@@ -49,10 +49,10 @@ fn tail(text: &str, max: usize) -> String {
     chars[chars.len().saturating_sub(max)..].iter().collect()
 }
 
-/// Runs `sh -c command` in the workspace with the workspace env; returns (success, combined output tail).
-pub async fn shell(hub: &Hub, command: &str, timeout: Duration) -> Result<(bool, String)> {
+/// Runs `sh -c command` in `dir` with the workspace env; returns (success, combined output tail).
+pub async fn shell(hub: &Hub, dir: &std::path::Path, command: &str, timeout: Duration) -> Result<(bool, String)> {
     let mut cmd = Command::new("sh");
-    cmd.arg("-c").arg(command).current_dir(&hub.config.workspace.dir).envs(&hub.config.workspace.env);
+    cmd.arg("-c").arg(command).current_dir(dir).envs(&hub.config.workspace.env);
     run_captured(cmd, timeout).await
 }
 
@@ -137,6 +137,11 @@ impl Orchestrator {
         if !verify.is_empty() {
             p.push_str(&format!("- After you report done, the orchestrator runs: {}. Run them yourself first.\n", verify.join(" && ")));
         }
+        if let Some(slug) = &task.project {
+            p.push_str(&format!(
+                "- This is project `{slug}`. Before using an LLM to classify, route or decide something, POST it to $MAP_DECIDE_URL (see CLAUDE.md).\n"
+            ));
+        }
         if let Some(failure) = previous_failure {
             p.push_str(&format!("\nThe previous attempt did not pass. Fix this first:\n```\n{}\n```\n", tail(failure, 2500)));
         }
@@ -159,8 +164,32 @@ impl Orchestrator {
         task.attempts += 1;
         let session = format!("{}task-{}-{}", self.hub.config.workspace.session_prefix, task.id, task.attempts);
         let previous_failure = if task.attempts > 1 { task.result.clone() } else { None };
+        if let Some(slug) = &task.project {
+            // Start from what was pushed to the project's code repo.
+            match crate::repo::sync_workspace(&self.hub.code_repo(slug), &self.hub.project_workspace(slug)).await {
+                Ok(None) => {}
+                Ok(Some(warning)) => {
+                    self.hub.event(Level::Warning, "task.workspace", None, Some(task.id), format!("Workspace not updated: {warning}")).await;
+                }
+                Err(err) => {
+                    task.attempts -= 1;
+                    task.result = Some(format!("Could not prepare the {slug} workspace: {err:#}"));
+                    task.status = TaskStatus::Failed;
+                    self.hub.put_task(&mut task).await?;
+                    return Ok(false);
+                }
+            }
+        }
         let prompt = self.build_prompt(&task, &session, previous_failure.as_deref());
-        let req = LaunchRequest { name: Some(session.clone()), provider: provider.clone(), model, role: Role::Worker, task_id: Some(task.id), prompt: Some(prompt) };
+        let req = LaunchRequest {
+            name: Some(session.clone()),
+            provider: provider.clone(),
+            model,
+            role: Role::Worker,
+            task_id: Some(task.id),
+            project: task.project.clone(),
+            prompt: Some(prompt),
+        };
         match self.hub.launch(req).await {
             Ok(s) => {
                 task.status = TaskStatus::Running;
@@ -282,10 +311,11 @@ impl Orchestrator {
     async fn finish(&self, mut task: Task) -> Result<()> {
         let hub = &self.hub;
         let cfg = &hub.config.orchestrator;
+        let dir = hub.work_dir(task.project.as_deref());
 
         if task.status == TaskStatus::Verifying {
             for command in &cfg.verify {
-                let (ok, output) = shell(hub, command, Duration::from_secs(30 * 60)).await?;
+                let (ok, output) = shell(hub, &dir, command, Duration::from_secs(30 * 60)).await?;
                 if !ok {
                     return self.retry_or_fail(task, &format!("`{command}` failed:\n{output}")).await;
                 }
@@ -309,7 +339,7 @@ impl Orchestrator {
 
         for template in &cfg.post_done {
             let command = template.replace("{id}", &task.id.to_string()).replace("{title}", &quote(&task.title)?);
-            let (ok, output) = shell(hub, &command, Duration::from_secs(10 * 60)).await?;
+            let (ok, output) = shell(hub, &dir, &command, Duration::from_secs(10 * 60)).await?;
             if !ok {
                 // The agent's work passed; a failing hook needs a person, not another agent run.
                 task.status = TaskStatus::Failed;
@@ -358,7 +388,7 @@ impl Orchestrator {
                 .map(|a| a.replace("{binary}", &spec.binary).replace("{model}", &spec.default_model).replace("{session}", "audit").replace("{prompt}", &prompt))
                 .collect();
             let mut cmd = Command::new(&argv[0]);
-            cmd.args(&argv[1..]).current_dir(&hub.config.workspace.dir).envs(&hub.config.workspace.env);
+            cmd.args(&argv[1..]).current_dir(hub.work_dir(task.project.as_deref())).envs(&hub.config.workspace.env);
             hub.event(Level::Info, "task.audit", None, Some(task.id), format!("Auditing with {provider}")).await;
             let (ok, output) = run_captured(cmd, Duration::from_secs(hub.config.orchestrator.audit.timeout_secs)).await?;
             if let Some(line) = output.lines().rev().find(|l| l.trim_start().starts_with("VERDICT:")) {
@@ -434,7 +464,7 @@ mod tests {
     }
 
     fn new_task(title: &str, deps: Vec<i64>) -> NewTask {
-        NewTask { title: title.into(), prompt: format!("do {title}"), depends_on: deps, provider: None, model: None }
+        NewTask { title: title.into(), prompt: format!("do {title}"), depends_on: deps, provider: None, model: None, project: None }
     }
 
     async fn settle(orch: &mut Orchestrator) {
@@ -507,6 +537,27 @@ mod tests {
         orch.tick().await.unwrap();
         assert!(term.sessions.lock().unwrap().contains_key(&s));
         assert_eq!(hub.store.task(t.id).await.unwrap().unwrap().status, TaskStatus::Running);
+    }
+
+    #[tokio::test]
+    async fn project_task_runs_in_the_project_workspace_with_its_decide_url() {
+        // No Reflex binary here: the project still works, its engine just reports an error.
+        let (hub, term, _dir) = setup("[reflex]\nbinary = \"/nonexistent/reflex\"").await;
+        let project = crate::projects::create(
+            &hub,
+            crate::projects::NewProject { name: "Support".into(), slug: None, description: String::new(), fallback: Some("none".into()), model: None },
+        )
+        .await
+        .unwrap();
+        assert!(hub.project_workspace(&project.slug).join("CLAUDE.md").exists());
+        let t = hub.store.create_task(NewTask { project: Some(project.slug.clone()), ..new_task("a", vec![]) }).await.unwrap();
+        Orchestrator::new(hub.clone()).tick().await.unwrap();
+        let session = hub.store.task(t.id).await.unwrap().unwrap().session.unwrap();
+        let script = term.sessions.lock().unwrap()[&session].script.clone();
+        assert!(script.contains("MAP_DECIDE_URL=http://127.0.0.1:4400/api/projects/support/decide"), "{script}");
+        assert_eq!(hub.store.session(&session).await.unwrap().unwrap().project.as_deref(), Some("support"));
+        let prompt = std::fs::read_to_string(hub.run_dir(&session).join("prompt.md")).unwrap();
+        assert!(prompt.contains("$MAP_DECIDE_URL"), "{prompt}");
     }
 
     #[tokio::test]

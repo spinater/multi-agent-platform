@@ -1,5 +1,12 @@
+import type { DecideResponse } from "./generated/DecideResponse";
+import type { Decision } from "./generated/Decision";
 import type { Event } from "./generated/Event";
+import type { FitResult } from "./generated/FitResult";
 import type { Overview } from "./generated/Overview";
+import type { ProjectInfo } from "./generated/ProjectInfo";
+import type { Question } from "./generated/Question";
+import type { ReflexStatus } from "./generated/ReflexStatus";
+import type { RepoListing } from "./generated/RepoListing";
 import type { Session } from "./generated/Session";
 import type { Task } from "./generated/Task";
 
@@ -59,15 +66,51 @@ export const api = {
   overview: () => request<Overview>("GET", "/overview"),
   events: (limit = 150) => request<Event[]>("GET", `/events?limit=${limit}`),
   pane: (name: string, lines = 400) => request<{ name: string; text: string }>("GET", `/sessions/${encodeURIComponent(name)}/pane?lines=${lines}`),
-  createSession: (body: { provider: string; model?: string; name?: string; prompt?: string; supervisor?: boolean }) =>
+  createSession: (body: { provider: string; model?: string; name?: string; prompt?: string; supervisor?: boolean; project?: string }) =>
     request<Session>("POST", "/sessions", body),
   deleteSession: (name: string, force = false) =>
     request<{ message: string }>("DELETE", `/sessions/${encodeURIComponent(name)}${force ? "?force=true" : ""}`),
   prompt: (name: string, text: string) => request("POST", `/sessions/${encodeURIComponent(name)}/prompt`, { text }),
   key: (name: string, key: string) => request("POST", `/sessions/${encodeURIComponent(name)}/key`, { key }),
-  createTask: (body: { title: string; prompt: string; depends_on: number[]; provider?: string; model?: string }) =>
+  createTask: (body: { title: string; prompt: string; depends_on: number[]; provider?: string; model?: string; project?: string }) =>
     request<Task>("POST", "/tasks", body),
   taskAction: (id: number, action: "retry" | "cancel") => request<Task>("PATCH", `/tasks/${id}`, { action }),
   deleteTask: (id: number) => request("DELETE", `/tasks/${id}`),
   setOrchestrator: (running: boolean) => request("POST", "/orchestrator", { running }),
+
+  createProject: (body: { name: string; slug?: string; description?: string; fallback?: string; model?: string }) =>
+    request<ProjectInfo>("POST", "/projects", body),
+  updateProject: (slug: string, body: ProjectUpdate) => request<ProjectInfo>("PATCH", `/projects/${slug}`, body),
+  deleteProject: (slug: string) => request("DELETE", `/projects/${slug}`),
+  repo: (slug: string, repo: RepoName) => request<RepoListing>("GET", `/projects/${slug}/repos/${repo}`),
+  readFile: (slug: string, repo: RepoName, path: string) =>
+    request<{ path: string; content: string }>("GET", `/projects/${slug}/repos/${repo}/file?path=${encodeURIComponent(path)}`),
+  /** `content: null` deletes the file. */
+  writeFile: (slug: string, repo: RepoName, body: { path: string; content: string | null; message?: string }) =>
+    request<{ commit: string }>("PUT", `/projects/${slug}/repos/${repo}/file`, body),
+  restartReflex: (slug: string) => request<ReflexStatus>("POST", `/projects/${slug}/reflex/restart`),
+  reflexLog: (slug: string) => request<{ log: string }>("GET", `/projects/${slug}/reflex/log`),
+  decide: (slug: string, body: { state: string; questions: Question[]; route?: Route }) => request<DecideResponse>("POST", `/projects/${slug}/decide`, body),
+  feedback: (slug: string, p: number, outcome: boolean) => request<{ refit?: boolean }>("POST", `/projects/${slug}/feedback`, { p, outcome }),
+  fit: (slug: string, body: { cases: { state: string; question: Question; expected: string | boolean }[]; rho: number; apply: boolean }) =>
+    request<FitResult>("POST", `/projects/${slug}/fit`, body),
+  decisions: (slug: string, limit = 200) => request<Decision[]>("GET", `/projects/${slug}/decisions?limit=${limit}`),
 };
+
+export type RepoName = "code" | "corpus";
+export type Route = "auto" | "reflex" | "llm";
+export type ProjectUpdate = {
+  name?: string;
+  description?: string;
+  threshold?: number | null;
+  fallback?: string;
+  model?: string | null;
+  questions?: Question[];
+};
+
+/** Clone URL for a project repo; git asks for the API token as the password when one is set. */
+export function cloneUrl(slug: string, repo: RepoName): string {
+  return `${location.origin}/git/${slug}/${repo}.git`;
+}
+
+export const fmtConf = (c: number | null | undefined) => (c == null ? "—" : c === 0 ? "0" : c < 0.001 ? c.toExponential(2) : c.toFixed(4));

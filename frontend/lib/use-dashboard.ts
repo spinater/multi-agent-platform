@@ -5,6 +5,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { ApiError, api, wsUrl } from "./api";
 import type { Event } from "./generated/Event";
 import type { OrchestratorStatus } from "./generated/OrchestratorStatus";
+import type { ProjectInfo } from "./generated/ProjectInfo";
 import type { ProviderInfo } from "./generated/ProviderInfo";
 import type { ServerMessage } from "./generated/ServerMessage";
 import type { Session } from "./generated/Session";
@@ -17,6 +18,7 @@ export type DashboardState = {
   tasks: Task[];
   providers: ProviderInfo[];
   orchestrator: OrchestratorStatus | null;
+  projects: ProjectInfo[];
   events: Event[];
   connection: Connection;
   reload: () => Promise<void>;
@@ -38,6 +40,7 @@ export function useDashboard(): DashboardState {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [providers, setProviders] = useState<ProviderInfo[]>([]);
   const [orchestrator, setOrchestrator] = useState<OrchestratorStatus | null>(null);
+  const [projects, setProjects] = useState<ProjectInfo[]>([]);
   const [events, setEvents] = useState<Event[]>([]);
   const [connection, setConnection] = useState<Connection>("connecting");
   const retry = useRef(0);
@@ -49,6 +52,7 @@ export function useDashboard(): DashboardState {
       setTasks(overview.tasks);
       setProviders(overview.providers);
       setOrchestrator(overview.orchestrator);
+      setProjects(overview.projects);
       setEvents(recent);
     } catch (err) {
       setConnection(err instanceof ApiError && err.status === 401 ? "unauthorized" : "offline");
@@ -80,6 +84,18 @@ export function useDashboard(): DashboardState {
           break;
         case "orchestrator":
           setOrchestrator(msg.status);
+          break;
+        case "project":
+          setProjects((list) => {
+            const i = list.findIndex((p) => p.project.slug === msg.project.project.slug);
+            if (i < 0) return [...list, msg.project];
+            const copy = list.slice();
+            copy[i] = msg.project;
+            return copy;
+          });
+          break;
+        case "project_removed":
+          setProjects((list) => list.filter((p) => p.project.slug !== msg.slug));
           break;
         case "resync":
           void reload().catch(() => {});
@@ -127,5 +143,5 @@ export function useDashboard(): DashboardState {
     };
   }, [reload]);
 
-  return { sessions, tasks, providers, orchestrator, events, connection, reload };
+  return { sessions, tasks, providers, orchestrator, projects, events, connection, reload };
 }

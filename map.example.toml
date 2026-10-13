@@ -77,3 +77,12 @@ timeout_secs = 600
 # prompt_mode = "send"          # "arg": prompt as last argument; "send": typed in after startup_secs
 # idle_markers = ["> "]
 # auth_markers = ["API key"]
+
+# Projects: each one has a code repo, a corpus repo and its own Reflex decision engine (https://reflex.gist.rs).
+# Questions go to Reflex first; only those below the project's threshold reach the fallback LLM.
+[reflex]
+# binary = "reflex"
+# port_base = 7400
+# Used by projects whose fallback is "api"; the other fallbacks are the providers above, run headless.
+# api_key_env = "ANTHROPIC_API_KEY"
+# api_model = "claude-haiku-5-5"

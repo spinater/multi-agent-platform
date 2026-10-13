@@ -23,6 +23,19 @@ nothing is tied to one repository, session name or provider.
     (`VERDICT: PASS`), then `post_done` hooks (e.g. commit).
   - **Retries.** A failed check retries the task with the failure output in the new prompt, up to `max_attempts`.
   - **Human safety.** It never kills a worker that someone is attached to, or one with typing on its input line.
+- **Projects.** A project is a code repo, a corpus repo and its own [Reflex](https://reflex.gist.rs) decision engine.
+  - **Repos.** Both are bare git repos served at `/git/<slug>/code.git` and `/git/<slug>/corpus.git`: clone, push,
+    or edit files from the dashboard. Tasks and sessions of a project run in a checkout of its code repo, which the
+    orchestrator fast-forwards before each task.
+  - **Decide before calling an LLM.** `POST /api/projects/<slug>/decide` asks Reflex first (local, no model, a few
+    milliseconds). Answers at or above the project's confidence threshold are final; only the rest go to the
+    project's fallback: the Anthropic API, or any provider run headless (`claude -p`, `codex exec`, `agy -p`).
+    Agents started in a project get the endpoint as `$MAP_DECIDE_URL`, and the code repo's `CLAUDE.md` tells them
+    to use it.
+  - **Corpus.** One top-level folder per Reflex domain (1–8), prose `.md` files inside. A push or an edit restarts
+    the project's Reflex on the new corpus.
+  - **Calibration.** The threshold is fitted from labeled cases (the ρ-quantile of Reflex's confidence on the cases
+    it got right), and Reflex's own calibrator learns from `feedback`. Every decision is logged with its lane.
 - **History.** Sessions, tasks and events live in SQLite. Every run keeps its prompt, launch script, result file and
   final pane under `.map/runs/<session>/`.
 
@@ -49,6 +62,11 @@ nothing is tied to one repository, session name or provider.
 | `backend/src/orchestrator.rs` | Task scheduling, provider failover, verify, audit, retry |
 | `backend/src/hub.rs` | Launching and closing sessions; the single place that writes state and broadcasts it |
 | `backend/src/terminal/` | `Terminal` trait; `tmux.rs` in production, `fake.rs` in tests |
+| `backend/src/projects.rs` | Creating and deleting projects; repo and corpus path rules |
+| `backend/src/repo.rs` | Bare repos written with git plumbing, corpus export, the agents' workspace checkout |
+| `backend/src/reflex.rs` | One Reflex process per project: export the corpus, start, health-check, restart |
+| `backend/src/decide.rs` | The decision gate (Reflex, threshold, fallback), answer parsing, threshold fitting |
+| `backend/src/api/git.rs` | Git smart HTTP through `git http-backend`; a corpus push restarts Reflex |
 | `backend/src/api/` | REST and WebSocket, token, Host and Origin checks |
 | `backend/src/model.rs` | Shared types, exported to TypeScript by ts-rs |
 | `frontend/` | Next.js dashboard (Bun), built as a static export |
@@ -68,7 +86,9 @@ and Next.js + Bun fits it better:
 
 ## Quick start
 
-Requirements: Rust 1.85+, Bun 1.2+, tmux, and the agent CLIs you want (`claude`, `codex`, `agy`).
+Requirements: Rust 1.85+, Bun 1.2+, tmux, git, and the agent CLIs you want (`claude`, `codex`, `agy`). For projects'
+decision engines, install Reflex (`curl -fsSL https://raw.githubusercontent.com/gist-rs/reflex/main/install.sh | sh`);
+without it, projects still work and every decision goes to the fallback.
 
 ```sh
 git clone git@github.com:spinater/multi-agent-platform.git && cd multi-agent-platform
@@ -86,6 +106,16 @@ Development, with hot reload for the dashboard:
 cd backend && cargo run -- serve -c ../map.toml      # API on :4400
 cd frontend && bun dev                               # dashboard on :3000, /api proxied to :4400
 ```
+
+## Dashboard
+
+A dark operator console in the style of the AI OS "MAPS" dashboard: a status bar (orchestrator, link, Reflex
+engines, providers), a left rail (clock, orchestrator, activity, backlog), a right rail (working and waiting
+sessions, an agents deck to start sessions, the projects table with Reflex status and restart), and in the middle
+a graph of the whole platform (projects, corpus domains, tasks, sessions, providers) with six views: rings, circle,
+areas, links, timeline and 3D orbit. Clicking a node opens a card whose buttons act on it (open the console,
+the task, the project; restart Reflex; start a session). Every number of the graph lives in `TUNING` at the top of
+`frontend/components/graph/layouts.ts`. Deep links: `#tasks`, `#sessions/<name>`, `#projects/<slug>`.
 
 ## Writing tasks
 
@@ -116,7 +146,19 @@ All routes are under `/api`. When `server.api_token` is set, send `Authorization
 | PATCH | `/tasks/{id}` | `{"action": "retry"}` or `{"action": "cancel"}` |
 | DELETE | `/tasks/{id}` | Delete a pending or finished task |
 | GET/POST | `/orchestrator` | Status, or `{"running": true}` |
+| GET/POST | `/projects` | List, or create (`name`, `slug`, `description`, `fallback`, `model`) |
+| GET/PATCH/DELETE | `/projects/{slug}` | Info (settings, Reflex status, decision counts), change (`threshold`, `fallback`, `model`, `questions`…), delete |
+| GET | `/projects/{slug}/repos/{code\|corpus}` | Files and recent commits |
+| GET/PUT | `/projects/{slug}/repos/{repo}/file` | `?path=` read; `{"path", "content", "message"}` commit (`content: null` deletes) |
+| POST | `/projects/{slug}/decide` | `{"state", "questions", "route": "auto"\|"reflex"\|"llm"}`; each answer has `lane` |
+| POST | `/projects/{slug}/feedback` | `{"p": <Reflex's confidence>, "outcome": bool}` for Reflex's calibrator |
+| POST | `/projects/{slug}/fit` | Labeled `cases`, `rho`, `apply`: fit the threshold |
+| GET | `/projects/{slug}/decisions?limit=` | Decision log, newest first |
+| POST | `/projects/{slug}/reflex/restart`, GET `…/reflex/log` | Restart Reflex, read its log |
 | GET | `/ws` | Pushes `ServerMessage` JSON (see `frontend/lib/generated/ServerMessage.ts`) |
+
+Git: `git clone http://127.0.0.1:4400/git/<slug>/code.git` (or `corpus.git`). With `api_token` set, git asks for a
+password: use the token (any user name).
 
 ## Security
 

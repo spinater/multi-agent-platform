@@ -14,7 +14,8 @@ use tokio::sync::broadcast;
 
 use crate::config::{Config, PromptMode, ProviderSpec};
 use crate::detect::{EndDecision, end_decision};
-use crate::model::{Event, Level, OrchestratorStatus, ProviderInfo, Role, ServerMessage, Session, SessionState, Task, TaskStatus};
+use crate::model::{Event, Level, OrchestratorStatus, Project, ProjectInfo, ProviderInfo, ReflexStatus, Role, ServerMessage, Session, SessionState, Task, TaskStatus};
+use crate::reflex;
 use crate::store::Store;
 use crate::terminal::Terminal;
 
@@ -27,6 +28,8 @@ pub struct Hub {
     tx: broadcast::Sender<ServerMessage>,
     orchestrator_running: AtomicBool,
     cooldowns: Mutex<HashMap<String, DateTime<Utc>>>,
+    pub reflex: reflex::Manager,
+    pub http: reqwest::Client,
 }
 
 pub struct LaunchRequest {
@@ -36,6 +39,8 @@ pub struct LaunchRequest {
     pub model: Option<String>,
     pub role: Role,
     pub task_id: Option<i64>,
+    /// Run in this project's workspace instead of `workspace.dir`.
+    pub project: Option<String>,
     pub prompt: Option<String>,
 }
 
@@ -47,7 +52,16 @@ impl Hub {
     pub fn new(config: Config, store: Store, term: Arc<dyn Terminal>) -> Arc<Self> {
         let (tx, _) = broadcast::channel(512);
         let running = config.orchestrator.autostart;
-        Arc::new(Self { config, store, term, tx, orchestrator_running: AtomicBool::new(running), cooldowns: Mutex::new(HashMap::new()) })
+        Arc::new(Self {
+            config,
+            store,
+            term,
+            tx,
+            orchestrator_running: AtomicBool::new(running),
+            cooldowns: Mutex::new(HashMap::new()),
+            reflex: reflex::Manager::default(),
+            http: reqwest::Client::new(),
+        })
     }
 
     pub fn subscribe(&self) -> broadcast::Receiver<ServerMessage> {
@@ -102,6 +116,100 @@ impl Hub {
 
     pub fn announce_task_removed(&self, id: i64) {
         self.send(ServerMessage::TaskRemoved { id });
+    }
+
+    // ---- projects
+
+    pub fn project_dir(&self, slug: &str) -> PathBuf {
+        self.config.server.data_dir.join("projects").join(slug)
+    }
+
+    pub fn code_repo(&self, slug: &str) -> PathBuf {
+        self.project_dir(slug).join("code.git")
+    }
+
+    pub fn corpus_repo(&self, slug: &str) -> PathBuf {
+        self.project_dir(slug).join("corpus.git")
+    }
+
+    /// The checkout of `code.git` that the project's agents work in.
+    pub fn project_workspace(&self, slug: &str) -> PathBuf {
+        self.project_dir(slug).join("workspace")
+    }
+
+    pub fn reflex_log(&self, slug: &str) -> PathBuf {
+        self.project_dir(slug).join("reflex.log")
+    }
+
+    /// Where a task or session of `project` runs: the project's workspace, or `workspace.dir`.
+    pub fn work_dir(&self, project: Option<&str>) -> PathBuf {
+        project.map_or_else(|| self.config.workspace.dir.clone(), |slug| self.project_workspace(slug))
+    }
+
+    /// The API as agents on this machine reach it (a wildcard bind is reached through loopback).
+    pub fn local_api_url(&self) -> String {
+        let bind = &self.config.server.bind;
+        let port = bind.rsplit_once(':').map_or("4400", |(_, p)| p);
+        let host = crate::api::host_name(bind);
+        let host = if host.is_empty() || host == "0.0.0.0" || host == "::" { "127.0.0.1" } else { host };
+        let host = if host.contains(':') { format!("[{host}]") } else { host.to_string() };
+        format!("http://{host}:{port}/api")
+    }
+
+    pub async fn project_info(&self, project: Project) -> Result<ProjectInfo> {
+        let stats = self.store.decision_stats(&project.slug).await?;
+        Ok(ProjectInfo { reflex: self.reflex.status(&project.slug), stats, project })
+    }
+
+    pub async fn projects(&self) -> Result<Vec<ProjectInfo>> {
+        let mut out = vec![];
+        for p in self.store.projects().await? {
+            out.push(self.project_info(p).await?);
+        }
+        Ok(out)
+    }
+
+    /// Pushes the project's current info (settings, Reflex status, decision counts) to the dashboard.
+    pub async fn announce_project(&self, slug: &str) {
+        match self.store.project(slug).await {
+            Ok(Some(p)) => match self.project_info(p).await {
+                Ok(project) => self.send(ServerMessage::Project { project }),
+                Err(err) => tracing::warn!("project {slug}: {err:#}"),
+            },
+            Ok(None) => {}
+            Err(err) => tracing::warn!("project {slug}: {err:#}"),
+        }
+    }
+
+    pub async fn put_project(&self, p: &Project) -> Result<()> {
+        self.store.save_project(p).await?;
+        self.announce_project(&p.slug).await;
+        Ok(())
+    }
+
+    pub fn announce_project_removed(&self, slug: &str) {
+        self.send(ServerMessage::ProjectRemoved { slug: slug.into() });
+    }
+
+    /// Exports the corpus repo and (re)starts the project's Reflex, announcing each state change.
+    pub async fn restart_reflex(&self, slug: &str) -> Result<ReflexStatus> {
+        let project = self.store.project(slug).await?.with_context(|| format!("unknown project `{slug}`"))?;
+        let live = self.project_dir(slug).join("corpus-live");
+        let (repo, log) = (self.corpus_repo(slug), self.reflex_log(slug));
+        let restart = self.reflex.restart(&self.config.reflex.binary, slug, project.port, reflex::Paths { corpus_repo: &repo, corpus_live: &live, log: &log });
+        tokio::pin!(restart);
+        // Announce "starting" as soon as it is set, then the outcome.
+        let status = tokio::select! {
+            s = &mut restart => s,
+            _ = tokio::time::sleep(Duration::from_millis(50)) => {
+                self.announce_project(slug).await;
+                restart.await
+            }
+        };
+        self.announce_project(slug).await;
+        let level = if status.state == crate::model::ReflexState::Error { Level::Warning } else { Level::Info };
+        self.event(level, "project.reflex", None, None, format!("{slug}: Reflex {:?} {}", status.state, status.message.lines().next().unwrap_or(""))).await;
+        Ok(status)
     }
 
     // ---- orchestrator switch and provider cooldowns
@@ -185,7 +293,7 @@ impl Hub {
         self.run_dir(session).join("result.json")
     }
 
-    fn resolve_model(spec: &ProviderSpec, requested: Option<&str>) -> Result<String> {
+    pub(crate) fn resolve_model(spec: &ProviderSpec, requested: Option<&str>) -> Result<String> {
         let model = requested.filter(|m| !m.is_empty()).unwrap_or(&spec.default_model).to_string();
         if !spec.models.is_empty() && !spec.models.contains(&model) {
             bail!("model `{model}` is not in this provider's list ({})", spec.models.join(", "));
@@ -237,6 +345,11 @@ impl Hub {
         if req.task_id.is_some() {
             script.push_str(&format!("export MAP_RESULT_FILE={}\n", quote(self.result_file(&name).to_str().context("non-UTF-8 path")?)?));
         }
+        if let Some(slug) = &req.project {
+            // Agents ask the project's decision endpoint before spending an LLM call on a classification.
+            script.push_str(&format!("export MAP_PROJECT={}\n", quote(slug)?));
+            script.push_str(&format!("export MAP_DECIDE_URL={}\n", quote(&format!("{}/projects/{slug}/decide", self.local_api_url()))?));
+        }
         script.push_str(&format!("exec {}\n", argv.join(" ")));
         let script_path = dir.join("launch.sh");
         std::fs::write(&script_path, &script)?;
@@ -246,7 +359,11 @@ impl Hub {
             std::fs::set_permissions(&script_path, std::fs::Permissions::from_mode(0o700))?;
         }
 
-        self.term.spawn(&name, &self.config.workspace.dir, &script_path).await?;
+        let cwd = self.work_dir(req.project.as_deref());
+        if !cwd.is_dir() {
+            bail!("workspace {} does not exist", cwd.display());
+        }
+        self.term.spawn(&name, &cwd, &script_path).await?;
         let now = Utc::now();
         let session = Session {
             name: name.clone(),
@@ -254,6 +371,7 @@ impl Hub {
             model: model.clone(),
             role: req.role,
             task_id: req.task_id,
+            project: req.project.clone(),
             state: SessionState::Starting,
             detail: None,
             rate_limit_reset_at: None,
