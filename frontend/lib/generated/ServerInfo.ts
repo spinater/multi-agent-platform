@@ -11,4 +11,8 @@ workspace_dir: string, session_prefix: string,
 /**
  * The SQLite database file.
  */
-database: string, watcher_interval_secs: number, };
+database: string, watcher_interval_secs: number, 
+/**
+ * `reflex --version` of `reflex.binary`, e.g. `reflex 0.2.4`; `None` when it is not installed.
+ */
+reflex_version: string | null, };

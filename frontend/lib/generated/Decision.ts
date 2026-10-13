@@ -2,4 +2,8 @@
 import type { Lane } from "./Lane";
 import type { Question } from "./Question";
 
-export type Decision = { id: number, project: string, at: string, state: string, question: Question, answer: string | boolean | null, lane: Lane, confidence: number | null, reflex_answer: string | boolean | null, ms: number, error: string | null, };
+export type Decision = { id: number, project: string, at: string, state: string, question: Question, answer: string | boolean | null, lane: Lane, confidence: number | null, reflex_answer: string | boolean | null, ms: number, error: string | null, 
+/**
+ * The user's verdict on the answer: `true` right, `false` wrong, `null` none yet.
+ */
+feedback: boolean | null, };

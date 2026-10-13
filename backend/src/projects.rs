@@ -195,8 +195,12 @@ pub async fn write_file(hub: &Hub, slug: &str, repo_name: &str, path: &str, cont
             validate_corpus_path(path)?;
             let repo_path = hub.corpus_repo(slug);
             if content.is_some() {
-                let mut domains: BTreeSet<String> =
-                    repo::files(&repo_path).await?.iter().filter(|f| validate_corpus_path(&f.path).is_ok()).map(|f| domain_of(&f.path).to_string()).collect();
+                let mut domains: BTreeSet<String> = repo::files(&repo_path)
+                    .await?
+                    .iter()
+                    .filter(|f| validate_corpus_path(&f.path).is_ok() && domain_of(&f.path) != repo::ARCHIVE_DIR)
+                    .map(|f| domain_of(&f.path).to_string())
+                    .collect();
                 domains.insert(domain_of(path).to_string());
                 if domains.len() > reflex::MAX_DOMAINS {
                     bail!("Reflex takes at most {} domains per corpus", reflex::MAX_DOMAINS);

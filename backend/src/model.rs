@@ -191,6 +191,8 @@ pub struct ServerInfo {
     pub database: String,
     #[ts(type = "number")]
     pub watcher_interval_secs: u64,
+    /// `reflex --version` of `reflex.binary`, e.g. `reflex 0.2.4`; `None` when it is not installed.
+    pub reflex_version: Option<String>,
 }
 
 /// Messages pushed to dashboard clients over `/api/ws`.
@@ -336,6 +338,11 @@ pub struct Answer {
     pub error: Option<String>,
     #[ts(type = "number")]
     pub ms: u64,
+    /// Why the answer took its lane, in one sentence (threshold comparison, shadow mode, Thai input…).
+    pub reason: String,
+    /// The decision log row of this answer, for feedback; 0 when it could not be recorded.
+    #[ts(type = "number")]
+    pub decision_id: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
@@ -368,6 +375,8 @@ pub struct Decision {
     #[ts(type = "number")]
     pub ms: i64,
     pub error: Option<String>,
+    /// The user's verdict on the answer: `true` right, `false` wrong, `null` none yet.
+    pub feedback: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
@@ -423,4 +432,100 @@ pub struct FitResult {
     pub coverage: f64,
     pub applied: bool,
     pub cases: Vec<FitCaseResult>,
+}
+
+// ---- reflex screen
+
+/// Reflex's score of a calibration case the last time it was run.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct CaseScore {
+    #[ts(type = "string | boolean | null")]
+    pub answer: serde_json::Value,
+    pub confidence: f64,
+    pub correct: bool,
+    pub at: DateTime<Utc>,
+}
+
+/// A labeled calibration case: a message and the correct answer to one of the project's saved questions.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct ReflexCase {
+    #[ts(type = "number")]
+    pub id: i64,
+    pub question_id: String,
+    pub text: String,
+    #[ts(type = "string | boolean")]
+    pub expected: serde_json::Value,
+    pub created_at: DateTime<Utc>,
+    /// `None` until Reflex has scored it (Reflex was down, or the question is gone).
+    pub score: Option<CaseScore>,
+}
+
+/// One lane over a summary window.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct LaneSummary {
+    #[ts(type = "number")]
+    pub count: i64,
+    /// Average time to answer in milliseconds; 0 without decisions.
+    pub avg_ms: f64,
+}
+
+/// Decisions per lane in one hour.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct HourBucket {
+    pub start: DateTime<Utc>,
+    #[ts(type = "number")]
+    pub reflex: i64,
+    #[ts(type = "number")]
+    pub llm: i64,
+    #[ts(type = "number")]
+    pub abstain: i64,
+}
+
+/// A project's decisions over the last `hours`.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct DecisionSummary {
+    #[ts(type = "number")]
+    pub hours: i64,
+    pub since: DateTime<Utc>,
+    #[ts(type = "number")]
+    pub total: i64,
+    pub reflex: LaneSummary,
+    pub llm: LaneSummary,
+    pub abstain: LaneSummary,
+    #[ts(type = "number")]
+    pub feedback_right: i64,
+    #[ts(type = "number")]
+    pub feedback_wrong: i64,
+    /// One per hour, oldest first; the last one holds the current hour.
+    pub buckets: Vec<HourBucket>,
+}
+
+/// Result of feedback on a logged decision.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct DecisionFeedback {
+    pub decision: Decision,
+    /// The calibration case the feedback added, if any.
+    pub case: Option<ReflexCase>,
+    /// Whether Reflex's own answer was right, as reported to its calibrator; `None` when Reflex had no answer.
+    pub reflex_outcome: Option<bool>,
+    /// Reflex's calibrator refitted on this report (it refits every 64 reports).
+    pub refit: bool,
+    pub reflex_error: Option<String>,
+}
+
+/// Result of moving corpus domains into or out of the archive folder.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct ArchiveResult {
+    pub moved: Vec<String>,
+    #[ts(type = "number")]
+    pub files: usize,
+    pub commit: String,
+    pub reflex: ReflexStatus,
 }

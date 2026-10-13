@@ -67,6 +67,13 @@ pub fn router(hub: Arc<Hub>) -> Router {
         .route("/projects/{slug}/feedback", post(projects::feedback))
         .route("/projects/{slug}/fit", post(projects::fit))
         .route("/projects/{slug}/decisions", get(projects::decisions))
+        // Reflex screen: calibration cases, decision feedback and summary, corpus archive.
+        .route("/projects/{slug}/cases", get(projects::cases).post(projects::add_cases))
+        .route("/projects/{slug}/cases/fit", post(projects::fit_cases))
+        .route("/projects/{slug}/cases/{id}", axum::routing::delete(projects::delete_case))
+        .route("/projects/{slug}/decisions/summary", get(projects::decision_summary))
+        .route("/projects/{slug}/decisions/{id}/feedback", post(projects::decision_feedback))
+        .route("/projects/{slug}/corpus/archive", post(projects::archive))
         .route("/ws", get(ws::handler))
         .layer(middleware::from_fn_with_state(hub.clone(), require_token))
         .with_state(hub.clone());

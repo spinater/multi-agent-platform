@@ -14,6 +14,9 @@ use crate::hub::Hub;
 use crate::model::{DecideResponse, Decision, FitResult, Project, ProjectInfo, Question, ReflexStatus, RepoListing};
 use crate::projects::{self, NewProject, validate_fallback, validate_questions, validate_repo_path};
 use crate::{reflex, repo};
+// Reflex screen.
+use crate::model::{ArchiveResult, DecisionFeedback, DecisionSummary, ReflexCase};
+use crate::reflex_screen;
 
 async fn load(hub: &Hub, slug: &str) -> Result<Project, ApiError> {
     hub.store.project(slug).await?.ok_or_else(|| not_found("project"))
@@ -207,4 +210,99 @@ pub struct LimitQuery {
 pub async fn decisions(State(hub): State<Arc<Hub>>, UrlPath(slug): UrlPath<String>, Query(q): Query<LimitQuery>) -> ApiResult<Vec<Decision>> {
     load(&hub, &slug).await?;
     Ok(Json(hub.store.decisions(&slug, q.limit.unwrap_or(200).clamp(1, 1000)).await?))
+}
+
+// ---- reflex screen: calibration cases, decision feedback and summary, corpus archive
+
+pub async fn cases(State(hub): State<Arc<Hub>>, UrlPath(slug): UrlPath<String>) -> ApiResult<Vec<ReflexCase>> {
+    load(&hub, &slug).await?;
+    Ok(Json(hub.store.cases(&slug).await?))
+}
+
+#[derive(Deserialize)]
+pub struct CaseBody {
+    question_id: String,
+    text: String,
+    expected: Value,
+}
+
+#[derive(Deserialize)]
+pub struct AddCasesBody {
+    cases: Vec<CaseBody>,
+}
+
+pub async fn add_cases(State(hub): State<Arc<Hub>>, UrlPath(slug): UrlPath<String>, Json(b): Json<AddCasesBody>) -> Result<(StatusCode, Json<Vec<ReflexCase>>), ApiError> {
+    let p = load(&hub, &slug).await?;
+    let new = b.cases.into_iter().map(|c| reflex_screen::NewCase { question_id: c.question_id, text: c.text, expected: c.expected }).collect();
+    let added = reflex_screen::add_cases(&hub, &p, new).await?;
+    hub.announce_project(&slug).await;
+    Ok((StatusCode::CREATED, Json(added)))
+}
+
+pub async fn delete_case(State(hub): State<Arc<Hub>>, UrlPath((slug, id)): UrlPath<(String, i64)>) -> ApiResult<Value> {
+    load(&hub, &slug).await?;
+    if !hub.store.delete_case(&slug, id).await? {
+        return Err(not_found("case"));
+    }
+    hub.announce_project(&slug).await;
+    Ok(Json(json!({ "ok": true })))
+}
+
+#[derive(Deserialize)]
+pub struct FitCasesBody {
+    rho: Option<f64>,
+    #[serde(default)]
+    apply: bool,
+}
+
+pub async fn fit_cases(State(hub): State<Arc<Hub>>, UrlPath(slug): UrlPath<String>, Json(b): Json<FitCasesBody>) -> ApiResult<FitResult> {
+    let mut p = load(&hub, &slug).await?;
+    let result = reflex_screen::fit(&hub, &mut p, b.rho.unwrap_or(0.3), b.apply).await?;
+    hub.announce_project(&slug).await;
+    Ok(Json(result))
+}
+
+#[derive(Deserialize)]
+pub struct DecisionFeedbackBody {
+    correct: bool,
+    /// The right answer, required when `correct` is false.
+    expected: Option<Value>,
+    #[serde(default = "yes")]
+    add_case: bool,
+}
+
+fn yes() -> bool {
+    true
+}
+
+pub async fn decision_feedback(
+    State(hub): State<Arc<Hub>>,
+    UrlPath((slug, id)): UrlPath<(String, i64)>,
+    Json(b): Json<DecisionFeedbackBody>,
+) -> ApiResult<DecisionFeedback> {
+    let p = load(&hub, &slug).await?;
+    Ok(Json(reflex_screen::feedback(&hub, &p, id, b.correct, b.expected, b.add_case).await?))
+}
+
+#[derive(Deserialize)]
+pub struct SummaryQuery {
+    hours: Option<i64>,
+}
+
+pub async fn decision_summary(State(hub): State<Arc<Hub>>, UrlPath(slug): UrlPath<String>, Query(q): Query<SummaryQuery>) -> ApiResult<DecisionSummary> {
+    load(&hub, &slug).await?;
+    Ok(Json(hub.store.decision_summary(&slug, q.hours.unwrap_or(24), chrono::Utc::now()).await?))
+}
+
+#[derive(Deserialize)]
+pub struct ArchiveBody {
+    /// Domains to move; omitted: the smallest until 8 are left.
+    domains: Option<Vec<String>>,
+    #[serde(default)]
+    restore: bool,
+}
+
+pub async fn archive(State(hub): State<Arc<Hub>>, UrlPath(slug): UrlPath<String>, Json(b): Json<ArchiveBody>) -> ApiResult<ArchiveResult> {
+    load(&hub, &slug).await?;
+    Ok(Json(reflex_screen::archive(&hub, &slug, b.domains, b.restore).await?))
 }

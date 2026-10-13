@@ -35,7 +35,15 @@ nothing is tied to one repository, session name or provider.
   - **Corpus.** One top-level folder per Reflex domain (1–8), prose `.md` files inside. A push or an edit restarts
     the project's Reflex on the new corpus.
   - **Calibration.** The threshold is fitted from labeled cases (the ρ-quantile of Reflex's confidence on the cases
-    it got right), and Reflex's own calibrator learns from `feedback`. Every decision is logged with its lane.
+    it got right), and Reflex's own calibrator learns from `feedback`. Every decision is logged with its lane and a
+    one-line `reason` (threshold comparison, shadow mode, Thai input…). Cases are stored per project and scored by
+    Reflex as they are added; marking a logged decision right or wrong adds it as a case and tells Reflex's calibrator
+    whether Reflex's own answer was right.
+  - **Not calibrated** (no threshold): shadow mode. Reflex scores every question, but the fallback answers.
+  - **Thai input** (any character in U+0E00–U+0E7F) is never sent to Reflex, which tokenises English only: it goes
+    straight to the fallback, with the reason in the answer.
+  - **More than 8 domains** pauses Reflex. Archiving moves domains to `_archive/` in the corpus repo (one commit),
+    which Reflex never loads; the dashboard's Reflex screen offers to archive the smallest.
 - **History.** Sessions, tasks and events live in SQLite. Every run keeps its prompt, launch script, result file and
   final pane under `.map/runs/<session>/`.
 
@@ -117,6 +125,12 @@ areas, links, timeline and 3D orbit. Clicking a node opens a card whose buttons 
 the task, the project; restart Reflex; start a session). Every number of the graph lives in `TUNING` at the top of
 `frontend/components/graph/layouts.ts`. Deep links: `#tasks`, `#sessions/<name>`, `#projects/<slug>`.
 
+The **Reflex** screen (`#reflex`, `frontend/components/reflex/`) is the current project's decision engine: how it
+works with the last 24 h per lane, a set-up checklist that ticks itself (install, corpus, questions, calibration,
+playground), a playground with feedback, calibration on a log-scale scatter with a draggable threshold, and the
+decision log. Confidence is always shown on a log axis (1e-5 … 1e-3, widened by whole decades when a corpus scores
+outside it), never as a percentage.
+
 ## Writing tasks
 
 A task is a title and a prompt. The orchestrator appends a protocol footer that tells the worker:
@@ -135,7 +149,7 @@ All routes are under `/api`. When `server.api_token` is set, send `Authorization
 
 | Method | Path | |
 | --- | --- | --- |
-| GET | `/overview` | Sessions, tasks, providers and orchestrator status in one call |
+| GET | `/overview` | Sessions, tasks, providers, orchestrator status and server info (incl. `reflex_version`) in one call |
 | GET | `/events?limit=&session=` | Event log, newest first |
 | GET/POST | `/sessions` | List, or start (`provider`, `model`, `name`, `prompt`, `supervisor`) |
 | DELETE | `/sessions/{name}?force=` | Close a live session (409 while a person is using it), or remove an exited one |
@@ -153,7 +167,13 @@ All routes are under `/api`. When `server.api_token` is set, send `Authorization
 | POST | `/projects/{slug}/decide` | `{"state", "questions", "route": "auto"\|"reflex"\|"llm"}`; each answer has `lane` |
 | POST | `/projects/{slug}/feedback` | `{"p": <Reflex's confidence>, "outcome": bool}` for Reflex's calibrator |
 | POST | `/projects/{slug}/fit` | Labeled `cases`, `rho`, `apply`: fit the threshold |
-| GET | `/projects/{slug}/decisions?limit=` | Decision log, newest first |
+| GET | `/projects/{slug}/decisions?limit=` | Decision log, newest first, with each decision's `feedback` |
+| GET | `/projects/{slug}/decisions/summary?hours=24` | Count and average ms per lane, feedback ✓/✕, hourly buckets |
+| POST | `/projects/{slug}/decisions/{id}/feedback` | `{"correct": bool, "expected"?, "add_case"?: true}`: verdict, calibration case, Reflex `feedback` |
+| GET/POST | `/projects/{slug}/cases` | Calibration cases; add `{"cases": [{"question_id", "text", "expected"}]}` (scored at once) |
+| DELETE | `/projects/{slug}/cases/{id}` | Remove a case |
+| POST | `/projects/{slug}/cases/fit` | `{"rho": 0.3, "apply": bool}`: re-score the stored cases (16 or more) and fit the threshold |
+| POST | `/projects/{slug}/corpus/archive` | `{"domains"?: [...], "restore"?: bool}`: move domains to or from `_archive/` (default: the smallest over 8) |
 | POST | `/projects/{slug}/reflex/restart`, GET `…/reflex/log` | Restart Reflex, read its log |
 | GET | `/ws` | Pushes `ServerMessage` JSON (see `frontend/lib/generated/ServerMessage.ts`) |
 

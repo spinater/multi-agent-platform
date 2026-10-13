@@ -7,6 +7,7 @@ mod model;
 mod orchestrator;
 mod projects;
 mod reflex;
+mod reflex_screen;
 mod repo;
 mod store;
 mod terminal;

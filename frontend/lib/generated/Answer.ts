@@ -9,4 +9,12 @@ answer: string | boolean | null, lane: Lane, confidence: number | null, probabil
 /**
  * What Reflex chose, even when it was below the threshold.
  */
-reflex_answer: string | boolean | null, llm_raw: string | null, error: string | null, ms: number, };
+reflex_answer: string | boolean | null, llm_raw: string | null, error: string | null, ms: number, 
+/**
+ * Why the answer took its lane, in one sentence (threshold comparison, shadow mode, Thai input…).
+ */
+reason: string, 
+/**
+ * The decision log row of this answer, for feedback; 0 when it could not be recorded.
+ */
+decision_id: number, };
