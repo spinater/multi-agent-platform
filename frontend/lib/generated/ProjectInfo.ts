@@ -3,4 +3,8 @@ import type { DecisionStats } from "./DecisionStats";
 import type { Project } from "./Project";
 import type { ReflexStatus } from "./ReflexStatus";
 
-export type ProjectInfo = { project: Project, reflex: ReflexStatus, stats: DecisionStats, };
+export type ProjectInfo = { project: Project, reflex: ReflexStatus, stats: DecisionStats, 
+/**
+ * The checkout of the code repo that the project's agents work in.
+ */
+workspace: string, };

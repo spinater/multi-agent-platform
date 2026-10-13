@@ -7,8 +7,8 @@ use anyhow::{Context, Result, bail};
 use chrono::Utc;
 
 use crate::hub::Hub;
-use crate::model::{Level, Project, Question, QuestionKind};
-use crate::{reflex, repo};
+use crate::model::{CheckLine, Level, Project, ProjectSettings, Question, QuestionKind, ReflexState, SourceKind};
+use crate::{project_settings, reflex, repo};
 
 pub struct NewProject {
     pub name: String,
@@ -140,7 +140,20 @@ fn code_seed(p: &Project) -> Vec<(String, Option<String>)> {
     vec![("README.md".into(), Some(readme)), ("CLAUDE.md".into(), Some(claude.into()))]
 }
 
+#[cfg(test)]
 pub async fn create(hub: &Hub, req: NewProject) -> Result<Project> {
+    create_with(hub, req, ProjectSettings::default()).await.map(|(p, _)| p)
+}
+
+fn check(checks: &mut Vec<CheckLine>, level: Level, text: impl Into<String>) {
+    checks.push(CheckLine { level, text: text.into() });
+}
+
+/// Creates the project's code repo (new, or imported from `settings.source`), its corpus repo, the agents'
+/// workspace and its Reflex, and reports each step as a check line.
+pub async fn create_with(hub: &Hub, req: NewProject, settings: ProjectSettings) -> Result<(Project, Vec<CheckLine>)> {
+    let mut settings = project_settings::normalize(settings);
+    project_settings::validate(hub, &settings)?;
     let name = req.name.trim().to_string();
     if name.is_empty() {
         bail!("a project needs a name");
@@ -163,25 +176,87 @@ pub async fn create(hub: &Hub, req: NewProject) -> Result<Project> {
         model: req.model.filter(|m| !m.is_empty()),
         questions: vec![],
         created_at: Utc::now(),
+        settings: ProjectSettings::default(),
     };
+    let mut checks = vec![];
     let setup = async {
         let code = hub.code_repo(&slug);
         let corpus = hub.corpus_repo(&slug);
-        repo::init_bare(&code).await?;
+        match settings.source.kind {
+            SourceKind::Empty => {
+                repo::init_bare(&code).await?;
+                repo::commit(&code, &code_seed(&project), "Initial commit").await?;
+                check(&mut checks, Level::Success, format!("code repo created · /git/{slug}/code.git · README.md, CLAUDE.md"));
+            }
+            SourceKind::Git | SourceKind::Local => {
+                let location = settings.source.location.clone().unwrap_or_default();
+                let source = if settings.source.kind == SourceKind::Local {
+                    let path = crate::login::expand_home(&location);
+                    if !path.is_dir() {
+                        bail!("{} is not a directory", path.display());
+                    }
+                    path.display().to_string()
+                } else {
+                    location.clone()
+                };
+                std::fs::create_dir_all(hub.project_dir(&slug))?;
+                let (branch, commits) = repo::clone_bare(&source, settings.source.branch.as_deref(), &code).await?;
+                check(&mut checks, Level::Success, format!("imported {commits} commit{} from {location} @ {branch} as main · /git/{slug}/code.git", if commits == 1 { "" } else { "s" }));
+                settings.source.branch = Some(branch);
+                if repo::read(&code, "CLAUDE.md").await.is_none() {
+                    let claude = code_seed(&project).into_iter().filter(|(p, _)| p == "CLAUDE.md").collect::<Vec<_>>();
+                    repo::commit(&code, &claude, "Add the platform's decision notes").await?;
+                    check(&mut checks, Level::Success, "added CLAUDE.md with the project's decision endpoint");
+                } else {
+                    check(&mut checks, Level::Warning, "kept the repo's own CLAUDE.md; agents still get $MAP_DECIDE_URL in their prompt");
+                }
+            }
+        }
         repo::init_bare(&corpus).await?;
-        repo::commit(&code, &code_seed(&project), "Initial commit").await?;
         repo::commit(&corpus, &corpus_seed(), "Initial corpus").await?;
-        repo::sync_workspace(&code, &hub.project_workspace(&slug)).await?;
-        hub.put_project(&project).await
+        check(&mut checks, Level::Success, format!("corpus repo created · /git/{slug}/corpus.git · 1 example domain"));
+        let workspace = hub.project_workspace(&slug);
+        repo::sync_workspace(&code, &workspace).await?;
+        check(&mut checks, Level::Success, format!("workspace checked out at {}", workspace.display()));
+        hub.put_project(&Project { settings: settings.clone(), ..project.clone() }).await
     };
     if let Err(err) = setup.await {
         let _ = std::fs::remove_dir_all(hub.project_dir(&slug));
         let _ = hub.store.delete_project(&slug).await;
         return Err(err);
     }
+    let project = Project { settings, ..project };
     hub.event(Level::Info, "project.created", None, None, format!("Project {slug} created")).await;
-    hub.restart_reflex(&slug).await?;
-    Ok(project)
+
+    match hub.restart_reflex(&slug).await {
+        Ok(s) => {
+            let first = s.message.lines().next().unwrap_or("").to_string();
+            match s.state {
+                ReflexState::Running => check(&mut checks, Level::Success, format!("Reflex running on 127.0.0.1:{} · {} domain(s)", project.port, s.domains.len())),
+                ReflexState::NoCorpus => check(&mut checks, Level::Warning, "Reflex not started: the corpus has no domains yet"),
+                state => check(&mut checks, Level::Warning, format!("Reflex {}: {first}", format!("{state:?}").to_lowercase())),
+            }
+        }
+        Err(err) => check(&mut checks, Level::Warning, format!("Reflex not started: {err:#}")),
+    }
+
+    let providers = hub.providers();
+    let order = if project.settings.providers.is_empty() { hub.config.orchestrator.provider_order.clone() } else { project.settings.providers.iter().map(|p| p.name.clone()).collect() };
+    for name in order {
+        let Some(p) = providers.iter().find(|p| p.name == name) else { continue };
+        let model = project.settings.providers.iter().find(|x| x.name == name).and_then(|x| x.model.clone()).unwrap_or(p.default_model.clone());
+        let (level, state) = match (p.available, p.signed_in) {
+            (false, _) => (Level::Error, "not found on PATH"),
+            (true, Some(true)) => (Level::Success, "found · signed in"),
+            (true, Some(false)) => (Level::Warning, "found · signed out"),
+            (true, None) => (Level::Info, "found · sign-in unknown"),
+        };
+        check(&mut checks, level, format!("{name} · {model} · {state}"));
+    }
+    let verify = project.settings.verify.clone().unwrap_or_else(|| hub.config.orchestrator.verify.clone());
+    let audit = project.settings.audit.as_ref().map_or(hub.config.orchestrator.audit.enabled, |a| a.enabled);
+    check(&mut checks, Level::Info, format!("verify: {} command(s) · audit {}{}", verify.len(), if audit { "on" } else { "off" }, if project.settings.paused { " · paused" } else { "" }));
+    Ok((project, checks))
 }
 
 /// Commits one file to a project repo (`None` deletes it); a corpus change restarts Reflex.

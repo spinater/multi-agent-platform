@@ -90,7 +90,8 @@ impl Orchestrator {
 
         let tasks = self.hub.store.tasks().await?;
         let mut active = tasks.iter().filter(|t| matches!(t.status, TaskStatus::Running | TaskStatus::Verifying | TaskStatus::Auditing)).count();
-        for task in tasks.iter().filter(|t| t.status == TaskStatus::Pending) {
+        let paused = crate::project_settings::paused(&self.hub).await;
+        for task in tasks.iter().filter(|t| t.status == TaskStatus::Pending && !crate::project_settings::is_paused(&paused, t)) {
             if active >= self.hub.config.orchestrator.max_parallel {
                 break;
             }
@@ -115,17 +116,13 @@ impl Orchestrator {
         Ok(())
     }
 
-    fn pick_provider(&self, task: &Task) -> Option<String> {
-        let candidates: Vec<String> = match &task.provider {
-            Some(p) => vec![p.clone()],
-            None => self.hub.config.orchestrator.provider_order.clone(),
-        };
+    async fn pick_provider(&self, task: &Task) -> Option<String> {
+        let candidates = crate::project_settings::candidates(&self.hub, task).await;
         candidates.into_iter().find(|p| self.hub.provider_available(p) && self.hub.cooldown_until(p).is_none())
     }
 
-    fn build_prompt(&self, task: &Task, session: &str, previous_failure: Option<&str>) -> String {
+    fn build_prompt(&self, task: &Task, session: &str, previous_failure: Option<&str>, verify: &[String]) -> String {
         let result_file = self.hub.result_file(session);
-        let verify = &self.hub.config.orchestrator.verify;
         let mut p = format!("{}\n\n---\nPlatform protocol (multi-agent-platform)\n", task.prompt.trim());
         p.push_str(&format!("- You are worker session `{session}` on task #{}: {}.\n", task.id, task.title));
         p.push_str("- Work autonomously in this repository; only stop to ask when you are truly blocked.\n");
@@ -150,7 +147,7 @@ impl Orchestrator {
 
     /// Returns true when a worker session was started.
     async fn start(&self, mut task: Task) -> Result<bool> {
-        let Some(provider) = self.pick_provider(&task) else {
+        let Some(provider) = self.pick_provider(&task).await else {
             let note = "Waiting: no provider is available (missing binary, quota or auth cooldown)".to_string();
             if task.result.as_deref() != Some(note.as_str()) {
                 task.result = Some(note);
@@ -160,7 +157,7 @@ impl Orchestrator {
         };
         let spec = self.hub.spec(&provider)?;
         // A model only carries over when it belongs to the chosen provider.
-        let model = task.model.clone().filter(|m| spec.models.contains(m));
+        let model = task.model.clone().filter(|m| spec.models.contains(m)).or(crate::project_settings::model(&self.hub, &task, &provider).await);
         task.attempts += 1;
         let session = format!("{}task-{}-{}", self.hub.config.workspace.session_prefix, task.id, task.attempts);
         let previous_failure = if task.attempts > 1 { task.result.clone() } else { None };
@@ -180,7 +177,7 @@ impl Orchestrator {
                 }
             }
         }
-        let prompt = self.build_prompt(&task, &session, previous_failure.as_deref());
+        let prompt = self.build_prompt(&task, &session, previous_failure.as_deref(), &crate::project_settings::verify(&self.hub, &task).await);
         let req = LaunchRequest {
             name: Some(session.clone()),
             provider: provider.clone(),
@@ -314,13 +311,13 @@ impl Orchestrator {
         let dir = hub.work_dir(task.project.as_deref());
 
         if task.status == TaskStatus::Verifying {
-            for command in &cfg.verify {
+            for command in &crate::project_settings::verify(hub, &task).await {
                 let (ok, output) = shell(hub, &dir, command, Duration::from_secs(30 * 60)).await?;
                 if !ok {
                     return self.retry_or_fail(task, &format!("`{command}` failed:\n{output}")).await;
                 }
             }
-            if cfg.audit.enabled {
+            if crate::project_settings::audit_enabled(hub, &task).await {
                 task.status = TaskStatus::Auditing;
                 hub.put_task(&mut task).await?;
             }
@@ -374,7 +371,7 @@ impl Orchestrator {
             body = task.prompt.trim(),
             summary = task.result.as_deref().unwrap_or("(none)"),
         );
-        for provider in &hub.config.orchestrator.audit.chain {
+        for provider in &crate::project_settings::audit_chain(hub, task).await {
             if !hub.provider_available(provider) || hub.cooldown_until(provider).is_some() {
                 continue;
             }

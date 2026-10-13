@@ -195,6 +195,17 @@ pub struct ProviderSpec {
     /// Pane text meaning the agent is busy even if the pane did not change.
     pub working_markers: Vec<String>,
     pub auth_markers: Vec<String>,
+    /// Sign-in command run in a helper tmux session (`{binary}` substituted); empty: no web sign-in.
+    pub login: Vec<String>,
+    /// Text typed into the helper session after `startup_secs` (for CLIs that sign in from their TUI).
+    pub login_send: Option<String>,
+    /// Shown before a sign-in starts, e.g. when the CLI signs out the current account first.
+    pub login_warning: Option<String>,
+    /// Files the CLI keeps its credentials in (`~/` is the home directory). Only their existence and whether
+    /// they parse are checked; empty: the sign-in state is unknown.
+    pub credentials: Vec<String>,
+    /// The environment variable that holds an API key instead of a sign-in.
+    pub api_key_env: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -211,6 +222,20 @@ struct ProviderOverride {
     idle_markers: Option<Vec<String>>,
     working_markers: Option<Vec<String>>,
     auth_markers: Option<Vec<String>>,
+    login: Option<Vec<String>>,
+    login_send: Option<String>,
+    login_warning: Option<String>,
+    credentials: Option<Vec<String>>,
+    api_key_env: Option<String>,
+}
+
+/// An optional override: missing keeps the built-in value, `""` clears it.
+fn optional(over: Option<String>, base: Option<String>) -> Option<String> {
+    match over {
+        Some(s) if s.is_empty() => None,
+        Some(s) => Some(s),
+        None => base,
+    }
 }
 
 fn strings(items: &[&str]) -> Vec<String> {
@@ -233,6 +258,11 @@ pub fn builtin_providers() -> BTreeMap<String, ProviderSpec> {
             idle_markers: strings(&["? for shortcuts"]),
             working_markers: strings(&["esc to interrupt"]),
             auth_markers: strings(&["Login expired", "Please run /login", "needs you to sign in again", "OAuth session expired", "Failed to authenticate"]),
+            login: strings(&["{binary}", "auth", "login"]),
+            login_send: None,
+            login_warning: None,
+            credentials: strings(&["~/.claude/.credentials.json"]),
+            api_key_env: Some("ANTHROPIC_API_KEY".into()),
         },
     );
     map.insert(
@@ -249,6 +279,12 @@ pub fn builtin_providers() -> BTreeMap<String, ProviderSpec> {
             idle_markers: strings(&["? for shortcuts"]),
             working_markers: strings(&["esc to interrupt", "Working"]),
             auth_markers: strings(&["Not logged in", "sign in with ChatGPT"]),
+            login: strings(&["{binary}", "login", "--device-auth"]),
+            login_send: None,
+            // Seen with codex-cli 0.159: the device flow deletes ~/.codex/auth.json as soon as it starts.
+            login_warning: Some("codex login signs out the current account as soon as it starts, before you approve the new one.".into()),
+            credentials: strings(&["~/.codex/auth.json"]),
+            api_key_env: Some("OPENAI_API_KEY".into()),
         },
     );
     map.insert(
@@ -265,6 +301,12 @@ pub fn builtin_providers() -> BTreeMap<String, ProviderSpec> {
             idle_markers: strings(&["Type your message"]),
             working_markers: strings(&["esc to cancel"]),
             auth_markers: strings(&["Login required", "Please sign in"]),
+            // agy signs in from its TUI (`/login`); it may keep the token in the system keyring instead of this file.
+            login: strings(&["{binary}"]),
+            login_send: Some("/login".into()),
+            login_warning: None,
+            credentials: strings(&["~/.gemini/jetski-standalone-oauth-token"]),
+            api_key_env: Some("GEMINI_API_KEY".into()),
         },
     );
     map
@@ -291,6 +333,11 @@ impl ProviderOverride {
                     idle_markers: vec![],
                     working_markers: vec![],
                     auth_markers: vec![],
+                    login: vec![],
+                    login_send: None,
+                    login_warning: None,
+                    credentials: vec![],
+                    api_key_env: None,
                 }
             }
         };
@@ -306,6 +353,11 @@ impl ProviderOverride {
             idle_markers: self.idle_markers.unwrap_or(base.idle_markers),
             working_markers: self.working_markers.unwrap_or(base.working_markers),
             auth_markers: self.auth_markers.unwrap_or(base.auth_markers),
+            login: self.login.unwrap_or(base.login),
+            login_send: optional(self.login_send, base.login_send),
+            login_warning: optional(self.login_warning, base.login_warning),
+            credentials: self.credentials.unwrap_or(base.credentials),
+            api_key_env: optional(self.api_key_env, base.api_key_env),
         })
     }
 }
@@ -386,6 +438,20 @@ mod tests {
         let claude = &c.providers["claude"];
         assert_eq!(claude.extra_args, vec!["--dangerously-skip-permissions"]);
         assert_eq!(claude.binary, "claude");
+    }
+
+    #[test]
+    fn login_settings_override_and_clear() {
+        let c = Config::parse(
+            "[workspace]\ndir = \"/r\"\n[providers.gemini]\nlogin_send = \"\"\ncredentials = [\"~/x.json\"]\n[providers.codex]\nlogin = [\"{binary}\", \"login\"]\n",
+            Path::new("/"),
+        )
+        .unwrap();
+        assert_eq!(c.providers["gemini"].login_send, None);
+        assert_eq!(c.providers["gemini"].credentials, vec!["~/x.json"]);
+        assert_eq!(c.providers["codex"].login, vec!["{binary}", "login"]);
+        assert!(c.providers["codex"].login_warning.is_some());
+        assert_eq!(c.providers["claude"].api_key_env.as_deref(), Some("ANTHROPIC_API_KEY"));
     }
 
     #[test]

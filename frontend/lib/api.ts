@@ -2,8 +2,14 @@ import type { DecideResponse } from "./generated/DecideResponse";
 import type { Decision } from "./generated/Decision";
 import type { Event } from "./generated/Event";
 import type { FitResult } from "./generated/FitResult";
+import type { LoginState } from "./generated/LoginState";
 import type { Overview } from "./generated/Overview";
+import type { ProjectCreated } from "./generated/ProjectCreated";
+import type { ProjectDefaults } from "./generated/ProjectDefaults";
 import type { ProjectInfo } from "./generated/ProjectInfo";
+import type { ProjectSettings } from "./generated/ProjectSettings";
+import type { SourceInspection } from "./generated/SourceInspection";
+import type { SourceKind } from "./generated/SourceKind";
 import type { Question } from "./generated/Question";
 import type { ReflexStatus } from "./generated/ReflexStatus";
 import type { RepoListing } from "./generated/RepoListing";
@@ -78,8 +84,8 @@ export const api = {
   deleteTask: (id: number) => request("DELETE", `/tasks/${id}`),
   setOrchestrator: (running: boolean) => request("POST", "/orchestrator", { running }),
 
-  createProject: (body: { name: string; slug?: string; description?: string; fallback?: string; model?: string }) =>
-    request<ProjectInfo>("POST", "/projects", body),
+  createProject: (body: { name: string; slug?: string; description?: string; fallback?: string; model?: string; settings?: ProjectSettings }) =>
+    request<ProjectCreated>("POST", "/projects", body),
   updateProject: (slug: string, body: ProjectUpdate) => request<ProjectInfo>("PATCH", `/projects/${slug}`, body),
   deleteProject: (slug: string) => request("DELETE", `/projects/${slug}`),
   repo: (slug: string, repo: RepoName) => request<RepoListing>("GET", `/projects/${slug}/repos/${repo}`),
@@ -95,6 +101,13 @@ export const api = {
   fit: (slug: string, body: { cases: { state: string; question: Question; expected: string | boolean }[]; rho: number; apply: boolean }) =>
     request<FitResult>("POST", `/projects/${slug}/fit`, body),
   decisions: (slug: string, limit = 200) => request<Decision[]>("GET", `/projects/${slug}/decisions?limit=${limit}`),
+
+  // ---- project settings and provider sign-in
+  projectDefaults: () => request<ProjectDefaults>("GET", "/projects/defaults"),
+  inspectSource: (body: { kind: SourceKind; location: string; branch?: string }) => request<SourceInspection>("POST", "/projects/inspect", body),
+  /** Starts (or returns the running) helper session that runs the provider's login command. */
+  loginStart: (provider: string) => request<LoginState>("POST", `/providers/${encodeURIComponent(provider)}/login`),
+  loginState: (provider: string) => request<LoginState>("GET", `/providers/${encodeURIComponent(provider)}/login`),
 };
 
 export type RepoName = "code" | "corpus";
@@ -106,6 +119,9 @@ export type ProjectUpdate = {
   fallback?: string;
   model?: string | null;
   questions?: Question[];
+  /** Providers, verify, audit and paused; the source is kept. */
+  settings?: ProjectSettings;
+  paused?: boolean;
 };
 
 /** Clone URL for a project repo; git asks for the API token as the password when one is set. */

@@ -158,7 +158,8 @@ impl Hub {
 
     pub async fn project_info(&self, project: Project) -> Result<ProjectInfo> {
         let stats = self.store.decision_stats(&project.slug).await?;
-        Ok(ProjectInfo { reflex: self.reflex.status(&project.slug), stats, project })
+        let workspace = self.project_workspace(&project.slug).display().to_string();
+        Ok(ProjectInfo { reflex: self.reflex.status(&project.slug), stats, project, workspace })
     }
 
     pub async fn projects(&self) -> Result<Vec<ProjectInfo>> {
@@ -289,6 +290,8 @@ impl Hub {
                 default_model: spec.default_model.clone(),
                 available: self.provider_available(name),
                 cooldown_until: self.cooldown_until(name),
+                signed_in: crate::login::signed_in(self, spec),
+                login: crate::login::info(self, name, spec),
             })
             .collect()
     }
@@ -313,6 +316,12 @@ impl Hub {
 
     /// Writes the run directory (prompt, launch script) and starts the agent in a new tmux session.
     pub async fn launch(self: &Arc<Self>, req: LaunchRequest) -> Result<Session> {
+        self.launch_command(req, None).await
+    }
+
+    /// [`Hub::launch`] with `command` (a template like `interactive`) in place of the provider's interactive
+    /// command, without its `extra_args` or prompt argument; used for the provider's sign-in.
+    pub async fn launch_command(self: &Arc<Self>, req: LaunchRequest, command: Option<&[String]>) -> Result<Session> {
         let spec = self.spec(&req.provider)?.clone();
         let model = Self::resolve_model(&spec, req.model.as_deref())?;
         let suffix = match req.name.as_deref().map(str::trim).filter(|n| !n.is_empty()) {
@@ -338,11 +347,11 @@ impl Hub {
         }
 
         let substitute = |arg: &str| arg.replace("{binary}", &spec.binary).replace("{model}", &model).replace("{session}", &name);
-        let mut argv: Vec<String> = spec.interactive.iter().map(|a| quote(&substitute(a))).collect::<Result<_>>()?;
-        for a in &spec.extra_args {
+        let mut argv: Vec<String> = command.unwrap_or(&spec.interactive).iter().map(|a| quote(&substitute(a))).collect::<Result<_>>()?;
+        for a in spec.extra_args.iter().filter(|_| command.is_none()) {
             argv.push(quote(a)?);
         }
-        if req.prompt.is_some() && spec.prompt_mode == PromptMode::Arg {
+        if req.prompt.is_some() && spec.prompt_mode == PromptMode::Arg && command.is_none() {
             argv.push(format!("\"$(cat {})\"", quote(prompt_file.to_str().context("non-UTF-8 path")?)?));
         }
 
