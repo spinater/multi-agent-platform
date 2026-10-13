@@ -67,6 +67,13 @@ pub fn router(hub: Arc<Hub>) -> Router {
         .route("/projects/{slug}/feedback", post(projects::feedback))
         .route("/projects/{slug}/fit", post(projects::fit))
         .route("/projects/{slug}/decisions", get(projects::decisions))
+        // ---- orchestrator decisions (decisions.rs; not Reflex decisions)
+        .route("/tasks/{id}/trace", get(task_trace))
+        .route("/decisions/model", get(decision_model))
+        .route("/decisions/edges", get(decision_edges))
+        .route("/decisions/latest", get(decision_latest))
+        .route("/orchestrator/step", post(orchestrator_step))
+        // ----
         .route("/ws", get(ws::handler))
         .layer(middleware::from_fn_with_state(hub.clone(), require_token))
         .with_state(hub.clone());
@@ -328,6 +335,56 @@ async fn set_orchestrator(State(hub): State<Arc<Hub>>, Json(body): Json<SetOrche
     let word = if body.running { "started" } else { "paused" };
     hub.event(Level::Info, "orchestrator", None, None, format!("Orchestrator {word}")).await;
     Ok(Json(json!(hub.orchestrator_status().await)))
+}
+
+// ---- orchestrator decisions (decisions.rs): per-task traces, the decision graph, edge counts, single steps
+
+#[derive(Deserialize)]
+struct TraceQuery {
+    limit: Option<i64>,
+}
+
+/// The task's `decision.*` events, newest first.
+async fn task_trace(State(hub): State<Arc<Hub>>, UrlPath(id): UrlPath<i64>, Query(q): Query<TraceQuery>) -> ApiResult<Vec<Event>> {
+    hub.store.task(id).await?.ok_or_else(|| not_found("task"))?;
+    Ok(Json(hub.store.decision_events(id, q.limit.unwrap_or(200).clamp(1, 2000)).await?))
+}
+
+async fn decision_model(State(hub): State<Arc<Hub>>) -> ApiResult<crate::model::DecisionModel> {
+    Ok(Json(crate::decisions::model(&hub, crate::orchestrator::TICK.as_secs())))
+}
+
+/// `project` absent: every task; empty: the default workspace; else that project's tasks.
+#[derive(Deserialize)]
+struct DecisionQuery {
+    since: Option<chrono::DateTime<chrono::Utc>>,
+    project: Option<String>,
+}
+
+/// How often each edge was taken since `since` (default: the last 24 hours).
+async fn decision_edges(State(hub): State<Arc<Hub>>, Query(q): Query<DecisionQuery>) -> ApiResult<crate::model::DecisionCounts> {
+    let since = q.since.unwrap_or_else(|| chrono::Utc::now() - chrono::Duration::hours(24));
+    Ok(Json(crate::decisions::counts(&hub, since, q.project.as_deref()).await?))
+}
+
+/// The newest decision event of each task.
+async fn decision_latest(State(hub): State<Arc<Hub>>, Query(q): Query<DecisionQuery>) -> ApiResult<Vec<Event>> {
+    Ok(Json(hub.store.latest_decisions(q.project.as_deref()).await?))
+}
+
+/// Runs exactly one orchestrator tick while it is paused and returns the decisions that tick made. Verify, audit and
+/// post_done run in the background after a tick, so their decisions arrive later as events.
+async fn orchestrator_step(State(hub): State<Arc<Hub>>) -> ApiResult<crate::model::StepResult> {
+    if hub.orchestrator_running() {
+        return Err(ApiError(StatusCode::CONFLICT, "the orchestrator is running; pause it to step".into()));
+    }
+    let before = hub.store.last_event_id().await?;
+    if !hub.step.step(std::time::Duration::from_secs(60)).await {
+        return Err(ApiError(StatusCode::GATEWAY_TIMEOUT, "the orchestrator did not finish a tick within 60s".into()));
+    }
+    let decisions = hub.store.decision_events_after(before).await?;
+    hub.event(Level::Info, "orchestrator.step", None, None, format!("Stepped one tick: {} decisions", decisions.len())).await;
+    Ok(Json(crate::model::StepResult { decisions }))
 }
 
 #[cfg(test)]

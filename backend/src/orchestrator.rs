@@ -12,11 +12,12 @@ use chrono::Utc;
 use serde::Deserialize;
 use tokio::process::Command;
 
+use crate::decisions::{self as dec, Kind, record};
 use crate::detect::EndDecision;
 use crate::hub::{Hub, LaunchRequest, quote};
 use crate::model::{Level, Role, SessionState, Task, TaskStatus};
 
-const TICK: Duration = Duration::from_secs(5);
+pub(crate) const TICK: Duration = Duration::from_secs(5);
 const OUTPUT_TAIL: usize = 4000;
 
 #[derive(Debug, Deserialize)]
@@ -34,13 +35,18 @@ pub struct Orchestrator {
 
 pub async fn run(hub: Arc<Hub>) {
     let mut orch = Orchestrator::new(hub);
+    let mut step = false;
     loop {
-        if orch.hub.orchestrator_running()
+        if (step || orch.hub.orchestrator_running())
             && let Err(err) = orch.tick().await
         {
             tracing::error!("orchestrator tick failed: {err:#}");
         }
-        tokio::time::sleep(TICK).await;
+        if step {
+            orch.hub.step.finished();
+        }
+        // A step request (`POST /api/orchestrator/step`) ends the sleep and runs one tick, paused or not.
+        step = orch.hub.step.sleep(TICK).await;
     }
 }
 
@@ -98,6 +104,7 @@ impl Orchestrator {
             if let Some(dead) = deps.iter().find(|d| matches!(d.status, TaskStatus::Failed | TaskStatus::Cancelled)) {
                 let note = format!("Blocked: dependency #{} {}", dead.id, dead.status.as_str());
                 if task.result.as_deref() != Some(note.as_str()) {
+                    record(&self.hub, Kind::READY_BLOCKED, task, format!("dependency #{} {}", dead.id, dead.status.as_str())).await;
                     let mut t = task.clone();
                     t.result = Some(note);
                     self.hub.put_task(&mut t).await?;
@@ -108,6 +115,7 @@ impl Orchestrator {
             if missing || deps.iter().any(|d| d.status != TaskStatus::Done) {
                 continue;
             }
+            record(&self.hub, Kind::READY_GO, task, dec::ready_detail(task, active, self.hub.config.orchestrator.max_parallel)).await;
             if self.start(task.clone()).await? {
                 active += 1;
             }
@@ -153,11 +161,13 @@ impl Orchestrator {
         let Some(provider) = self.pick_provider(&task) else {
             let note = "Waiting: no provider is available (missing binary, quota or auth cooldown)".to_string();
             if task.result.as_deref() != Some(note.as_str()) {
+                record(&self.hub, Kind::PICK_NONE, &task, dec::pick_detail(&self.hub, &task, None)).await;
                 task.result = Some(note);
                 self.hub.put_task(&mut task).await?;
             }
             return Ok(false);
         };
+        record(&self.hub, Kind::PICK_CHOSEN, &task, dec::pick_detail(&self.hub, &task, Some(&provider))).await;
         let spec = self.hub.spec(&provider)?;
         // A model only carries over when it belongs to the chosen provider.
         let model = task.model.clone().filter(|m| spec.models.contains(m));
@@ -172,6 +182,8 @@ impl Orchestrator {
                     self.hub.event(Level::Warning, "task.workspace", None, Some(task.id), format!("Workspace not updated: {warning}")).await;
                 }
                 Err(err) => {
+                    record(&self.hub, Kind::LAUNCH_ERROR, &task, format!("could not prepare the {slug} workspace: {err:#}")).await;
+                    record(&self.hub, Kind::RETRY_FAILED, &task, "workspace error · no retry").await;
                     task.attempts -= 1;
                     task.result = Some(format!("Could not prepare the {slug} workspace: {err:#}"));
                     task.status = TaskStatus::Failed;
@@ -196,6 +208,7 @@ impl Orchestrator {
                 task.session = Some(s.name.clone());
                 task.result = None;
                 self.hub.put_task(&mut task).await?;
+                record(&self.hub, Kind::LAUNCH_STARTED, &task, format!("hub.launch {} · {provider} ({}) · attempt {}", s.name, s.model, task.attempts)).await;
                 self.hub
                     .event(Level::Info, "task.started", Some(&s.name), Some(task.id), format!("Task #{} attempt {} on {provider} ({})", task.id, task.attempts, s.model))
                     .await;
@@ -204,10 +217,15 @@ impl Orchestrator {
             Err(err) => {
                 let reason = format!("Could not start {provider}: {err:#}");
                 self.hub.event(Level::Error, "task.start_failed", None, Some(task.id), &reason).await;
+                record(&self.hub, Kind::LAUNCH_ERROR, &task, format!("{reason} · {provider} cools down 5m")).await;
                 self.hub.cool_down(&provider, Utc::now() + chrono::Duration::minutes(5));
                 task.result = Some(reason);
+                let used = format!("attempt {} of {} used", task.attempts, self.hub.config.orchestrator.max_attempts);
                 if task.attempts >= self.hub.config.orchestrator.max_attempts {
+                    record(&self.hub, Kind::RETRY_FAILED, &task, used).await;
                     task.status = TaskStatus::Failed;
+                } else {
+                    record(&self.hub, Kind::RETRY_AGAIN, &task, used).await;
                 }
                 self.hub.put_task(&mut task).await?;
                 Ok(false)
@@ -217,6 +235,7 @@ impl Orchestrator {
 
     async fn check_running(&self, task: Task) -> Result<()> {
         let Some(name) = task.session.clone() else {
+            record(&self.hub, Kind::WATCH_LOST, &task, "task is running but has no session").await;
             return self.retry_or_fail(task, "Running without a session").await;
         };
         let result_path = self.hub.result_file(&name);
@@ -228,6 +247,7 @@ impl Orchestrator {
                 Err(_) => return Ok(()),
             };
             if result.status == "done" {
+                record(&self.hub, Kind::WATCH_DONE, &task, format!("$MAP_RESULT_FILE status done · {}", dec::last_line(&result.summary))).await;
                 let mut task = task;
                 task.status = TaskStatus::Verifying;
                 task.result = Some(result.summary);
@@ -236,20 +256,26 @@ impl Orchestrator {
                 self.spawn_finish(task);
                 return Ok(());
             }
+            record(&self.hub, Kind::WATCH_FAILED, &task, format!("$MAP_RESULT_FILE status {} · {}", result.status, dec::last_line(&result.summary))).await;
             return self.retry_or_fail(task, &format!("Agent reported failure: {}", result.summary)).await;
         }
 
         let session = self.hub.store.session(&name).await?;
         match session.as_ref().map(|s| s.state) {
-            None | Some(SessionState::Exited) => self.retry_or_fail(task, "The session ended without writing a result file").await,
+            None | Some(SessionState::Exited) => {
+                record(&self.hub, Kind::WATCH_EXITED, &task, format!("session {name} exited · no $MAP_RESULT_FILE")).await;
+                self.retry_or_fail(task, "The session ended without writing a result file").await
+            }
             Some(SessionState::NeedsAuth) => {
                 let provider = session.map(|s| s.provider).unwrap_or_default();
+                record(&self.hub, Kind::WATCH_AUTH, &task, format!("session {name} needs_auth · {provider} sign-in")).await;
                 self.retry_or_fail(task, &format!("{provider} needs a new sign-in; moving to another provider")).await
             }
             _ => {
                 let limit = chrono::Duration::minutes(self.hub.config.orchestrator.task_timeout_minutes as i64);
                 let started = session.map_or(task.updated_at, |s| s.created_at);
                 if Utc::now() - started > limit {
+                    record(&self.hub, Kind::WATCH_TIMEOUT, &task, format!("running longer than task_timeout {}m", limit.num_minutes())).await;
                     self.retry_or_fail(task, "Timed out").await
                 } else {
                     Ok(())
@@ -275,6 +301,7 @@ impl Orchestrator {
                 EndDecision::End => {}
                 kept => {
                     let why = if kept == EndDecision::KeepInput { "a person is typing" } else { "a client is attached" };
+                    record(&self.hub, Kind::RETRY_KEPT, &task, format!("{why} · session {name} left alone")).await;
                     self.hub.event(Level::Warning, "task.kept", Some(&name), Some(task.id), format!("{reason}, but {why}; leaving the session alone")).await;
                     return Ok(());
                 }
@@ -282,10 +309,13 @@ impl Orchestrator {
         }
         let headline = reason.lines().next().unwrap_or_default().chars().take(300).collect::<String>();
         task.result = Some(reason);
+        let used = format!("attempt {} of {} used", task.attempts, self.hub.config.orchestrator.max_attempts);
         if task.attempts < self.hub.config.orchestrator.max_attempts {
+            record(&self.hub, Kind::RETRY_AGAIN, &task, format!("{used} · failure goes into the next prompt")).await;
             task.status = TaskStatus::Pending;
             self.hub.event(Level::Warning, "task.retry", task.session.as_deref(), Some(task.id), format!("Retrying: {headline}")).await;
         } else {
+            record(&self.hub, Kind::RETRY_FAILED, &task, used).await;
             task.status = TaskStatus::Failed;
             self.hub.event(Level::Error, "task.failed", task.session.as_deref(), Some(task.id), format!("Failed: {headline}")).await;
         }
@@ -314,24 +344,42 @@ impl Orchestrator {
         let dir = hub.work_dir(task.project.as_deref());
 
         if task.status == TaskStatus::Verifying {
-            for command in &cfg.verify {
+            for (i, command) in cfg.verify.iter().enumerate() {
+                let of = format!("{} of {}", i + 1, cfg.verify.len());
+                record(hub, Kind::VERIFY_CMD_START, &task, format!("`{command}` · {of}")).await;
+                let started = std::time::Instant::now();
                 let (ok, output) = shell(hub, &dir, command, Duration::from_secs(30 * 60)).await?;
                 if !ok {
+                    record(hub, Kind::VERIFY_FAIL, &task, format!("`{command}` failed · {of} · {}", dec::last_line(&output))).await;
                     return self.retry_or_fail(task, &format!("`{command}` failed:\n{output}")).await;
                 }
+                record(hub, Kind::VERIFY_CMD_PASS, &task, format!("`{command}` exit 0 · {of} · {}", dec::secs(started.elapsed()))).await;
             }
+            record(hub, Kind::VERIFY_PASS, &task, if cfg.verify.is_empty() { "no verify commands".to_string() } else { format!("all {} exit 0", cfg.verify.len()) }).await;
             if cfg.audit.enabled {
                 task.status = TaskStatus::Auditing;
                 hub.put_task(&mut task).await?;
+            } else {
+                record(hub, Kind::AUDIT_OFF, &task, "audit.enabled = false").await;
             }
         }
 
         if task.status == TaskStatus::Auditing {
             match self.audit(&task).await? {
-                Verdict::Pass(by) => hub.event(Level::Success, "task.audit_pass", task.session.as_deref(), Some(task.id), format!("Audit passed ({by})")).await,
-                Verdict::Fail(reason) => return self.retry_or_fail(task, &format!("Audit failed: {reason}")).await,
-                Verdict::Unavailable if cfg.audit.required => return self.retry_or_fail(task, "No auditor was available and audit is required").await,
+                Verdict::Pass(by) => {
+                    record(hub, Kind::AUDIT_PASS, &task, format!("{by}: VERDICT: PASS")).await;
+                    hub.event(Level::Success, "task.audit_pass", task.session.as_deref(), Some(task.id), format!("Audit passed ({by})")).await
+                }
+                Verdict::Fail(reason) => {
+                    record(hub, Kind::AUDIT_FAIL, &task, format!("VERDICT: FAIL · {}", dec::last_line(&reason))).await;
+                    return self.retry_or_fail(task, &format!("Audit failed: {reason}")).await;
+                }
+                Verdict::Unavailable if cfg.audit.required => {
+                    record(hub, Kind::AUDIT_NO_AUDITOR, &task, "no auditor in audit.chain answered · audit.required = true").await;
+                    return self.retry_or_fail(task, "No auditor was available and audit is required").await;
+                }
                 Verdict::Unavailable => {
+                    record(hub, Kind::AUDIT_SKIPPED, &task, "no auditor in audit.chain answered · audit.required = false").await;
                     hub.event(Level::Warning, "task.audit_skipped", task.session.as_deref(), Some(task.id), "No auditor available; accepted on verification").await
                 }
             };
@@ -341,6 +389,7 @@ impl Orchestrator {
             let command = template.replace("{id}", &task.id.to_string()).replace("{title}", &quote(&task.title)?);
             let (ok, output) = shell(hub, &dir, &command, Duration::from_secs(10 * 60)).await?;
             if !ok {
+                record(hub, Kind::POST_FAIL, &task, format!("`{command}` failed · {}", dec::last_line(&output))).await;
                 // The agent's work passed; a failing hook needs a person, not another agent run.
                 task.status = TaskStatus::Failed;
                 task.result = Some(format!("post_done `{command}` failed:\n{output}"));
@@ -348,13 +397,18 @@ impl Orchestrator {
                 hub.event(Level::Error, "task.post_done_failed", task.session.as_deref(), Some(task.id), format!("`{command}` failed")).await;
                 return Ok(());
             }
+            record(hub, Kind::POST_CMD_PASS, &task, format!("`{command}` exit 0")).await;
         }
+        record(hub, Kind::POST_PASS, &task, if cfg.post_done.is_empty() { "no post_done hooks".to_string() } else { format!("all {} hooks exit 0", cfg.post_done.len()) }).await;
 
         if let Some(name) = task.session.clone()
             && hub.store.session(&name).await?.is_some_and(|s| s.state.is_live())
             && hub.close_session(&name, false, "Task done").await? != EndDecision::End
         {
             hub.event(Level::Info, "task.kept", Some(&name), Some(task.id), "Task done; session left open because a person is using it").await;
+            record(hub, Kind::END_KEPT, &task, format!("a client is attached or the input line has text · {name} left open")).await;
+        } else {
+            record(hub, Kind::END_CLOSED, &task, "no client attached · input line empty · worker session ended").await;
         }
         task.status = TaskStatus::Done;
         hub.put_task(&mut task).await?;
@@ -376,10 +430,12 @@ impl Orchestrator {
         );
         for provider in &hub.config.orchestrator.audit.chain {
             if !hub.provider_available(provider) || hub.cooldown_until(provider).is_some() {
+                record(hub, Kind::AUDIT_UNAVAILABLE, task, format!("{provider} · not found or cooling down")).await;
                 continue;
             }
             let spec = hub.spec(provider)?;
             if spec.headless.is_empty() {
+                record(hub, Kind::AUDIT_UNAVAILABLE, task, format!("{provider} · no headless command")).await;
                 continue;
             }
             let argv: Vec<String> = spec
@@ -390,6 +446,7 @@ impl Orchestrator {
             let mut cmd = Command::new(&argv[0]);
             cmd.args(&argv[1..]).current_dir(hub.work_dir(task.project.as_deref())).envs(&hub.config.workspace.env);
             hub.event(Level::Info, "task.audit", None, Some(task.id), format!("Auditing with {provider}")).await;
+            record(hub, Kind::AUDIT_ASK, task, format!("{provider} · reviewing git status, git diff, git log -5")).await;
             let (ok, output) = run_captured(cmd, Duration::from_secs(hub.config.orchestrator.audit.timeout_secs)).await?;
             if let Some(line) = output.lines().rev().find(|l| l.trim_start().starts_with("VERDICT:")) {
                 let verdict = line.trim_start().trim_start_matches("VERDICT:").trim();
@@ -404,6 +461,7 @@ impl Orchestrator {
                 hub.cool_down(provider, Utc::now() + chrono::Duration::minutes(hub.config.orchestrator.provider_cooldown_minutes as i64));
             }
             hub.event(Level::Warning, "task.audit_unavailable", None, Some(task.id), format!("{provider} gave no verdict; trying the next auditor")).await;
+            record(hub, Kind::AUDIT_UNAVAILABLE, task, format!("{provider} · no VERDICT line")).await;
         }
         Ok(Verdict::Unavailable)
     }
@@ -560,6 +618,103 @@ mod tests {
         assert!(prompt.contains("$MAP_DECIDE_URL"), "{prompt}");
     }
 
+    // ---- orchestrator decisions
+
+    /// The task's decision kinds, oldest first, without the `decision.` prefix.
+    async fn decisions_of(hub: &Hub, id: i64) -> Vec<String> {
+        let mut kinds: Vec<String> = hub.store.decision_events(id, 500).await.unwrap().into_iter().map(|e| e.kind.trim_start_matches("decision.").to_string()).collect();
+        kinds.reverse();
+        kinds
+    }
+
+    #[tokio::test]
+    async fn a_passing_task_records_every_decision_on_the_happy_path() {
+        let (hub, _term, _dir) = setup("verify = [\"true\", \"echo checked\"]").await;
+        let t = hub.store.create_task(new_task("a", vec![])).await.unwrap();
+        let mut orch = Orchestrator::new(hub.clone());
+        orch.tick().await.unwrap();
+        assert_eq!(decisions_of(&hub, t.id).await, ["ready.go", "pick.chosen", "launch.started"]);
+        let session = hub.store.task(t.id).await.unwrap().unwrap().session.unwrap();
+        std::fs::write(hub.result_file(&session), r#"{"status":"done","summary":"did a"}"#).unwrap();
+        settle(&mut orch).await;
+        assert_eq!(hub.store.task(t.id).await.unwrap().unwrap().status, TaskStatus::Done);
+        assert_eq!(
+            decisions_of(&hub, t.id).await,
+            [
+                "ready.go",
+                "pick.chosen",
+                "launch.started",
+                "watch.done",
+                "verify.cmd_start",
+                "verify.cmd_pass",
+                "verify.cmd_start",
+                "verify.cmd_pass",
+                "verify.pass",
+                "audit.off",
+                "post.pass",
+                "end.closed"
+            ]
+        );
+        let trace = hub.store.decision_events(t.id, 500).await.unwrap();
+        let find = |kind: &str| trace.iter().find(|e| e.kind == kind).unwrap().message.clone();
+        assert_eq!(find("decision.pick.chosen"), "order claude → claude");
+        assert_eq!(find("decision.ready.go"), "no dependencies · slot 1/1");
+        assert!(trace.iter().any(|e| e.kind == "decision.verify.cmd_pass" && e.message.starts_with("`echo checked` exit 0 · 2 of 2")), "{trace:?}");
+        // Every recorded kind is in the model, so the dashboard can place it on an edge.
+        assert!(trace.iter().all(|e| crate::decisions::ALL.iter().any(|k| k.kind == e.kind)));
+        let counts = crate::decisions::counts(&hub, Utc::now() - chrono::Duration::hours(1), Some("")).await.unwrap();
+        let n = |from, to| counts.edges.iter().find(|e| e.from == from && e.to == to).map_or(0, |e| e.count);
+        use crate::model::DecisionNode as N;
+        assert_eq!((n(N::Ready, N::Pick), n(N::Verify, N::Audit), n(N::End, N::Done), n(N::Verify, N::Verify)), (1, 1, 1, 0));
+        assert!(crate::decisions::counts(&hub, Utc::now() - chrono::Duration::hours(1), Some("other")).await.unwrap().edges.is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_failing_verify_records_retry_then_failure() {
+        let (hub, _term, _dir) = setup("verify = [\"echo broken-test; false\"]\nmax_attempts = 2").await;
+        let t = hub.store.create_task(new_task("a", vec![])).await.unwrap();
+        let mut orch = Orchestrator::new(hub.clone());
+        for _ in 0..2 {
+            orch.tick().await.unwrap();
+            let s = hub.store.task(t.id).await.unwrap().unwrap().session.unwrap();
+            std::fs::write(hub.result_file(&s), r#"{"status":"done","summary":"x"}"#).unwrap();
+            settle(&mut orch).await;
+        }
+        assert_eq!(hub.store.task(t.id).await.unwrap().unwrap().status, TaskStatus::Failed);
+        let attempt = ["ready.go", "pick.chosen", "launch.started", "watch.done", "verify.cmd_start", "verify.fail"];
+        let mut expected: Vec<&str> = attempt.to_vec();
+        expected.push("retry.again");
+        expected.extend(attempt);
+        expected.push("retry.failed");
+        assert_eq!(decisions_of(&hub, t.id).await, expected);
+        let trace = hub.store.decision_events(t.id, 500).await.unwrap();
+        assert_eq!(trace[0].message, "attempt 2 of 2 used");
+        assert!(trace[1].message.starts_with("`echo broken-test; false` failed · 1 of 1 · broken-test"), "{}", trace[1].message);
+    }
+
+    #[tokio::test]
+    async fn a_task_parked_at_a_branch_records_it_once() {
+        let (hub, _term, _dir) = setup("").await;
+        let t = hub.store.create_task(NewTask { provider: Some("nobody".into()), ..new_task("a", vec![]) }).await.unwrap();
+        let mut orch = Orchestrator::new(hub.clone());
+        for _ in 0..3 {
+            orch.tick().await.unwrap();
+        }
+        assert_eq!(decisions_of(&hub, t.id).await, ["ready.go", "pick.none"]);
+        assert_eq!(hub.store.decision_events(t.id, 1).await.unwrap()[0].message, "pinned: nobody · nobody not found on PATH");
+    }
+
+    #[tokio::test]
+    async fn a_step_runs_one_tick_of_the_paused_loop() {
+        let (hub, _term, _dir) = setup("").await;
+        assert!(!hub.orchestrator_running());
+        let t = hub.store.create_task(new_task("a", vec![])).await.unwrap();
+        let looping = tokio::spawn(run(hub.clone()));
+        assert!(hub.step.step(Duration::from_secs(10)).await);
+        assert_eq!(hub.store.task(t.id).await.unwrap().unwrap().status, TaskStatus::Running);
+        looping.abort();
+    }
+
     #[tokio::test]
     async fn failed_dependency_blocks_dependents() {
         let (hub, _term, _dir) = setup("").await;
@@ -570,5 +725,6 @@ mod tests {
         let b = hub.store.task(b.id).await.unwrap().unwrap();
         assert_eq!(b.status, TaskStatus::Pending);
         assert!(b.result.unwrap().starts_with("Blocked"));
+        assert_eq!(decisions_of(&hub, b.id).await, ["ready.blocked"]);
     }
 }

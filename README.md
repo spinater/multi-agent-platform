@@ -129,6 +129,34 @@ A task is a title and a prompt. The orchestrator appends a protocol footer that 
 Pin a task to a provider (and model) or leave it open for failover. Tasks with `depends_on` wait until those tasks
 are `done`. If a dependency fails or is cancelled, its dependents show as blocked.
 
+## Orchestrator decisions
+
+Every branch the orchestrator takes for a task is an event `decision.<node>.<outcome>` with `task_id` set and the
+detail it looked at as the message (`pinned: claude → claude`, `no dependencies · slot 2/4`,
+`` `bun test` failed · 1 of 3 · 2 failing ``). The Decisions screen (`#decisions`, `#decisions/<task id>`) draws them as
+a graph; `backend/src/decisions.rs` holds the kinds, the edge each takes and the rule text. A decision identical to
+one of the task's last two is not logged again, so a task parked at a branch does not log every tick.
+
+| Kind | Edge | Emitted in |
+| --- | --- | --- |
+| `decision.ready.go` | ready → pick | `tick`: dependencies done, slot free |
+| `decision.ready.blocked` | ready → blocked | `tick`: a dependency failed or was cancelled |
+| `decision.pick.chosen` / `.none` | pick → launch / stays | `start` (`pick_provider`); `none` while no provider is available |
+| `decision.launch.started` / `.error` | launch → watch / retry | `start` (`hub.launch`, project workspace sync) |
+| `decision.watch.done` | watch → verify | `check_running`: result file says done |
+| `decision.watch.failed` / `.exited` / `.auth` / `.timeout` / `.lost` | watch → retry | `check_running` |
+| `decision.verify.cmd_start` / `.cmd_pass` | stays (progress) | `finish`: each `verify` command, `` `cmd` · 2 of 4 `` |
+| `decision.verify.pass` / `.fail` | verify → audit / retry | `finish` |
+| `decision.audit.off` / `.pass` / `.skipped` | audit → post | `finish` (`audit.enabled`, verdict, no auditor and not required) |
+| `decision.audit.fail` / `.no_auditor` | audit → retry | `finish` |
+| `decision.audit.ask` / `.unavailable` | stays (progress) | `audit`: each auditor of `audit.chain` |
+| `decision.post.cmd_pass` | stays (progress) | `finish`: each `post_done` hook |
+| `decision.post.pass` / `.fail` | post → end / failed | `finish` |
+| `decision.end.closed` / `.kept` | end → done | `finish` (`detect::end_decision` via `close_session`) |
+| `decision.retry.again` / `.failed` / `.kept` | retry → ready / failed / watch | `retry_or_fail`, and `start` after a launch error |
+
+The older `task.*` events (`task.started`, `task.retry`, `task.done`…) are still sent.
+
 ## API
 
 All routes are under `/api`. When `server.api_token` is set, send `Authorization: Bearer <token>`.
@@ -155,6 +183,11 @@ All routes are under `/api`. When `server.api_token` is set, send `Authorization
 | POST | `/projects/{slug}/fit` | Labeled `cases`, `rho`, `apply`: fit the threshold |
 | GET | `/projects/{slug}/decisions?limit=` | Decision log, newest first |
 | POST | `/projects/{slug}/reflex/restart`, GET `…/reflex/log` | Restart Reflex, read its log |
+| GET | `/tasks/{id}/trace?limit=` | The task's orchestrator decisions (`decision.*` events), newest first |
+| GET | `/decisions/model` | The decision graph (nodes with their rules, edges, event kinds) and the config its rules read |
+| GET | `/decisions/edges?since=&project=` | Times each edge was taken since `since` (default 24 h); `project` empty = default workspace, absent = all |
+| GET | `/decisions/latest?project=` | The newest decision of every task |
+| POST | `/orchestrator/step` | Run exactly one orchestrator tick while it is paused (409 while running); returns that tick's decisions |
 | GET | `/ws` | Pushes `ServerMessage` JSON (see `frontend/lib/generated/ServerMessage.ts`) |
 
 Git: `git clone http://127.0.0.1:4400/git/<slug>/code.git` (or `corpus.git`). With `api_token` set, git asks for a
