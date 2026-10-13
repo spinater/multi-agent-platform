@@ -18,6 +18,8 @@ pub struct Config {
     pub orchestrator: OrchestratorConfig,
     #[serde(default)]
     pub reflex: ReflexConfig,
+    #[serde(default)]
+    pub skills: SkillsConfig,
     /// Overrides merged onto the built-in `claude`, `codex` and `gemini` specs; new names add providers.
     #[serde(default, rename = "providers")]
     provider_overrides: BTreeMap<String, ProviderOverride>,
@@ -166,6 +168,57 @@ pub struct ReflexConfig {
 impl Default for ReflexConfig {
     fn default() -> Self {
         Self { binary: "reflex".into(), port_base: 7400, api_key_env: "ANTHROPIC_API_KEY".into(), api_model: "claude-haiku-5-5".into() }
+    }
+}
+
+/// Where the Skills screen looks for skills, context files and evidence of their use. Everything here is read only,
+/// except `.claude/settings.local.json` inside a workspace, which enabling or disabling a skill writes.
+/// `~` expands to `$HOME`; `*_project_dirs` are relative to each workspace.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct SkillsConfig {
+    /// Context file each provider reads at session start, relative to the workspace.
+    pub context_files: BTreeMap<String, String>,
+    /// Skill folders inside a workspace that Claude Code loads (`<dir>/<name>/SKILL.md`).
+    pub claude_project_dirs: Vec<PathBuf>,
+    /// Skill folders inside a workspace that Codex loads.
+    pub codex_project_dirs: Vec<PathBuf>,
+    /// Personal Claude Code skills, searched recursively (claude.ai-synced skills live under `synced/`).
+    pub claude_user_dirs: Vec<PathBuf>,
+    /// Claude Code plugins: every folder with `.claude-plugin/plugin.json` below these is a plugin, and its
+    /// `skills/` folder holds its skills. Marketplace catalogs count only for plugins `enabledPlugins` turns on.
+    pub claude_plugin_dirs: Vec<PathBuf>,
+    /// Personal Codex skills.
+    pub codex_user_dirs: Vec<PathBuf>,
+    /// Claude Code's user settings: `enabledPlugins` and permission rules that disable skills everywhere.
+    pub claude_settings: PathBuf,
+    /// Claude Code's session transcripts (`<dir>/<workspace path with non-alphanumerics as ->/*.jsonl`): the
+    /// evidence for load counts.
+    pub claude_transcripts: PathBuf,
+}
+
+impl Default for SkillsConfig {
+    fn default() -> Self {
+        let context_files = [("claude", "CLAUDE.md"), ("codex", "AGENTS.md"), ("gemini", "GEMINI.md")].into_iter().map(|(k, v)| (k.to_string(), v.to_string())).collect();
+        Self {
+            context_files,
+            claude_project_dirs: vec![".claude/skills".into()],
+            codex_project_dirs: vec![".agents/skills".into()],
+            claude_user_dirs: vec!["~/.claude/skills".into()],
+            claude_plugin_dirs: vec!["~/.claude/plugins".into()],
+            codex_user_dirs: vec!["~/.codex/skills".into()],
+            claude_settings: "~/.claude/settings.json".into(),
+            claude_transcripts: "~/.claude/projects".into(),
+        }
+    }
+}
+
+/// `~` or `~/…` becomes `$HOME/…`; other paths are unchanged.
+pub fn expand_home(p: &Path) -> PathBuf {
+    let Ok(rest) = p.strip_prefix("~") else { return p.to_path_buf() };
+    match std::env::var_os("HOME") {
+        Some(home) => PathBuf::from(home).join(rest),
+        None => p.to_path_buf(),
     }
 }
 
@@ -331,6 +384,16 @@ impl Config {
         config.server.static_dir = resolve(&config.server.static_dir);
         config.server.data_dir = resolve(&config.server.data_dir);
         config.workspace.dir = resolve(&config.workspace.dir);
+        let home = |p: &Path| resolve(&expand_home(p));
+        let skills = &mut config.skills;
+        for dir in skills.claude_user_dirs.iter_mut().chain(skills.claude_plugin_dirs.iter_mut()).chain(skills.codex_user_dirs.iter_mut()) {
+            *dir = home(dir);
+        }
+        skills.claude_settings = home(&skills.claude_settings);
+        skills.claude_transcripts = home(&skills.claude_transcripts);
+        if let Some(dir) = skills.claude_project_dirs.iter().chain(&skills.codex_project_dirs).find(|d| d.is_absolute() || d.components().any(|c| c == std::path::Component::ParentDir)) {
+            bail!("skills project dir `{}` must be relative to the workspace and stay inside it", dir.display());
+        }
         if config.reflex.binary.contains('/') {
             config.reflex.binary = resolve(Path::new(&config.reflex.binary)).to_string_lossy().into_owned();
         }
@@ -366,6 +429,16 @@ mod tests {
         assert_eq!(c.server.static_dir, PathBuf::from("/srv/map/frontend/out"));
         assert!(c.orchestrator.audit.enabled);
         assert_eq!(c.reflex.port_base, 7400);
+        assert_eq!(c.skills.context_files["codex"], "AGENTS.md");
+    }
+
+    #[test]
+    fn skills_paths_expand_home() {
+        let c = Config::parse("[workspace]\ndir = \"/r\"\n[skills]\nclaude_user_dirs = [\"~/sk\", \"rel\"]\n", Path::new("/etc/map")).unwrap();
+        let home = PathBuf::from(std::env::var_os("HOME").unwrap());
+        assert_eq!(c.skills.claude_user_dirs, vec![home.join("sk"), PathBuf::from("/etc/map/rel")]);
+        assert_eq!(c.skills.claude_transcripts, home.join(".claude/projects"));
+        assert!(Config::parse("[workspace]\ndir = \"/r\"\n[skills]\nclaude_project_dirs = [\"../x\"]\n", Path::new("/")).is_err());
     }
 
     #[test]

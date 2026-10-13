@@ -524,3 +524,115 @@ pub struct DecisionCounts {
 pub struct StepResult {
     pub decisions: Vec<Event>,
 }
+
+// ---- skills
+
+/// Where a skill file lives: the workspace, the user's home, or an installed plugin.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum SkillSource {
+    Project,
+    User,
+    Plugin,
+}
+
+/// A provider's context file in the workspace (CLAUDE.md, AGENTS.md, GEMINI.md…), read at session start.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct ContextFile {
+    pub provider: String,
+    /// The file name, relative to the workspace.
+    pub file: String,
+    pub path: String,
+    pub exists: bool,
+    pub lines: u32,
+    /// The first lines of prose (headings and imports skipped).
+    pub summary: String,
+    /// `@path` imports (Claude Code's syntax), e.g. `AGENTS.md` from a CLAUDE.md that is just `@AGENTS.md`.
+    pub imports: Vec<String>,
+    /// The other context files that import this one.
+    pub imported_by: Vec<String>,
+}
+
+/// One provider that can load a skill, and how.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct SkillLoad {
+    pub provider: String,
+    /// `native` (the provider's own skills folder), or e.g. `via AGENTS.md` when that context file points at the
+    /// skill: the agent reads it only if it follows the pointer.
+    pub how: String,
+}
+
+/// What the evidence on this machine says about a skill's use in this workspace.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct SkillUsage {
+    /// Times Claude loaded it (a `Skill` tool call, or `/name` typed) in this workspace's transcripts.
+    pub loads: u32,
+    pub loads_week: u32,
+    /// Distinct agent sessions that loaded it.
+    pub sessions: u32,
+    pub last_used: Option<DateTime<Utc>>,
+    /// MAP tasks during which it was loaded, from the session that ran each task.
+    #[ts(type = "number[]")]
+    pub task_ids: Vec<i64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct Skill {
+    /// The absolute path of its SKILL.md; the key for the other skills endpoints.
+    pub id: String,
+    pub name: String,
+    /// The name Claude's `Skill` tool and `/` menu use: `name`, `plugin:name`, or `anthropic-skills:name` for
+    /// skills synced from claude.ai.
+    pub invocation: String,
+    pub source: SkillSource,
+    pub plugin: Option<String>,
+    /// Whose skills folder it is in: `claude` or `codex`.
+    pub home: String,
+    pub description: String,
+    pub allowed_tools: Vec<String>,
+    /// For display: relative to the workspace, or with `~` for the home directory.
+    pub path: String,
+    pub loads_in: Vec<SkillLoad>,
+    /// False when a permission rule or `skillOverrides` entry in a Claude settings file turns it off here.
+    pub enabled: bool,
+    /// Whether the dashboard can switch it for this workspace (it writes `.claude/settings.local.json`).
+    pub can_toggle: bool,
+    /// Why it is off, or why it cannot be switched from here.
+    pub toggle_note: Option<String>,
+    /// False for `disable-model-invocation: true`: Claude runs it only when a person types `/name`.
+    pub model_invocable: bool,
+    /// False when nothing on this machine records its loads (Codex skills).
+    pub usage_known: bool,
+    pub usage: SkillUsage,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct SkillsOverview {
+    /// The project slug; `None` is `workspace.dir`.
+    pub project: Option<String>,
+    pub workspace: String,
+    pub contexts: Vec<ContextFile>,
+    pub skills: Vec<Skill>,
+    /// The transcript folder load counts were read from, when it exists.
+    pub transcripts: Option<String>,
+    pub transcript_files: u32,
+    /// Loads that named no skill found here (bundled or since-removed skills).
+    pub unmatched_loads: u32,
+    pub scanned_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct SkillFile {
+    pub id: String,
+    pub path: String,
+    pub content: String,
+    /// The file was longer than the limit and was cut.
+    pub truncated: bool,
+}

@@ -9,6 +9,7 @@ mod orchestrator;
 mod projects;
 mod reflex;
 mod repo;
+mod skills;
 mod store;
 mod terminal;
 mod watcher;

@@ -2,6 +2,7 @@
 
 mod git;
 mod projects;
+mod skills;
 mod ws;
 
 use std::sync::Arc;
@@ -74,6 +75,10 @@ pub fn router(hub: Arc<Hub>) -> Router {
         .route("/decisions/latest", get(decision_latest))
         .route("/orchestrator/step", post(orchestrator_step))
         // ----
+        // ---- skills: context files, skills and their use per workspace; enabling writes .claude/settings.local.json
+        .route("/skills", get(skills::overview))
+        .route("/skills/enabled", axum::routing::patch(skills::set_enabled))
+        .route("/skills/file", get(skills::file))
         .route("/ws", get(ws::handler))
         .layer(middleware::from_fn_with_state(hub.clone(), require_token))
         .with_state(hub.clone());
