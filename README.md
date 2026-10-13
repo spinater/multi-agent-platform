@@ -117,6 +117,31 @@ areas, links, timeline and 3D orbit. Clicking a node opens a card whose buttons 
 the task, the project; restart Reflex; start a session). Every number of the graph lives in `TUNING` at the top of
 `frontend/components/graph/layouts.ts`. Deep links: `#tasks`, `#sessions/<name>`, `#projects/<slug>`.
 
+### Skills (`#skills`, `#skills/<name>`)
+
+What each agent can load in the current project's workspace (`backend/src/skills.rs`; locations in `[skills]` of
+`map.toml`, all read only):
+
+- **Context files.** `CLAUDE.md`, `AGENTS.md`, `GEMINI.md`: line count, first prose lines, `@imports`.
+- **Skills.** `<workspace>/.claude/skills` and `~/.claude/skills` (including claude.ai-synced skills, invoked as
+  `anthropic-skills:<name>`), installed Claude Code plugins (every `.claude-plugin/plugin.json` below
+  `~/.claude/plugins`; marketplace catalogs count only for plugins `enabledPlugins` turns on), and Codex skills
+  (`<workspace>/.agents/skills`, `~/.codex/skills`). Claude loads its own natively; Codex or Gemini are listed for
+  a Claude skill only when their context file points at it ("via AGENTS.md"), since they read it only if they follow
+  that pointer.
+- **Enable/disable** is Claude Code's own mechanism, per workspace: MAP edits `<workspace>/.claude/settings.local.json`
+  (the file Claude's `/skills` menu writes), adding a `Skill(<name>)` rule to `permissions.deny` and, for
+  non-plugin skills, `skillOverrides: {"<name>": "off"}`; enabling removes them. Other keys are kept, and the file is
+  added to the workspace's `.git/info/exclude` so a `post_done` commit does not pick it up. A skill turned off in
+  `~/.claude/settings.json` or a committed `.claude/settings.json` is shown as off but not switchable here; Codex
+  skills have no per-project switch.
+- **Use.** Loads are `Skill` tool calls and typed `/name` commands in Claude Code's transcripts for the workspace
+  (`~/.claude/projects/<path with non-alphanumerics as ->/*.jsonl`). A transcript belongs to a MAP task when its
+  session name (MAP starts Claude with `--name <tmux session>`) is a run of that task, or, for unnamed sessions, when
+  exactly one Claude run of the project was alive at the time. Codex and Gemini loads are not recorded anywhere MAP
+  can read, so their skills show "use not recorded".
+- **Run as task** queues a task in the current project with an editable prompt that loads the skill.
+
 ## Writing tasks
 
 A task is a title and a prompt. The orchestrator appends a protocol footer that tells the worker:
@@ -155,6 +180,9 @@ All routes are under `/api`. When `server.api_token` is set, send `Authorization
 | POST | `/projects/{slug}/fit` | Labeled `cases`, `rho`, `apply`: fit the threshold |
 | GET | `/projects/{slug}/decisions?limit=` | Decision log, newest first |
 | POST | `/projects/{slug}/reflex/restart`, GET `…/reflex/log` | Restart Reflex, read its log |
+| GET | `/skills?project=` | Context files, skills (project, user, plugin; Claude and Codex) and their use in the project's workspace |
+| PATCH | `/skills/enabled` | `{"project", "skill": <id>, "enabled"}`: switch a Claude skill for that workspace |
+| GET | `/skills/file?project=&path=<id>` | A SKILL.md, only for ids the scanner itself returned |
 | GET | `/ws` | Pushes `ServerMessage` JSON (see `frontend/lib/generated/ServerMessage.ts`) |
 
 Git: `git clone http://127.0.0.1:4400/git/<slug>/code.git` (or `corpus.git`). With `api_token` set, git asks for a

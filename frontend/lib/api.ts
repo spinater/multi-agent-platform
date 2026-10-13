@@ -8,6 +8,8 @@ import type { Question } from "./generated/Question";
 import type { ReflexStatus } from "./generated/ReflexStatus";
 import type { RepoListing } from "./generated/RepoListing";
 import type { Session } from "./generated/Session";
+import type { SkillFile } from "./generated/SkillFile";
+import type { SkillsOverview } from "./generated/SkillsOverview";
 import type { Task } from "./generated/Task";
 
 const TOKEN_KEY = "map.apiToken";
@@ -95,6 +97,15 @@ export const api = {
   fit: (slug: string, body: { cases: { state: string; question: Question; expected: string | boolean }[]; rho: number; apply: boolean }) =>
     request<FitResult>("POST", `/projects/${slug}/fit`, body),
   decisions: (slug: string, limit = 200) => request<Decision[]>("GET", `/projects/${slug}/decisions?limit=${limit}`),
+
+  // ---- skills (Skills screen). `project: null` is the default workspace.
+  skills: (project: string | null) => request<SkillsOverview>("GET", `/skills?project=${encodeURIComponent(project ?? "")}`),
+  /** Writes the workspace's `.claude/settings.local.json`; returns the fresh overview. */
+  setSkillEnabled: (project: string | null, skill: string, enabled: boolean) =>
+    request<SkillsOverview>("PATCH", "/skills/enabled", { project: project ?? "", skill, enabled }),
+  /** Only ids the scanner returned are readable. */
+  skillFile: (project: string | null, id: string) =>
+    request<SkillFile>("GET", `/skills/file?project=${encodeURIComponent(project ?? "")}&path=${encodeURIComponent(id)}`),
 };
 
 export type RepoName = "code" | "corpus";

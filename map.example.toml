@@ -86,3 +86,18 @@ timeout_secs = 600
 # Used by projects whose fallback is "api"; the other fallbacks are the providers above, run headless.
 # api_key_env = "ANTHROPIC_API_KEY"
 # api_model = "claude-haiku-5-5"
+
+# The Skills screen: what each agent can load in a workspace, where it comes from, and which tasks used it.
+# MAP only reads these locations. The one file it writes is <workspace>/.claude/settings.local.json, when you
+# disable or enable a skill for a project (a `Skill(name)` deny rule, plus `skillOverrides` for non-plugin skills).
+# `~` expands to $HOME; *_project_dirs are relative to each workspace.
+[skills]
+# context_files = { claude = "CLAUDE.md", codex = "AGENTS.md", gemini = "GEMINI.md" }
+# claude_project_dirs = [".claude/skills"]
+# codex_project_dirs = [".agents/skills"]
+# claude_user_dirs = ["~/.claude/skills"]
+# claude_plugin_dirs = ["~/.claude/plugins"]
+# codex_user_dirs = ["~/.codex/skills"]
+# claude_settings = "~/.claude/settings.json"
+# Load counts come from Claude Code's session transcripts of the workspace.
+# claude_transcripts = "~/.claude/projects"
