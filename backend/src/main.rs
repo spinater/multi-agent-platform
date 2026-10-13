@@ -10,6 +10,7 @@ mod reflex;
 mod repo;
 mod store;
 mod terminal;
+mod usage;
 mod watcher;
 
 use std::net::SocketAddr;
@@ -84,6 +85,7 @@ async fn serve(config: Config) -> Result<()> {
     let hub = open(config).await?;
     tokio::spawn(watcher::run(hub.clone()));
     tokio::spawn(orchestrator::run(hub.clone()));
+    tokio::spawn(usage::run(hub.clone()));
     for project in hub.store.projects().await? {
         let hub = hub.clone();
         tokio::spawn(async move {

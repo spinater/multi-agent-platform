@@ -67,6 +67,10 @@ pub fn router(hub: Arc<Hub>) -> Router {
         .route("/projects/{slug}/feedback", post(projects::feedback))
         .route("/projects/{slug}/fit", post(projects::fit))
         .route("/projects/{slug}/decisions", get(projects::decisions))
+        // ---- usage: plan limits per provider (usage.rs)
+        .route("/usage", get(usage))
+        .route("/usage/refresh", post(refresh_usage))
+        // ----
         .route("/ws", get(ws::handler))
         .layer(middleware::from_fn_with_state(hub.clone(), require_token))
         .with_state(hub.clone());
@@ -328,6 +332,19 @@ async fn set_orchestrator(State(hub): State<Arc<Hub>>, Json(body): Json<SetOrche
     let word = if body.running { "started" } else { "paused" };
     hub.event(Level::Info, "orchestrator", None, None, format!("Orchestrator {word}")).await;
     Ok(Json(json!(hub.orchestrator_status().await)))
+}
+
+// ---- usage
+
+/// The latest reading (polled every `usage.interval_secs`).
+async fn usage(State(hub): State<Arc<Hub>>) -> Json<crate::model::UsageReport> {
+    Json(hub.usage.report())
+}
+
+/// Reads every provider now (a read in the last few seconds is returned as is). Takes a JSON body (`{}`) like the
+/// other state-changing routes, so a cross-site form cannot trigger it.
+async fn refresh_usage(State(hub): State<Arc<Hub>>, Json(_): Json<Value>) -> Json<crate::model::UsageReport> {
+    Json(crate::usage::refresh(&hub).await)
 }
 
 #[cfg(test)]

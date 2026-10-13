@@ -18,6 +18,8 @@ pub struct Config {
     pub orchestrator: OrchestratorConfig,
     #[serde(default)]
     pub reflex: ReflexConfig,
+    #[serde(default)]
+    pub usage: UsageConfig,
     /// Overrides merged onto the built-in `claude`, `codex` and `gemini` specs; new names add providers.
     #[serde(default, rename = "providers")]
     provider_overrides: BTreeMap<String, ProviderOverride>,
@@ -166,6 +168,63 @@ pub struct ReflexConfig {
 impl Default for ReflexConfig {
     fn default() -> Self {
         Self { binary: "reflex".into(), port_base: 7400, api_key_env: "ANTHROPIC_API_KEY".into(), api_model: "claude-haiku-5-5".into() }
+    }
+}
+
+/// Plan limits per provider account (`backend/src/usage.rs`), and the line past which the orchestrator gives a
+/// provider no new tasks. Paths may start with `~/`.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct UsageConfig {
+    pub enabled: bool,
+    pub interval_secs: u64,
+    /// No new tasks for a provider once any of its windows is at or above this percentage.
+    pub skip_pct: f64,
+    /// Claude Code's sign-in (`claudeAiOauth`). Its token is only ever sent to api.anthropic.com.
+    pub claude_credentials: PathBuf,
+    /// Claude Code's transcripts, for tokens per day and per project.
+    pub claude_projects: PathBuf,
+    /// Codex's rollout logs: rate-limit snapshots and token counts.
+    pub codex_sessions: PathBuf,
+    /// Codex's sign-in file; only its presence is checked.
+    pub codex_auth: PathBuf,
+    /// Per provider: turn the reader off, or pick one (`claude`, `codex`, `none`) for a provider with another name.
+    pub providers: BTreeMap<String, UsageProviderConfig>,
+}
+
+impl Default for UsageConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            interval_secs: 300,
+            skip_pct: 90.0,
+            claude_credentials: "~/.claude/.credentials.json".into(),
+            claude_projects: "~/.claude/projects".into(),
+            codex_sessions: "~/.codex/sessions".into(),
+            codex_auth: "~/.codex/auth.json".into(),
+            providers: BTreeMap::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct UsageProviderConfig {
+    pub enabled: bool,
+    pub reader: Option<String>,
+}
+
+impl Default for UsageProviderConfig {
+    fn default() -> Self {
+        Self { enabled: true, reader: None }
+    }
+}
+
+/// `~/x` → `$HOME/x`; anything else unchanged.
+fn expand_home(p: &Path) -> PathBuf {
+    match (p.strip_prefix("~"), std::env::var_os("HOME")) {
+        (Ok(rest), Some(home)) => PathBuf::from(home).join(rest),
+        _ => p.to_path_buf(),
     }
 }
 
@@ -335,6 +394,25 @@ impl Config {
             config.reflex.binary = resolve(Path::new(&config.reflex.binary)).to_string_lossy().into_owned();
         }
 
+        let usage = &mut config.usage;
+        for p in [&mut usage.claude_credentials, &mut usage.claude_projects, &mut usage.codex_sessions, &mut usage.codex_auth] {
+            *p = resolve(&expand_home(p));
+        }
+        if !(usage.skip_pct > 0.0 && usage.skip_pct <= 100.0) {
+            bail!("usage.skip_pct must be above 0 and at most 100");
+        }
+        usage.interval_secs = usage.interval_secs.max(30);
+        for (name, p) in &usage.providers {
+            if !config.providers.contains_key(name) {
+                bail!("unknown provider `{name}` in [usage.providers]");
+            }
+            if let Some(r) = &p.reader
+                && !matches!(r.as_str(), "claude" | "codex" | "none")
+            {
+                bail!("usage.providers.{name}.reader must be `claude`, `codex` or `none`");
+            }
+        }
+
         if config.server.api_token.as_deref() == Some("") {
             config.server.api_token = None;
         }
@@ -366,6 +444,19 @@ mod tests {
         assert_eq!(c.server.static_dir, PathBuf::from("/srv/map/frontend/out"));
         assert!(c.orchestrator.audit.enabled);
         assert_eq!(c.reflex.port_base, 7400);
+        assert_eq!(c.usage.skip_pct, 90.0);
+    }
+
+    #[test]
+    fn usage_paths_expand_home_and_settings_are_checked() {
+        let home = std::env::var("HOME").unwrap();
+        let c = Config::parse("[workspace]\ndir = \"/r\"\n[usage]\ncodex_sessions = \"logs/codex\"\n", Path::new("/etc/map")).unwrap();
+        assert_eq!(c.usage.claude_credentials, PathBuf::from(home).join(".claude/.credentials.json"));
+        assert_eq!(c.usage.codex_sessions, PathBuf::from("/etc/map/logs/codex"));
+        for bad in ["skip_pct = 0", "skip_pct = 120", "[usage.providers.nope]\nenabled = false", "[usage.providers.codex]\nreader = \"x\""] {
+            let text = format!("[workspace]\ndir = \"/r\"\n[usage]\n{bad}\n");
+            assert!(Config::parse(&text, Path::new("/")).is_err(), "{bad}");
+        }
     }
 
     #[test]

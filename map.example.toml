@@ -86,3 +86,19 @@ timeout_secs = 600
 # Used by projects whose fallback is "api"; the other fallbacks are the providers above, run headless.
 # api_key_env = "ANTHROPIC_API_KEY"
 # api_model = "claude-haiku-5-5"
+
+# Plan limits per provider account, shown on the Usage screen and in the top bar. Claude: the account endpoint the
+# CLI's /usage reads, with Claude Code's own sign-in (the token only ever goes to api.anthropic.com). Codex: the
+# newest rate-limit snapshot in its session logs (from its last run). Other CLIs have no local source yet.
+[usage]
+# enabled = true
+# interval_secs = 300
+# The orchestrator gives a provider no new tasks once any of its windows is at or above this percentage.
+skip_pct = 90
+# claude_credentials = "~/.claude/.credentials.json"
+# claude_projects = "~/.claude/projects"
+# codex_sessions = "~/.codex/sessions"
+# codex_auth = "~/.codex/auth.json"
+# Turn a reader off, or pick one ("claude", "codex", "none") for a provider with another name.
+# [usage.providers.codex]
+# enabled = false

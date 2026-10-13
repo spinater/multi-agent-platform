@@ -15,7 +15,7 @@ use crate::model::{Decision, DecisionStats, Event, Lane, Level, Project, Session
 
 #[derive(Clone)]
 pub struct Store {
-    pool: SqlitePool,
+    pub(crate) pool: SqlitePool,
 }
 
 /// Enums are stored as their serde names (`rate_limited`, `worker`, …), the same strings the API uses.

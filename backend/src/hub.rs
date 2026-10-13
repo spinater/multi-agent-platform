@@ -30,6 +30,8 @@ pub struct Hub {
     cooldowns: Mutex<HashMap<String, DateTime<Utc>>>,
     pub reflex: reflex::Manager,
     pub http: reqwest::Client,
+    /// The latest plan-usage report (`usage.rs`); also feeds the skip line in [`Hub::cooldown_until`].
+    pub usage: crate::usage::UsageState,
 }
 
 pub struct LaunchRequest {
@@ -52,6 +54,7 @@ impl Hub {
     pub fn new(config: Config, store: Store, term: Arc<dyn Terminal>) -> Arc<Self> {
         let (tx, _) = broadcast::channel(512);
         let running = config.orchestrator.autostart;
+        let usage = crate::usage::UsageState::new(&config);
         Arc::new(Self {
             config,
             store,
@@ -61,6 +64,7 @@ impl Hub {
             cooldowns: Mutex::new(HashMap::new()),
             reflex: reflex::Manager::default(),
             http: reqwest::Client::new(),
+            usage,
         })
     }
 
@@ -243,16 +247,22 @@ impl Hub {
         }
     }
 
+    /// Also set while a plan-usage window is at or above `usage.skip_pct` (until it resets).
     pub fn cooldown_until(&self, provider: &str) -> Option<DateTime<Utc>> {
         let mut map = self.cooldowns.lock().unwrap();
-        match map.get(provider) {
+        let manual = match map.get(provider) {
             Some(until) if *until > Utc::now() => Some(*until),
             Some(_) => {
                 map.remove(provider);
                 None
             }
             None => None,
-        }
+        };
+        manual.max(self.usage.skip_until(provider, &self.config))
+    }
+
+    pub fn announce_usage(&self, report: crate::model::UsageReport) {
+        self.send(ServerMessage::Usage { report });
     }
 
     pub fn spec(&self, provider: &str) -> Result<&ProviderSpec> {
