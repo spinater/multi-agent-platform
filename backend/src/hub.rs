@@ -290,6 +290,7 @@ impl Hub {
             session_prefix: self.config.workspace.session_prefix.clone(),
             database: self.config.server.data_dir.join("map.db").display().to_string(),
             watcher_interval_secs: self.config.watcher.interval_secs,
+            reflex_version: self.reflex.version(&self.config.reflex.binary),
         }
     }
 

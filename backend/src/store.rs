@@ -11,7 +11,7 @@ use serde::de::DeserializeOwned;
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions, SqliteRow};
 use sqlx::{Row, SqlitePool};
 
-use crate::model::{Decision, DecisionStats, Event, Lane, Level, Project, Session, Task, TaskStatus};
+use crate::model::{CaseScore, Decision, DecisionStats, DecisionSummary, Event, HourBucket, Lane, LaneSummary, Level, Project, ReflexCase, Session, Task, TaskStatus};
 
 #[derive(Clone)]
 pub struct Store {
@@ -253,6 +253,7 @@ impl Store {
 
     pub async fn delete_project(&self, slug: &str) -> Result<()> {
         sqlx::query("DELETE FROM decisions WHERE project = ?").bind(slug).execute(&self.pool).await?;
+        sqlx::query("DELETE FROM reflex_cases WHERE project = ?").bind(slug).execute(&self.pool).await?;
         sqlx::query("DELETE FROM projects WHERE slug = ?").bind(slug).execute(&self.pool).await?;
         Ok(())
     }
@@ -279,26 +280,27 @@ impl Store {
         Ok(id)
     }
 
+    fn decision_row(row: &SqliteRow) -> Result<Decision> {
+        Ok(Decision {
+            id: row.get("id"),
+            project: row.get("project"),
+            at: row.get("at"),
+            state: row.get("state"),
+            question: serde_json::from_str(row.get("question"))?,
+            answer: serde_json::from_str(row.get("answer"))?,
+            lane: parse_enum(row.get("lane"))?,
+            confidence: row.get("confidence"),
+            reflex_answer: serde_json::from_str(row.get("reflex_answer"))?,
+            ms: row.get("ms"),
+            error: row.get("error"),
+            feedback: row.get("feedback"),
+        })
+    }
+
     /// Newest first.
     pub async fn decisions(&self, project: &str, limit: i64) -> Result<Vec<Decision>> {
         let rows = sqlx::query("SELECT * FROM decisions WHERE project = ? ORDER BY id DESC LIMIT ?").bind(project).bind(limit).fetch_all(&self.pool).await?;
-        rows.iter()
-            .map(|row| {
-                Ok(Decision {
-                    id: row.get("id"),
-                    project: row.get("project"),
-                    at: row.get("at"),
-                    state: row.get("state"),
-                    question: serde_json::from_str(row.get("question"))?,
-                    answer: serde_json::from_str(row.get("answer"))?,
-                    lane: parse_enum(row.get("lane"))?,
-                    confidence: row.get("confidence"),
-                    reflex_answer: serde_json::from_str(row.get("reflex_answer"))?,
-                    ms: row.get("ms"),
-                    error: row.get("error"),
-                })
-            })
-            .collect()
+        rows.iter().map(Self::decision_row).collect()
     }
 
     pub async fn decision_stats(&self, project: &str) -> Result<DecisionStats> {
@@ -357,7 +359,7 @@ impl Store {
 
     // ---- orchestrator decisions (`decision.*` events, see decisions.rs)
 
-    fn decision_row(row: &SqliteRow) -> Result<Event> {
+    fn decision_event_row(row: &SqliteRow) -> Result<Event> {
         Ok(Event {
             id: row.get("id"),
             at: row.get("at"),
@@ -376,13 +378,13 @@ impl Store {
             .bind(limit)
             .fetch_all(&self.pool)
             .await?;
-        rows.iter().map(Self::decision_row).collect()
+        rows.iter().map(Self::decision_event_row).collect()
     }
 
     /// Decision events with an id above `after`, oldest first.
     pub async fn decision_events_after(&self, after: i64) -> Result<Vec<Event>> {
         let rows = sqlx::query("SELECT * FROM events WHERE id > ? AND kind LIKE 'decision.%' ORDER BY id").bind(after).fetch_all(&self.pool).await?;
-        rows.iter().map(Self::decision_row).collect()
+        rows.iter().map(Self::decision_event_row).collect()
     }
 
     pub async fn last_event_id(&self) -> Result<i64> {
@@ -400,7 +402,7 @@ impl Store {
         .bind(project)
         .fetch_all(&self.pool)
         .await?;
-        rows.iter().map(Self::decision_row).collect()
+        rows.iter().map(Self::decision_event_row).collect()
     }
 
     /// How many decision events of each kind happened since `since` (project filter as in `latest_decisions`).
@@ -416,6 +418,145 @@ impl Store {
         .fetch_all(&self.pool)
         .await?;
         Ok(rows.iter().map(|r| (r.get("kind"), r.get("n"))).collect())
+    }
+
+    // ---- reflex screen: decision feedback, calibration cases, summary
+
+    pub async fn decision(&self, project: &str, id: i64) -> Result<Option<Decision>> {
+        let row = sqlx::query("SELECT * FROM decisions WHERE project = ? AND id = ?").bind(project).bind(id).fetch_optional(&self.pool).await?;
+        row.as_ref().map(Self::decision_row).transpose()
+    }
+
+    pub async fn set_decision_feedback(&self, project: &str, id: i64, feedback: Option<bool>) -> Result<()> {
+        sqlx::query("UPDATE decisions SET feedback = ? WHERE project = ? AND id = ?").bind(feedback).bind(project).bind(id).execute(&self.pool).await?;
+        Ok(())
+    }
+
+    fn case_row(row: &SqliteRow) -> Result<ReflexCase> {
+        let answer: Option<String> = row.get("answer");
+        let confidence: Option<f64> = row.get("confidence");
+        let correct: Option<bool> = row.get("correct");
+        let at: Option<DateTime<Utc>> = row.get("scored_at");
+        let score = match (answer, confidence, correct, at) {
+            (Some(answer), Some(confidence), Some(correct), Some(at)) => Some(CaseScore { answer: serde_json::from_str(&answer)?, confidence, correct, at }),
+            _ => None,
+        };
+        Ok(ReflexCase {
+            id: row.get("id"),
+            question_id: row.get("question_id"),
+            text: row.get("text"),
+            expected: serde_json::from_str(row.get("expected"))?,
+            created_at: row.get("created_at"),
+            score,
+        })
+    }
+
+    /// Inserts the cases in one transaction and returns them with their ids.
+    pub async fn add_cases(&self, project: &str, cases: &[(String, String, serde_json::Value)]) -> Result<Vec<ReflexCase>> {
+        let now = Utc::now();
+        let mut tx = self.pool.begin().await?;
+        let mut ids = vec![];
+        for (question_id, text, expected) in cases {
+            let id: i64 = sqlx::query("INSERT INTO reflex_cases (project, question_id, text, expected, created_at) VALUES (?, ?, ?, ?, ?) RETURNING id")
+                .bind(project)
+                .bind(question_id)
+                .bind(text)
+                .bind(expected.to_string())
+                .bind(now)
+                .fetch_one(&mut *tx)
+                .await?
+                .get("id");
+            ids.push(id);
+        }
+        tx.commit().await?;
+        let mut out = vec![];
+        for id in ids {
+            out.extend(self.case(project, id).await?);
+        }
+        Ok(out)
+    }
+
+    pub async fn case(&self, project: &str, id: i64) -> Result<Option<ReflexCase>> {
+        let row = sqlx::query("SELECT * FROM reflex_cases WHERE project = ? AND id = ?").bind(project).bind(id).fetch_optional(&self.pool).await?;
+        row.as_ref().map(Self::case_row).transpose()
+    }
+
+    /// Oldest first.
+    pub async fn cases(&self, project: &str) -> Result<Vec<ReflexCase>> {
+        let rows = sqlx::query("SELECT * FROM reflex_cases WHERE project = ? ORDER BY id").bind(project).fetch_all(&self.pool).await?;
+        rows.iter().map(Self::case_row).collect()
+    }
+
+    /// Returns whether the case existed.
+    pub async fn delete_case(&self, project: &str, id: i64) -> Result<bool> {
+        let done = sqlx::query("DELETE FROM reflex_cases WHERE project = ? AND id = ?").bind(project).bind(id).execute(&self.pool).await?;
+        Ok(done.rows_affected() > 0)
+    }
+
+    /// `None` clears the score (the case could not be run).
+    pub async fn save_case_score(&self, id: i64, score: Option<&CaseScore>) -> Result<()> {
+        sqlx::query("UPDATE reflex_cases SET answer = ?, confidence = ?, correct = ?, scored_at = ? WHERE id = ?")
+            .bind(score.map(|s| s.answer.to_string()))
+            .bind(score.map(|s| s.confidence))
+            .bind(score.map(|s| s.correct))
+            .bind(score.map(|s| s.at))
+            .bind(id)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    /// Counts and average time per lane, feedback, and hourly buckets over the `hours` up to `now`.
+    pub async fn decision_summary(&self, project: &str, hours: i64, now: DateTime<Utc>) -> Result<DecisionSummary> {
+        use chrono::{Duration, DurationRound};
+        let hours = hours.clamp(1, 24 * 30);
+        // Buckets are whole clock hours; the last one is the current, partial hour.
+        let first = now.duration_trunc(Duration::hours(1))? - Duration::hours(hours - 1);
+        let rows = sqlx::query("SELECT at, lane, ms, feedback FROM decisions WHERE project = ? AND at >= ?").bind(project).bind(first).fetch_all(&self.pool).await?;
+        let mut buckets: Vec<HourBucket> = (0..hours).map(|i| HourBucket { start: first + Duration::hours(i), reflex: 0, llm: 0, abstain: 0 }).collect();
+        let (mut reflex, mut llm, mut abstain) = (LaneSummary::default(), LaneSummary::default(), LaneSummary::default());
+        let (mut right, mut wrong) = (0, 0);
+        for row in &rows {
+            let at: DateTime<Utc> = row.get("at");
+            if at < first {
+                continue;
+            }
+            let lane: Lane = parse_enum(row.get("lane"))?;
+            let ms: i64 = row.get("ms");
+            match row.get::<Option<bool>, _>("feedback") {
+                Some(true) => right += 1,
+                Some(false) => wrong += 1,
+                None => {}
+            }
+            let i = (at - first).num_hours();
+            let bucket = usize::try_from(i).ok().and_then(|i| buckets.get_mut(i));
+            let (summary, slot) = match lane {
+                Lane::Reflex => (&mut reflex, bucket.map(|b| &mut b.reflex)),
+                Lane::Llm => (&mut llm, bucket.map(|b| &mut b.llm)),
+                Lane::Abstain => (&mut abstain, bucket.map(|b| &mut b.abstain)),
+            };
+            summary.count += 1;
+            summary.avg_ms += ms as f64;
+            if let Some(slot) = slot {
+                *slot += 1;
+            }
+        }
+        for s in [&mut reflex, &mut llm, &mut abstain] {
+            if s.count > 0 {
+                s.avg_ms /= s.count as f64;
+            }
+        }
+        Ok(DecisionSummary {
+            hours,
+            since: first,
+            total: reflex.count + llm.count + abstain.count,
+            reflex,
+            llm,
+            abstain,
+            feedback_right: right,
+            feedback_wrong: wrong,
+            buckets,
+        })
     }
 }
 
@@ -503,6 +644,7 @@ mod tests {
             reflex_answer: serde_json::Value::Bool(true),
             ms: 1,
             error: None,
+            feedback: None,
         };
         store.insert_decision(&d).await.unwrap();
         store.insert_decision(&Decision { lane: Lane::Llm, ..d.clone() }).await.unwrap();
@@ -513,5 +655,100 @@ mod tests {
         store.delete_project("support").await.unwrap();
         assert!(store.project("support").await.unwrap().is_none());
         assert_eq!(store.decision_stats("support").await.unwrap().total, 0);
+    }
+
+    async fn reflex_fixture() -> (Store, Decision) {
+        use crate::model::{Question, QuestionKind};
+        let store = Store::memory().await.unwrap();
+        let q = Question { id: "route".into(), kind: QuestionKind::Choice, prompt: "Team?".into(), options: Some(vec!["billing".into(), "shipping".into()]), criteria: None };
+        let p = Project {
+            slug: "support".into(),
+            name: "Support".into(),
+            description: String::new(),
+            port: 7400,
+            threshold: None,
+            fallback: "none".into(),
+            model: None,
+            questions: vec![q.clone()],
+            settings: Default::default(),
+            created_at: Utc::now(),
+        };
+        store.save_project(&p).await.unwrap();
+        let d = Decision {
+            id: 0,
+            project: "support".into(),
+            at: Utc::now(),
+            state: "charged twice".into(),
+            question: q,
+            answer: serde_json::json!("billing"),
+            lane: Lane::Reflex,
+            confidence: Some(2e-4),
+            reflex_answer: serde_json::json!("billing"),
+            ms: 4,
+            error: None,
+            feedback: None,
+        };
+        (store, d)
+    }
+
+    #[tokio::test]
+    async fn decision_feedback_round_trips() {
+        let (store, d) = reflex_fixture().await;
+        let id = store.insert_decision(&d).await.unwrap();
+        assert_eq!(store.decision("support", id).await.unwrap().unwrap().feedback, None);
+        store.set_decision_feedback("support", id, Some(false)).await.unwrap();
+        assert_eq!(store.decision("support", id).await.unwrap().unwrap().feedback, Some(false));
+        assert!(store.decision("other", id).await.unwrap().is_none());
+        assert_eq!(store.decisions("support", 5).await.unwrap()[0].feedback, Some(false));
+    }
+
+    #[tokio::test]
+    async fn calibration_cases_are_added_scored_and_deleted() {
+        let (store, _) = reflex_fixture().await;
+        let added = store
+            .add_cases("support", &[("route".into(), "charged twice".into(), serde_json::json!("billing")), ("route".into(), "parcel lost".into(), serde_json::json!("shipping"))])
+            .await
+            .unwrap();
+        assert_eq!(added.len(), 2);
+        assert!(added.iter().all(|c| c.score.is_none()));
+        let score = CaseScore { answer: serde_json::json!("billing"), confidence: 3.2e-4, correct: false, at: Utc::now() };
+        store.save_case_score(added[1].id, Some(&score)).await.unwrap();
+        let cases = store.cases("support").await.unwrap();
+        assert_eq!(cases.iter().map(|c| c.text.as_str()).collect::<Vec<_>>(), vec!["charged twice", "parcel lost"]);
+        let got = cases[1].score.as_ref().unwrap();
+        assert_eq!((got.confidence, got.correct, got.answer.clone()), (3.2e-4, false, serde_json::json!("billing")));
+        assert_eq!(cases[1].expected, serde_json::json!("shipping"));
+        store.save_case_score(added[1].id, None).await.unwrap();
+        assert!(store.case("support", added[1].id).await.unwrap().unwrap().score.is_none());
+
+        assert!(store.delete_case("support", added[0].id).await.unwrap());
+        assert!(!store.delete_case("support", added[0].id).await.unwrap());
+        assert!(!store.delete_case("other", added[1].id).await.unwrap());
+        store.delete_project("support").await.unwrap();
+        assert!(store.cases("support").await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn summary_buckets_lanes_by_hour() {
+        let (store, d) = reflex_fixture().await;
+        let now = Utc::now();
+        let hour = chrono::Duration::hours(1);
+        store.insert_decision(&Decision { at: now, ms: 2, ..d.clone() }).await.unwrap();
+        store.insert_decision(&Decision { at: now, ms: 6, ..d.clone() }).await.unwrap();
+        let llm = store.insert_decision(&Decision { at: now - hour * 3, lane: Lane::Llm, ms: 1500, ..d.clone() }).await.unwrap();
+        store.insert_decision(&Decision { at: now - hour * 5, lane: Lane::Abstain, ms: 10, ..d.clone() }).await.unwrap();
+        store.insert_decision(&Decision { at: now - hour * 30, lane: Lane::Llm, ms: 900, ..d.clone() }).await.unwrap();
+        store.set_decision_feedback("support", llm, Some(true)).await.unwrap();
+
+        let s = store.decision_summary("support", 24, now).await.unwrap();
+        assert_eq!(s.buckets.len(), 24);
+        assert_eq!((s.total, s.reflex.count, s.llm.count, s.abstain.count), (4, 2, 1, 1));
+        assert_eq!((s.reflex.avg_ms, s.llm.avg_ms), (4.0, 1500.0));
+        assert_eq!((s.feedback_right, s.feedback_wrong), (1, 0));
+        let last = s.buckets.last().unwrap();
+        assert_eq!((last.reflex, last.llm), (2, 0));
+        assert_eq!(s.buckets[23 - 3].llm, 1);
+        assert_eq!(s.buckets[23 - 5].abstain, 1);
+        assert!(s.buckets.windows(2).all(|w| w[1].start - w[0].start == hour));
     }
 }

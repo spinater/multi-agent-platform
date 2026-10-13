@@ -40,6 +40,8 @@ pub struct Manager {
     /// Restarts of one project run one at a time, so two quick pushes cannot start two engines on one port.
     locks: Mutex<HashMap<String, Arc<Mutex<()>>>>,
     http: reqwest::Client,
+    /// `reflex --version`, re-read at most every few seconds so an install shows up without a server restart.
+    version: std::sync::Mutex<Option<(std::time::Instant, Option<String>)>>,
 }
 
 pub struct Paths<'a> {
@@ -48,7 +50,28 @@ pub struct Paths<'a> {
     pub log: &'a Path,
 }
 
+/// The first line of `<binary> --version` (`reflex 0.2.4`), or `None` when the binary cannot run.
+pub fn read_version(binary: &str) -> Option<String> {
+    let out = std::process::Command::new(binary).arg("--version").stdin(Stdio::null()).stderr(Stdio::null()).output().ok()?;
+    let text = String::from_utf8_lossy(&out.stdout);
+    let line = text.lines().map(str::trim).find(|l| !l.is_empty())?;
+    out.status.success().then(|| line.to_string())
+}
+
 impl Manager {
+    /// The installed Reflex's version, cached for 10 seconds.
+    pub fn version(&self, binary: &str) -> Option<String> {
+        let mut cache = self.version.lock().unwrap();
+        if let Some((at, v)) = cache.as_ref()
+            && at.elapsed() < Duration::from_secs(10)
+        {
+            return v.clone();
+        }
+        let v = read_version(binary);
+        *cache = Some((std::time::Instant::now(), v.clone()));
+        v
+    }
+
     pub fn status(&self, slug: &str) -> ReflexStatus {
         self.status.lock().unwrap().get(slug).cloned().unwrap_or_else(|| status(ReflexState::Stopped, "", vec![]))
     }

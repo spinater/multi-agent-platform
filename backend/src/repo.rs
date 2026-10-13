@@ -14,6 +14,9 @@ use crate::model::{Commit, RepoFile};
 
 pub const BRANCH: &str = "refs/heads/main";
 
+/// Corpus folder whose contents Reflex never loads: archived domains live in `_archive/<domain>/…`.
+pub const ARCHIVE_DIR: &str = "_archive";
+
 /// `git` with a fixed identity, so platform commits never depend on the server user's git config.
 fn git_cmd() -> Command {
     let mut cmd = Command::new("git");
@@ -218,7 +221,7 @@ pub async fn export_corpus(repo: &Path, dest: &Path) -> Result<Vec<String>> {
     while let Some(entry) = entries.next_entry().await? {
         let name = entry.file_name().to_string_lossy().into_owned();
         let is_dir = entry.file_type().await?.is_dir();
-        if !name.starts_with('.') && !name.eq_ignore_ascii_case("readme.md") && (is_dir || name.ends_with(".md")) {
+        if !name.starts_with('.') && name != ARCHIVE_DIR && !name.eq_ignore_ascii_case("readme.md") && (is_dir || name.ends_with(".md")) {
             domains.push(name.trim_end_matches(".md").to_string());
         } else if is_dir {
             tokio::fs::remove_dir_all(entry.path()).await?;
@@ -267,8 +270,9 @@ mod tests {
         assert_eq!(export_corpus(&repo, &live).await.unwrap(), vec!["refund", "shipping"]);
         assert!(!live.join("README.md").exists());
 
-        commit(&repo, &[("shipping.md".into(), None)], "drop").await.unwrap();
+        commit(&repo, &[("shipping.md".into(), None), ("_archive/old/a.md".into(), Some("archived".into()))], "drop").await.unwrap();
         assert_eq!(export_corpus(&repo, &live).await.unwrap(), vec!["refund"]);
+        assert!(!live.join(ARCHIVE_DIR).exists());
 
         let ws = dir.path().join("ws");
         assert_eq!(sync_workspace(&repo, &ws).await.unwrap(), None);

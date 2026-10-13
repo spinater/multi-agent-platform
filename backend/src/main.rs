@@ -10,6 +10,7 @@ mod orchestrator;
 mod project_settings;
 mod projects;
 mod reflex;
+mod reflex_screen;
 mod repo;
 mod skills;
 mod store;

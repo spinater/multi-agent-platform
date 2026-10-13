@@ -89,7 +89,7 @@ function ProjectSwitcher() {
 function Nav() {
   const { route, go } = useApp();
   return (
-    <nav className="flex flex-none gap-0.5 overflow-x-auto">
+    <nav className="flex max-w-full min-w-0 gap-0.5 overflow-x-auto">
       {SCREENS.map((s) => (
         <a
           key={s}
@@ -116,7 +116,7 @@ export function TopBar({ extra }: { extra?: ReactNode }) {
   const { go, theme, toggleTheme } = useApp();
   return (
     <header className="sticky top-0 z-30 flex min-h-11 flex-wrap items-center justify-between gap-x-5 gap-y-2 border-b border-line bg-[color-mix(in_srgb,var(--bg)_97%,transparent)] px-5 py-2">
-      <div className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-2">
+      <div className="flex max-w-full min-w-0 flex-wrap items-center gap-x-4 gap-y-2">
         <a
           href="#projects"
           onClick={(e) => {

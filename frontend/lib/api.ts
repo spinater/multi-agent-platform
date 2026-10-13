@@ -21,6 +21,11 @@ import type { StepResult } from "./generated/StepResult";
 import type { SkillFile } from "./generated/SkillFile";
 import type { SkillsOverview } from "./generated/SkillsOverview";
 import type { Task } from "./generated/Task";
+// Reflex screen.
+import type { ArchiveResult } from "./generated/ArchiveResult";
+import type { DecisionFeedback } from "./generated/DecisionFeedback";
+import type { DecisionSummary } from "./generated/DecisionSummary";
+import type { ReflexCase } from "./generated/ReflexCase";
 
 const TOKEN_KEY = "map.apiToken";
 
@@ -124,6 +129,19 @@ export const api = {
   /** Starts (or returns the running) helper session that runs the provider's login command. */
   loginStart: (provider: string) => request<LoginState>("POST", `/providers/${encodeURIComponent(provider)}/login`),
   loginState: (provider: string) => request<LoginState>("GET", `/providers/${encodeURIComponent(provider)}/login`),
+  // ---- Reflex screen: calibration cases, decision feedback and summary, corpus archive
+  cases: (slug: string) => request<ReflexCase[]>("GET", `/projects/${slug}/cases`),
+  /** Adds cases (scored by Reflex at once). `expected` is an option's text, or yes/no for a yes/no question. */
+  addCases: (slug: string, cases: { question_id: string; text: string; expected: string | boolean }[]) => request<ReflexCase[]>("POST", `/projects/${slug}/cases`, { cases }),
+  deleteCase: (slug: string, id: number) => request("DELETE", `/projects/${slug}/cases/${id}`),
+  /** Re-scores the stored cases and fits the threshold (ρ-quantile); `apply` saves it. Needs 16 cases. */
+  fitCases: (slug: string, body: { rho?: number; apply: boolean }) => request<FitResult>("POST", `/projects/${slug}/cases/fit`, body),
+  decisionSummary: (slug: string, hours = 24) => request<DecisionSummary>("GET", `/projects/${slug}/decisions/summary?hours=${hours}`),
+  /** A wrong answer needs `expected`, the right one; by default the message also becomes a calibration case. */
+  decisionFeedback: (slug: string, id: number, body: { correct: boolean; expected?: string | boolean; add_case?: boolean }) =>
+    request<DecisionFeedback>("POST", `/projects/${slug}/decisions/${id}/feedback`, body),
+  /** Moves domains to `_archive/` in the corpus repo (default: the smallest until 8 are left), or back with `restore`. */
+  archiveDomains: (slug: string, body: { domains?: string[]; restore?: boolean }) => request<ArchiveResult>("POST", `/projects/${slug}/corpus/archive`, body),
 };
 
 export type RepoName = "code" | "corpus";

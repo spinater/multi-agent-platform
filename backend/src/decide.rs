@@ -144,10 +144,89 @@ async fn ask_fallback(hub: &Hub, project: &Project, state: &str, q: &Question) -
     }
 }
 
+/// Reflex tokenises English only: Thai text (U+0E00–U+0E7F) never reaches it and goes to the fallback.
+pub fn has_thai(text: &str) -> bool {
+    text.chars().any(|c| ('\u{0E00}'..='\u{0E7F}').contains(&c))
+}
+
+/// Confidence as the dashboard writes it: `2.1e-4`.
+pub fn fmt_conf(c: f64) -> String {
+    if c == 0.0 { "0".into() } else { format!("{c:.1e}") }
+}
+
+/// What Reflex's part of a decision amounted to, before the fallback (if any) is asked.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Gate {
+    /// The caller asked for the fallback only.
+    LlmOnly,
+    /// Thai input: Reflex was not asked.
+    Thai,
+    /// Reflex could not be asked.
+    Unreachable,
+    /// Reflex answered nothing (`outcome: null`).
+    Abstained,
+    /// No threshold yet: Reflex scored in shadow, its answer is not used.
+    Shadow(f64),
+    Above(f64, f64),
+    Below(f64, f64),
+    /// `route: reflex`: Reflex's answer whatever its confidence.
+    Forced(f64),
+}
+
+impl Gate {
+    pub fn passes(&self) -> bool {
+        matches!(self, Gate::Above(..) | Gate::Forced(_))
+    }
+
+    /// The reason for the lane, given who the fallback is (`None`: it is not asked).
+    pub fn reason(&self, fallback: Option<&str>) -> String {
+        let to = |what: String| match fallback {
+            Some(f) => format!("{what}, so it went to {f}."),
+            None => format!("{what}, and no fallback was asked."),
+        };
+        match self {
+            Gate::LlmOnly => to("Fallback only was requested".into()),
+            Gate::Thai => to("Thai input: Reflex reads English only and was not asked".into()),
+            Gate::Unreachable => to("Reflex is not reachable".into()),
+            Gate::Abstained => to("Reflex abstained".into()),
+            Gate::Shadow(c) => to(format!("Not calibrated: Reflex scored {} in shadow, but there is no threshold yet", fmt_conf(*c))),
+            Gate::Above(c, t) => format!("Confidence {} is at or above the threshold {}: answered locally, no LLM call.", fmt_conf(*c), fmt_conf(*t)),
+            Gate::Below(c, t) => to(format!("Confidence {} is below the threshold {}", fmt_conf(*c), fmt_conf(*t))),
+            Gate::Forced(c) => format!("Reflex only was requested: its answer at confidence {}, threshold not applied.", fmt_conf(*c)),
+        }
+    }
+}
+
+/// Reflex's verdict on one question, from its answer (`None` when Reflex was not asked or not reachable).
+pub fn gate(route: Route, thai: bool, threshold: Option<f64>, reflex_answer: &Value, confidence: Option<f64>, asked: bool) -> Gate {
+    if route == Route::Llm {
+        return Gate::LlmOnly;
+    }
+    if thai {
+        return Gate::Thai;
+    }
+    if !asked {
+        return Gate::Unreachable;
+    }
+    let c = confidence.unwrap_or(0.0);
+    if reflex_answer.is_null() {
+        return Gate::Abstained;
+    }
+    if route == Route::Reflex {
+        return Gate::Forced(c);
+    }
+    match threshold {
+        None => Gate::Shadow(c),
+        Some(t) if c >= t => Gate::Above(c, t),
+        Some(t) => Gate::Below(c, t),
+    }
+}
+
 pub async fn decide(hub: &Hub, project: &Project, state: &str, questions: &[Question], route: Route) -> Result<DecideResponse> {
     validate_questions(questions)?;
     let started = Instant::now();
-    let (reflex, reflex_error) = if route == Route::Llm {
+    let thai = has_thai(state);
+    let (reflex, reflex_error) = if route == Route::Llm || thai {
         (None, None)
     } else {
         match hub.reflex.post(project.port, "/decide", &json!({ "state": state, "questions": questions })).await {
@@ -155,6 +234,8 @@ pub async fn decide(hub: &Hub, project: &Project, state: &str, questions: &[Ques
             Err(err) => (None, Some(format!("{err:#}"))),
         }
     };
+    // One Reflex call answers every question; each answer's time includes it.
+    let reflex_ms = started.elapsed().as_millis() as u64;
     let by_id = |id: &str| reflex.as_ref().and_then(|v| v["answers"].as_array()).and_then(|a| a.iter().find(|x| x["question_id"] == id)).cloned();
 
     let mut answers = vec![];
@@ -164,12 +245,13 @@ pub async fn decide(hub: &Hub, project: &Project, state: &str, questions: &[Ques
         let confidence = r.as_ref().and_then(|a| a["confidence"].as_f64());
         let probabilities = r.as_ref().and_then(|a| serde_json::from_value::<Vec<f64>>(a["probabilities"].clone()).ok());
         let reflex_answer = r.as_ref().map_or(Value::Null, |a| decode(q, &a["outcome"]));
-        let passes = !reflex_answer.is_null() && matches!((project.threshold, confidence), (Some(t), Some(c)) if c >= t);
+        let g = gate(route, thai, project.threshold, &reflex_answer, confidence, r.is_some());
         let use_fallback = match route {
             Route::Llm => true,
             Route::Reflex => false,
-            Route::Auto => !passes && project.fallback != "none",
+            Route::Auto => !g.passes() && project.fallback != "none",
         };
+        let mut reason = g.reason(use_fallback.then_some(project.fallback.as_str()));
 
         let (answer, lane, llm_raw, error) = if use_fallback {
             match ask_fallback(hub, project, state, q).await {
@@ -181,13 +263,16 @@ pub async fn decide(hub: &Hub, project: &Project, state: &str, questions: &[Ques
                 }
                 Err(err) => (Value::Null, Lane::Abstain, None, Some(format!("{err:#}"))),
             }
-        } else if !reflex_answer.is_null() && (passes || route == Route::Reflex) {
+        } else if g.passes() {
             (reflex_answer.clone(), Lane::Reflex, None, None)
         } else {
             (Value::Null, Lane::Abstain, None, None)
         };
+        if use_fallback && lane == Lane::Abstain {
+            reason.push_str(" The fallback gave no usable answer either.");
+        }
 
-        let ms = t0.elapsed().as_millis() as u64;
+        let ms = reflex_ms + t0.elapsed().as_millis() as u64;
         let record = Decision {
             id: 0,
             project: project.slug.clone(),
@@ -200,11 +285,16 @@ pub async fn decide(hub: &Hub, project: &Project, state: &str, questions: &[Ques
             reflex_answer: reflex_answer.clone(),
             ms: ms as i64,
             error: error.clone(),
+            feedback: None,
         };
-        if let Err(err) = hub.store.insert_decision(&record).await {
-            tracing::warn!("could not record a decision: {err:#}");
-        }
-        answers.push(Answer { question_id: q.id.clone(), answer, lane, confidence, probabilities, reflex_answer, llm_raw, error, ms });
+        let decision_id = match hub.store.insert_decision(&record).await {
+            Ok(id) => id,
+            Err(err) => {
+                tracing::warn!("could not record a decision: {err:#}");
+                0
+            }
+        };
+        answers.push(Answer { question_id: q.id.clone(), answer, lane, confidence, probabilities, reflex_answer, llm_raw, error, ms, reason, decision_id });
     }
     hub.announce_project(&project.slug).await;
     Ok(DecideResponse {
@@ -216,7 +306,7 @@ pub async fn decide(hub: &Hub, project: &Project, state: &str, questions: &[Ques
     })
 }
 
-fn same(a: &Value, b: &Value) -> bool {
+pub fn same(a: &Value, b: &Value) -> bool {
     match (a, b) {
         (Value::String(x), Value::String(y)) => x.trim().eq_ignore_ascii_case(y.trim()),
         _ => a == b,
@@ -303,6 +393,38 @@ mod tests {
         let yn = Question { kind: QuestionKind::Noul, options: None, ..q };
         assert_eq!(parse_answer(&yn, "Yes"), json!(true));
         assert_eq!(parse_answer(&yn, "ไม่ใช่"), json!(false));
+    }
+
+    #[test]
+    fn thai_input_skips_reflex() {
+        assert!(has_thai("ฐานข้อมูล db-2 ตอบช้ามาก"));
+        assert!(has_thai("replica lag on db-2 ไหม"));
+        assert!(!has_thai("Replica lag 45s on db-2, primary CPU at 95%"));
+        assert!(!has_thai("café ünïcode 日本語"));
+        let answer = json!("billing");
+        let g = gate(Route::Auto, true, Some(1e-4), &answer, Some(5e-4), true);
+        assert_eq!(g, Gate::Thai);
+        assert!(!g.passes());
+        assert_eq!(g.reason(Some("claude")), "Thai input: Reflex reads English only and was not asked, so it went to claude.");
+        assert_eq!(gate(Route::Reflex, true, None, &Value::Null, None, false), Gate::Thai);
+    }
+
+    #[test]
+    fn gate_follows_threshold_and_route() {
+        let a = json!("billing");
+        assert_eq!(gate(Route::Auto, false, Some(1e-4), &a, Some(2.1e-4), true), Gate::Above(2.1e-4, 1e-4));
+        assert!(gate(Route::Auto, false, Some(1e-4), &a, Some(2.1e-4), true).passes());
+        assert_eq!(gate(Route::Auto, false, Some(1e-4), &a, Some(3e-5), true), Gate::Below(3e-5, 1e-4));
+        // Not calibrated: shadow mode, never passes.
+        let shadow = gate(Route::Auto, false, None, &a, Some(2e-4), true);
+        assert_eq!(shadow, Gate::Shadow(2e-4));
+        assert!(!shadow.passes());
+        assert_eq!(gate(Route::Auto, false, Some(1e-4), &Value::Null, Some(9e-4), true), Gate::Abstained);
+        assert_eq!(gate(Route::Auto, false, Some(1e-4), &Value::Null, None, false), Gate::Unreachable);
+        assert!(gate(Route::Reflex, false, None, &a, Some(1e-5), true).passes());
+        assert_eq!(gate(Route::Llm, false, Some(1e-4), &a, Some(1e-3), true), Gate::LlmOnly);
+        assert_eq!(Gate::Above(2.13e-4, 1e-4).reason(None), "Confidence 2.1e-4 is at or above the threshold 1.0e-4: answered locally, no LLM call.");
+        assert_eq!(Gate::Below(3e-5, 1e-4).reason(None), "Confidence 3.0e-5 is below the threshold 1.0e-4, and no fallback was asked.");
     }
 
     #[test]
