@@ -298,6 +298,10 @@ impl Hub {
         }
     }
 
+    pub fn announce_providers(&self, providers: Vec<ProviderInfo>) {
+        self.send(ServerMessage::Providers { providers });
+    }
+
     pub fn providers(&self) -> Vec<ProviderInfo> {
         self.config
             .providers

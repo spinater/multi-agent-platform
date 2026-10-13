@@ -105,6 +105,9 @@ export function useDashboard(): DashboardState {
         case "usage":
           setUsageReport(msg.report);
           break;
+        case "providers":
+          setProviders(msg.providers);
+          break;
         case "resync":
           void reload().catch(() => {});
           break;

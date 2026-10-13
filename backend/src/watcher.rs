@@ -24,6 +24,8 @@ struct Memory {
 pub struct Watcher {
     hub: Arc<Hub>,
     memory: HashMap<String, Memory>,
+    /// The provider list last pushed to dashboards, as JSON, so a sign-in or a cooldown shows without a reload.
+    providers: Option<String>,
 }
 
 pub async fn run(hub: Arc<Hub>) {
@@ -50,7 +52,7 @@ fn short(d: chrono::Duration) -> String {
 
 impl Watcher {
     pub fn new(hub: Arc<Hub>) -> Self {
-        Self { hub, memory: HashMap::new() }
+        Self { hub, memory: HashMap::new(), providers: None }
     }
 
     pub async fn tick(&mut self, now: DateTime<Utc>) -> anyhow::Result<()> {
@@ -65,7 +67,21 @@ impl Watcher {
             }
         }
         self.memory.retain(|name, _| live.contains_key(name));
+        self.push_providers();
         Ok(())
+    }
+
+    /// Pushes the provider list when it differs from the last one pushed (the first tick only records it).
+    fn push_providers(&mut self) {
+        let providers = self.hub.providers();
+        let Ok(json) = serde_json::to_string(&providers) else { return };
+        if self.providers.as_ref() == Some(&json) {
+            return;
+        }
+        let first = self.providers.replace(json).is_none();
+        if !first {
+            self.hub.announce_providers(providers);
+        }
     }
 
     async fn check(&mut self, mut s: Session, attached: Option<usize>, now: DateTime<Utc>) -> anyhow::Result<()> {
@@ -141,7 +157,9 @@ impl Watcher {
         } else {
             let stalled_for = mem.changed_at.map(|t| now - t).unwrap_or_default();
             let (state, detail) = Self::classify(&s, &sig, changed_recently, stalled_for, cfg.stall_minutes, spec.startup_secs, now);
-            if state == SessionState::NeedsAuth && s.state != SessionState::NeedsAuth {
+            // The sign-in helper session shows the login screen by design: that is not the provider being signed out.
+            let signing_in = s.name == crate::login::session_name(&hub, &s.provider);
+            if state == SessionState::NeedsAuth && s.state != SessionState::NeedsAuth && !signing_in {
                 hub.cool_down(&s.provider, now + chrono::Duration::minutes(hub.config.orchestrator.provider_cooldown_minutes as i64));
                 hub.event(Level::Error, "session.needs_auth", Some(&s.name), s.task_id, format!("{} needs you to sign in again", s.provider)).await;
             }
@@ -195,6 +213,7 @@ mod tests {
     use super::*;
     use crate::config::Config;
     use crate::hub::LaunchRequest;
+    use crate::model::ServerMessage;
     use crate::store::Store;
     use crate::terminal::fake::FakeTerminal;
     use std::path::Path;
@@ -255,6 +274,50 @@ mod tests {
         w.tick(t0 + chrono::Duration::minutes(1)).await.unwrap();
         assert!(term.sent(&name).is_empty());
         assert_eq!(hub.store.session(&name).await.unwrap().unwrap().state, SessionState::RateLimited);
+    }
+
+    #[tokio::test]
+    async fn the_sign_in_helper_does_not_cool_the_provider_down() {
+        let (hub, term, _dir) = setup().await;
+        let req = LaunchRequest { name: Some("map-login-claude".into()), provider: "claude".into(), model: None, role: Role::Manual, task_id: None, project: None, prompt: None };
+        let name = hub.launch(req).await.unwrap().name;
+        assert_eq!(name, crate::login::session_name(&hub, "claude"));
+        let mut w = Watcher::new(hub.clone());
+        term.set_pane(&name, "Login expired · Please run /login\n");
+        w.tick(Utc::now()).await.unwrap();
+        assert!(hub.cooldown_until("claude").is_none());
+    }
+
+    #[tokio::test]
+    async fn a_sign_in_or_a_cooldown_is_pushed_to_dashboards() {
+        let dir = tempfile::tempdir().unwrap();
+        let cred = dir.path().join("auth.json");
+        let text = format!(
+            "[workspace]\ndir = \"{0}\"\n[server]\ndata_dir = \"{0}/data\"\n[providers.codex]\ncredentials = [\"{1}\"]\napi_key_env = \"MAP_TEST_UNSET_KEY\"\n",
+            dir.path().display(),
+            cred.display()
+        );
+        let hub = Hub::new(Config::parse(&text, Path::new("/")).unwrap(), Store::memory().await.unwrap(), Arc::new(FakeTerminal::default()));
+        let mut rx = hub.subscribe();
+        let mut w = Watcher::new(hub.clone());
+        let codex = |msg: ServerMessage| match msg {
+            ServerMessage::Providers { providers } => providers.into_iter().find(|p| p.name == "codex"),
+            _ => None,
+        };
+
+        w.tick(Utc::now()).await.unwrap();
+        assert!(rx.try_recv().is_err(), "the first tick only records the list");
+
+        std::fs::write(&cred, r#"{"tokens": {}}"#).unwrap();
+        w.tick(Utc::now()).await.unwrap();
+        assert_eq!(codex(rx.try_recv().unwrap()).unwrap().signed_in, Some(true));
+
+        w.tick(Utc::now()).await.unwrap();
+        assert!(rx.try_recv().is_err(), "nothing changed, nothing pushed");
+
+        hub.cool_down("codex", Utc::now() + chrono::Duration::minutes(5));
+        w.tick(Utc::now()).await.unwrap();
+        assert!(codex(rx.try_recv().unwrap()).unwrap().cooldown_until.is_some());
     }
 
     #[tokio::test]

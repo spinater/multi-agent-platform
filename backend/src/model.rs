@@ -221,6 +221,8 @@ pub enum ServerMessage {
     Resync,
     /// A new usage reading (every `usage.interval_secs`, or after `POST /api/usage/refresh`).
     Usage { report: UsageReport },
+    /// A provider's sign-in, availability or cooldown changed (checked every watcher tick), e.g. after a login.
+    Providers { providers: Vec<ProviderInfo> },
 }
 
 // ---- projects and decisions
