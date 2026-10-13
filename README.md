@@ -141,6 +141,31 @@ cd backend && cargo run -- serve -c ../map.toml      # API on :4400
 cd frontend && bun dev                               # dashboard on :3000, /api proxied to :4400
 ```
 
+## Deploy with Docker Compose
+
+One container runs the server, the dashboard, tmux, git and a pinned Reflex. The agent CLIs and their sign-ins stay
+on the host and are mounted at the same paths, so the container and your shell share one login per account (a
+token refresh on one side never logs out the other). It publishes on `127.0.0.1` only; put a tunnel or an
+authenticating proxy in front to reach it from elsewhere.
+
+```sh
+cp .env.example .env                        # your uid/gid, user, home, Node dir, MAP_DIR, port
+mkdir -p ~/map-deploy/data/map && git init ~/map-deploy/data/workspace
+cp deploy/map.docker.toml ~/map-deploy/map.toml
+#   set api_token (openssl rand -hex 32), the PATH in [workspace.env], and allowed_hosts for your tunnel's name
+docker compose up -d --build
+docker compose logs -f map                  # open http://127.0.0.1:4400 and paste the token once
+```
+
+- Mounted from the host: `~/.claude`, `~/.claude.json`, `~/.codex`, `~/.gemini` (read-write: sign-ins, history,
+  transcripts for Usage and Skills) and the CLIs in `~/.local/bin`, `~/.local/share/claude` and the Node install
+  (read-only). Adjust `docker-compose.yml` if yours live elsewhere.
+- State lives in `MAP_DIR/data` (database, run files, project repos, workspaces); config in `MAP_DIR/map.toml`.
+- Agent sessions are tmux sessions inside the container, so `docker compose restart` ends them (the watcher marks
+  them exited and the orchestrator retries their tasks).
+- **Cloudflare tunnel**: point it at `http://127.0.0.1:4400`, add the public host name to `allowed_hosts`, keep
+  `api_token` set, and preferably put Cloudflare Access in front.
+
 ## Dashboard
 
 A dark operator console. The **command centre** watches and steers the orchestrator for the current project (or

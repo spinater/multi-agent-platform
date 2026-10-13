@@ -1,0 +1,35 @@
+# Runs MAP on this machine at 127.0.0.1:${MAP_PORT}. Put a tunnel or an authenticating proxy in front to reach it
+# from elsewhere. Settings come from .env (copy .env.example); `map.toml` lives in ${MAP_DIR} (start from
+# deploy/map.docker.toml). See README, "Deploy with Docker Compose".
+services:
+  map:
+    build:
+      context: .
+      args:
+        MAP_UID: ${MAP_UID:?set MAP_UID in .env}
+        MAP_GID: ${MAP_GID:?set MAP_GID in .env}
+        MAP_USER: ${MAP_USER:?set MAP_USER in .env}
+        MAP_HOME: ${MAP_HOME:?set MAP_HOME in .env}
+    image: multi-agent-platform:local
+    container_name: map
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${MAP_PORT:-4400}:4400"
+    environment:
+      # The agent CLIs are the host's, mounted below.
+      PATH: ${MAP_HOME}/.local/bin:${MAP_NODE_DIR}/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+      # Claude Code keeps its settings file in ~/.claude/.claude.json instead of ~/.claude.json: the host rewrites
+      # ~/.claude.json by renaming over it, which a single-file bind mount cannot follow. Sign-in stays shared.
+      CLAUDE_CONFIG_DIR: ${MAP_HOME}/.claude
+    volumes:
+      # Config (read-only) and state: the database, run files, project repos and workspaces.
+      - ${MAP_DIR}/map.toml:/config/map.toml:ro
+      - ${MAP_DIR}/data:/data
+      # Agent sign-ins and history, shared with the host so a token refresh on one side does not log out the other.
+      - ${MAP_HOME}/.claude:${MAP_HOME}/.claude
+      - ${MAP_HOME}/.codex:${MAP_HOME}/.codex
+      - ${MAP_HOME}/.gemini:${MAP_HOME}/.gemini
+      # Agent binaries (read-only): claude, codex (a Node script) and agy.
+      - ${MAP_HOME}/.local/bin:${MAP_HOME}/.local/bin:ro
+      - ${MAP_HOME}/.local/share/claude:${MAP_HOME}/.local/share/claude:ro
+      - ${MAP_NODE_DIR}:${MAP_NODE_DIR}:ro

@@ -1,0 +1,13 @@
+.git
+.claude
+.env
+map.toml
+.map
+design_handoff_map_dashboard
+backend/target
+frontend/node_modules
+frontend/.next
+frontend/out
+frontend/next-env.d.ts
+frontend/tsconfig.tsbuildinfo
+**/*.log

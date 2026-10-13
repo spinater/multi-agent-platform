@@ -1,0 +1,38 @@
+# map.toml for docker-compose.yml: copy to ${MAP_DIR}/map.toml and edit. Paths are inside the container:
+# /data is ${MAP_DIR}/data on the host, and the agent CLIs are the host's, mounted at the same paths.
+# Every other setting is documented in map.example.toml.
+
+[server]
+# All interfaces inside the container; compose publishes it on the host's 127.0.0.1 only.
+bind = "0.0.0.0:4400"
+# Required once the dashboard is reachable from outside this machine (e.g. through a Cloudflare tunnel).
+# Generate one with `openssl rand -hex 32`; the dashboard asks for it once per browser.
+api_token = "change-me"
+static_dir = "/app/frontend/out"
+data_dir = "/data/map"
+# The tunnel's public host name, so requests that arrive with it in the Host header are accepted.
+# allowed_hosts = ["agents.example.com"]
+
+[workspace]
+# Where tasks and sessions without a project run (create it as a git repo: `git init ${MAP_DIR}/data/workspace`).
+dir = "/data/workspace"
+session_prefix = "map-"
+
+[workspace.env]
+# The host's agent CLIs; keep in sync with PATH in docker-compose.yml (MAP_HOME and MAP_NODE_DIR from .env).
+PATH = "/home/you/.local/bin:/home/you/.local/node-v24.13.1-linux-x64/bin:/usr/local/bin:/usr/bin:/bin"
+
+[orchestrator]
+autostart = false
+max_parallel = 1
+provider_order = ["claude", "codex", "gemini"]
+
+[providers.claude]
+# Unattended workers stop at every permission prompt without this; only enable it if you accept that risk.
+# extra_args = ["--dangerously-skip-permissions"]
+
+[providers.gemini]
+binary = "agy"
+
+[reflex]
+binary = "/usr/local/bin/reflex"

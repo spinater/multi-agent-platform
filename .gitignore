@@ -16,3 +16,6 @@ map.toml
 
 # Claude Code agent worktrees
 .claude/worktrees/
+
+# Docker Compose settings for this machine
+.env
