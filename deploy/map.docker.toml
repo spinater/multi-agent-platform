@@ -20,13 +20,21 @@ data_dir = "/home/you/MAP/config/data"
 dir = "/home/you/MAP/config/data/workspace"
 session_prefix = "map-"
 # MAP marks the default workspace and each project's folder as trusted for Claude Code and Codex before it starts an
-# agent there; set false to answer the CLIs' own trust prompts yourself. (Here Claude Code's file is
-# ~/.claude/.claude.json, from CLAUDE_CONFIG_DIR in docker-compose.yml.)
+# agent there; set false to answer the CLIs' own trust prompts yourself. (With agents_home isolated below, Claude
+# Code's file is <config>/agent-home/claude/.claude.json; shared, ~/.claude/.claude.json from CLAUDE_CONFIG_DIR in
+# docker-compose.yml.)
 trust_folders = true
 
 [workspace.env]
 # The host's agent CLIs; keep in sync with PATH in docker-compose.yml (MAP_HOME and MAP_NODE_DIR from .env).
 PATH = "/home/you/.local/bin:/home/you/.local/node-v24.13.1-linux-x64/bin:/usr/local/bin:/usr/bin:/bin"
+
+# MAP's agents have their own logins and history in /home/you/MAP/config/agent-home (claude/, codex/,
+# gemini-home/), inside the mounted config folder: sign each provider in once under Settings → Agent CLIs. The
+# ~/.claude, ~/.codex and ~/.gemini mounts in docker-compose.yml are then not needed. "shared" uses the host's own
+# sign-ins through those mounts instead (see map.example.toml).
+[agents_home]
+mode = "isolated"
 
 [orchestrator]
 autostart = false

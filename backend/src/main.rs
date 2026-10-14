@@ -78,8 +78,13 @@ async fn open(config: Config) -> Result<Arc<Hub>> {
         tracing::warn!("map.toml: {warning}");
     }
     std::fs::create_dir_all(&config.server.data_dir).with_context(|| format!("creating {}", config.server.data_dir.display()))?;
+    // `[agents_home] mode = "isolated"`: each provider's own folder (0700), empty until it is signed in there.
+    for dir in config.create_agent_homes()? {
+        tracing::info!("agent home: {}", dir.display());
+    }
     let store = Store::open(&config.server.data_dir.join("map.db")).await?;
-    Ok(Hub::new(config, store, Arc::new(Tmux::new())))
+    let tmux = Tmux::new(config.workspace.tmux_socket.clone());
+    Ok(Hub::new(config, store, Arc::new(tmux)))
 }
 
 async fn check(config: Config) -> Result<()> {

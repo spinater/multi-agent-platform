@@ -343,6 +343,17 @@ impl Hub {
         self.config.providers.get(provider).with_context(|| format!("unknown provider `{provider}`"))
     }
 
+    /// The provider CLI's state folder (sign-in, settings, history) as the CLI sees it: see [`Config::provider_home`].
+    pub fn provider_home(&self, provider: &str) -> Option<PathBuf> {
+        self.config.provider_home(provider)
+    }
+
+    /// The variables every run of `provider` gets before `[workspace.env]` (isolated mode only): see
+    /// [`Config::provider_env`].
+    pub fn provider_env(&self, provider: &str) -> Vec<(String, String)> {
+        self.config.provider_env(provider)
+    }
+
     /// The provider's binary is on the workspace PATH (or the absolute path exists).
     pub fn provider_available(&self, provider: &str) -> bool {
         self.spec(provider).is_ok_and(|spec| self.binary_path(&spec.binary).is_some())
@@ -365,6 +376,7 @@ impl Hub {
             database: self.config.server.data_dir.join("map.db").display().to_string(),
             watcher_interval_secs: self.config.watcher.interval_secs,
             reflex_version: self.reflex.version(&self.config.reflex.binary),
+            tmux_socket: self.config.workspace.tmux_socket.clone(),
         }
     }
 
@@ -456,6 +468,11 @@ impl Hub {
         // MAP's git defaults (key, known hosts, identity; the user's own ~/.gitconfig included after them). Before
         // workspace.env, so a GIT_CONFIG_GLOBAL set there wins.
         script.push_str(&format!("export GIT_CONFIG_GLOBAL={}\n", quote(self.gitconfig().to_str().context("non-UTF-8 path")?)?));
+        // `[agents_home] mode = "isolated"`: the CLI's own state folder (CLAUDE_CONFIG_DIR, CODEX_HOME, …), for every
+        // launch of the provider, sign-in and update helpers included. Nothing in shared mode.
+        for (k, v) in self.provider_env(&req.provider) {
+            script.push_str(&format!("export {k}={}\n", quote(&v)?));
+        }
         for (k, v) in &self.config.workspace.env {
             script.push_str(&format!("export {k}={}\n", quote(v)?));
         }

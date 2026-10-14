@@ -201,11 +201,13 @@ fn substitute(command: &[String], binary: &str) -> Vec<String> {
 }
 
 /// Runs the `version` command with the resolved binary, the workspace env, no stdin and a timeout.
-async fn installed_version(hub: &Hub, spec: &ProviderSpec, binary: &Path, timeout: Duration) -> Result<String, String> {
+async fn installed_version(hub: &Hub, name: &str, spec: &ProviderSpec, binary: &Path, timeout: Duration) -> Result<String, String> {
     let shown = substitute(&spec.version, &spec.binary).join(" ");
     let argv = substitute(&spec.version, &binary.to_string_lossy());
     let mut cmd = tokio::process::Command::new(&argv[0]);
-    cmd.args(&argv[1..]).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped()).kill_on_drop(true).envs(&hub.config.workspace.env).env("NO_COLOR", "1");
+    cmd.args(&argv[1..]).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped()).kill_on_drop(true);
+    // Isolated mode: the CLI reads its own config (an update channel, say) from MAP's folder for it, as in a launch.
+    cmd.envs(hub.config.provider_env(name)).envs(&hub.config.workspace.env).env("NO_COLOR", "1");
     if hub.config.workspace.dir.is_dir() {
         cmd.current_dir(&hub.config.workspace.dir);
     }
@@ -375,7 +377,7 @@ pub async fn check(hub: &Hub, name: &str) -> UpdateInfo {
         match &binary {
             _ if spec.version.is_empty() => Ok(None),
             None => Err(format!("`{}` is not on the workspace PATH", spec.binary)),
-            Some(b) => installed_version(hub, spec, b, timeout).await.map(Some),
+            Some(b) => installed_version(hub, name, spec, b, timeout).await.map(Some),
         }
     };
     let latest = async {
@@ -431,6 +433,11 @@ fn empty_spec() -> ProviderSpec {
         version: vec![],
         latest: None,
         update: vec![],
+        home_env: None,
+        default_home: None,
+        home_subdir: None,
+        isolated_dir: None,
+        home_keep: vec![],
     }
 }
 

@@ -277,6 +277,49 @@ mod tests {
         assert_eq!(info(&hub, "codex", hub.spec("codex").unwrap()).command, "/bin/sh login --device-auth");
     }
 
+    #[tokio::test]
+    async fn isolated_mode_signs_in_and_checks_credentials_in_maps_own_folder() {
+        use crate::terminal::fake::FakeTerminal;
+        let dir = tempfile::tempdir().unwrap();
+        let d = dir.path().display();
+        let config = |mode: &str| {
+            let text = format!(
+                "[workspace]\ndir = \"{d}\"\n[server]\ndata_dir = \"{d}/data\"\n[agents_home]\nmode = \"{mode}\"\ndir = \"{d}/ah\"\n[providers.claude]\nbinary = \"/bin/sh\"\nstartup_secs = 0\napi_key_env = \"\"\n[providers.codex]\nbinary = \"/bin/sh\"\nstartup_secs = 0\napi_key_env = \"\"\n[providers.gemini]\nbinary = \"/bin/sh\"\nlogin_send = \"\"\nstartup_secs = 0\napi_key_env = \"\"\n"
+            );
+            crate::config::Config::parse(&text, std::path::Path::new("/")).unwrap()
+        };
+        let term = Arc::new(FakeTerminal::default());
+        let hub = Hub::new(config("isolated"), crate::store::Store::memory().await.unwrap(), term.clone());
+        let ah = dir.path().join("ah");
+        // Nothing is copied over: not signed in until the helper session has run in MAP's folder.
+        assert_eq!(signed_in(&hub, hub.spec("codex").unwrap()), Some(false));
+        assert_eq!(info(&hub, "codex", hub.spec("codex").unwrap()).credentials, [ah.join("codex/auth.json").display().to_string()]);
+        for (provider, export) in [
+            ("codex", format!("export CODEX_HOME={}/codex\n", ah.display())),
+            ("claude", format!("export CLAUDE_CONFIG_DIR={}/claude\n", ah.display())),
+            ("gemini", format!("export HOME={}/gemini-home\n", ah.display())),
+        ] {
+            start(&hub, provider).await.unwrap();
+            let script = term.sessions.lock().unwrap()[&format!("map-login-{provider}")].script.clone();
+            assert!(script.contains(&export), "{script}");
+        }
+        std::fs::create_dir_all(ah.join("codex")).unwrap();
+        std::fs::write(ah.join("codex/auth.json"), "{}").unwrap();
+        assert_eq!(signed_in(&hub, hub.spec("codex").unwrap()), Some(true));
+        std::fs::create_dir_all(ah.join("gemini-home/.gemini")).unwrap();
+        std::fs::write(ah.join("gemini-home/.gemini/jetski-standalone-oauth-token"), "t").unwrap();
+        assert_eq!(signed_in(&hub, hub.spec("gemini").unwrap()), Some(true));
+
+        // Shared mode: the same launch exports none of them.
+        let term = Arc::new(FakeTerminal::default());
+        let hub = Hub::new(config("shared"), crate::store::Store::memory().await.unwrap(), term.clone());
+        start(&hub, "codex").await.unwrap();
+        let script = term.sessions.lock().unwrap()["map-login-codex"].script.clone();
+        for var in ["CODEX_HOME", "CLAUDE_CONFIG_DIR", "export HOME", "CARGO_HOME"] {
+            assert!(!script.contains(var), "{var}: {script}");
+        }
+    }
+
     #[test]
     fn home_expansion() {
         let home = std::env::var("HOME").unwrap();

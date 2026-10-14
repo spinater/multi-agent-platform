@@ -4,13 +4,15 @@
 # once (never overwrites it) and starts the service. The agent CLIs (claude, codex, agy) are the ones on your PATH.
 #
 #   deploy/install.sh [--home DIR] [--config-dir DIR] [--projects-dir DIR] [--port 4400] [--bind 127.0.0.1]
-#                     [--prefix DIR] [--config FILE] [--no-service]
+#                     [--prefix DIR] [--config FILE] [--agent-login isolated|shared] [--no-service]
 #   deploy/install.sh --uninstall      # stops and removes the service and the app; keeps config, data, projects
 #
 # Layout (--home DIR, default ~/MAP):  DIR/app        the binary, dashboard and Reflex (replaced on every install)
 #                                      DIR/config     map.toml, templates/, agents/, data/ (database, runs, corpus
 #                                                     repos, git key, the default workspace, logs)
 #                                      DIR/workspace  the project folder: projects can only be its sub-folders
+# --agent-login (new configs only, default isolated): isolated gives MAP's agents their own sign-ins and history in
+# DIR/config/agent-home; shared uses your own (~/.claude, ~/.codex, ~/.gemini).
 set -euo pipefail
 
 PORT=4400
@@ -22,6 +24,7 @@ CONFIG_DIR=""
 PROJECTS_DIR=""
 SERVICE=1
 UNINSTALL=0
+AGENT_LOGIN=isolated
 LABEL=com.multi-agent-platform.map
 REFLEX_VERSION=v0.2.4
 LEGACY_CONFIG="${XDG_CONFIG_HOME:-$HOME/.config}/map/map.toml"
@@ -38,9 +41,12 @@ while [ $# -gt 0 ]; do
     --projects-dir) PROJECTS_DIR="$(abs "$2")"; shift 2 ;;
     --prefix) PREFIX="$(abs "$2")"; shift 2 ;;
     --config) CONFIG="$(abs "$2")"; shift 2 ;;
+    --agent-login)
+      case "$2" in isolated|shared) AGENT_LOGIN="$2" ;; *) echo "--agent-login takes isolated or shared" >&2; exit 2 ;; esac
+      shift 2 ;;
     --no-service) SERVICE=0; shift ;;
     --uninstall) UNINSTALL=1; shift ;;
-    -h|--help) sed -n '2,13p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,15p' "$0"; exit 0 ;;
     *) echo "unknown option $1" >&2; exit 2 ;;
   esac
 done
@@ -137,6 +143,11 @@ if [ -f "$CONFIG" ]; then
     printf '      [projects]\n      path = "%s"\n' "$PROJECTS_DIR"
     echo "    to $CONFIG (one [projects] table only) and restart MAP."
   fi
+  if ! grep -Eq '^[[:space:]]*\[agents_home\]' "$CONFIG"; then
+    echo "    its agents share your own CLI sign-ins (no [agents_home]). To give them their own, add:"
+    printf '      [agents_home]\n      mode = "isolated"\n'
+    echo "    restart MAP and sign each provider in under Settings -> Agent CLIs."
+  fi
 else
   mkdir -p "$DATA_DIR/workspace"
   # The workspace for tasks without a project must be a git repo. It lives in data/, so it is never a project.
@@ -166,6 +177,12 @@ session_prefix = "map-"
 [workspace.env]
 # The PATH the installer ran with, so the service finds the same agent CLIs as your shell.
 PATH = "$PATH"
+
+[agents_home]
+# isolated: MAP's agents sign in with their own accounts and keep their own history, in $CONFIG_DIR/agent-home
+# (claude/, codex/, gemini-home/); sign each one in once under Settings → Agent CLIs. Your own claude, codex and
+# agy in a terminal are unaffected. shared: they use your own sign-ins and history (~/.claude, ~/.codex, ~/.gemini).
+mode = "$AGENT_LOGIN"
 
 [orchestrator]
 autostart = false
@@ -206,7 +223,7 @@ LOG_DIR="$DATA_DIR"
 layout() {
   say "layout"
   echo "    app       $PREFIX            (map, dashboard, reflex: replaced on every install)"
-  echo "    config    $CONFIG_DIR        (map.toml, templates/, agents/)"
+  echo "    config    $CONFIG_DIR        (map.toml, templates/, agents/, agent-home/ with isolated agent logins)"
   echo "    data      $DATA_DIR          (database, runs, corpus repos, git key, default workspace)"
   echo "    projects  $PROJECTS_DIR      (the project folder: projects are its sub-folders)"
 }

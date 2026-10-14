@@ -7,22 +7,41 @@ use tokio::process::Command;
 
 use super::{TermSession, Terminal};
 
+/// Variables tmux reads to find "the current server" when it runs inside a tmux session. They would win over `-L`'s
+/// absence (and point a MAP started inside tmux at that server), so every tmux command MAP runs drops them.
+const TMUX_VARS: [&str; 2] = ["TMUX", "TMUX_PANE"];
+
 pub struct Tmux {
     bin: String,
+    /// `workspace.tmux_socket`: `-L <name>` on every command; `None`: tmux's default server.
+    socket: Option<String>,
 }
 
 impl Tmux {
-    pub fn new() -> Self {
+    pub fn new(socket: Option<String>) -> Self {
         let bin = ["/opt/homebrew/bin/tmux", "/usr/local/bin/tmux", "/usr/bin/tmux"]
             .into_iter()
             .find(|p| Path::new(p).exists())
             .unwrap_or("tmux")
             .to_string();
-        Self { bin }
+        Self { bin, socket: socket.filter(|s| !s.is_empty()) }
+    }
+
+    /// The tmux command for `args`: `-L <socket>` first when one is configured, and without `TMUX` / `TMUX_PANE`.
+    fn command(&self, args: &[&str]) -> Command {
+        let mut cmd = Command::new(&self.bin);
+        if let Some(socket) = &self.socket {
+            cmd.arg("-L").arg(socket);
+        }
+        for var in TMUX_VARS {
+            cmd.env_remove(var);
+        }
+        cmd.args(args).kill_on_drop(true);
+        cmd
     }
 
     async fn run(&self, args: &[&str]) -> Result<std::process::Output> {
-        let out = tokio::time::timeout(Duration::from_secs(5), Command::new(&self.bin).args(args).kill_on_drop(true).output())
+        let out = tokio::time::timeout(Duration::from_secs(5), self.command(args).output())
             .await
             .context("tmux timed out")?
             .context("running tmux")?;
@@ -64,11 +83,6 @@ impl Tmux {
     }
 }
 
-impl Default for Tmux {
-    fn default() -> Self {
-        Self::new()
-    }
-}
 
 fn alive(pid: &str) -> bool {
     std::process::Command::new("kill").args(["-0", pid]).output().is_ok_and(|o| o.status.success())
@@ -153,5 +167,34 @@ impl Terminal for Tmux {
             bail!("processes survived the kill: {survivors:?}");
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn parts(t: &Tmux, args: &[&str]) -> (Vec<String>, Vec<(String, Option<String>)>) {
+        let cmd = t.command(args);
+        let std = cmd.as_std();
+        let argv = std.get_args().map(|a| a.to_string_lossy().into_owned()).collect();
+        let env = std.get_envs().map(|(k, v)| (k.to_string_lossy().into_owned(), v.map(|v| v.to_string_lossy().into_owned()))).collect();
+        (argv, env)
+    }
+
+    #[test]
+    fn commands_use_the_private_socket_and_never_the_callers_tmux() {
+        let private = Tmux::new(Some("map-test".into()));
+        let (argv, env) = parts(&private, &["has-session", "-t", "=map-x"]);
+        assert_eq!(argv, ["-L", "map-test", "has-session", "-t", "=map-x"]);
+        // Removed (`None`), not just left unset: a MAP started inside tmux must not inherit them.
+        for var in TMUX_VARS {
+            assert!(env.contains(&(var.to_string(), None)), "{var} not removed: {env:?}");
+        }
+        let default = Tmux::new(None);
+        let (argv, env) = parts(&default, &["list-sessions"]);
+        assert_eq!(argv, ["list-sessions"]);
+        assert!(env.contains(&("TMUX".to_string(), None)) && env.contains(&("TMUX_PANE".to_string(), None)));
+        assert_eq!(parts(&Tmux::new(Some(String::new())), &["ls"]).0, ["ls"], "an empty name is the default server");
     }
 }

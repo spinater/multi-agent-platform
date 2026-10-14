@@ -6,7 +6,7 @@
 use std::path::Path;
 
 use crate::hub::Hub;
-use crate::model::{AgentBinary, EnvVarState, GitCliTool, RunMode, ServerSettings, SettingsInfo};
+use crate::model::{AgentBinary, AgentsHome, AgentsHomeMode, EnvVarState, GitCliTool, RunMode, ServerSettings, SettingsInfo};
 
 /// Files a container runtime leaves at the root: Docker's `/.dockerenv`, Podman's `/run/.containerenv`.
 const CONTAINER_MARKERS: [&str; 2] = ["/.dockerenv", "/run/.containerenv"];
@@ -45,6 +45,14 @@ pub fn restart_hint(mode: RunMode, config_path: Option<&str>) -> String {
     }
 }
 
+/// The command that attaches to a session by hand, `<session>` standing for its name.
+pub fn attach_command(socket: Option<&str>) -> String {
+    match socket {
+        Some(s) => format!("tmux -L {s} attach -t '=<session>'"),
+        None => "tmux attach -t '=<session>'".into(),
+    }
+}
+
 /// `name` is set (non-empty) in `[workspace.env]` and/or MAP's own environment. Never the value.
 fn var(hub: &Hub, name: &str, purpose: &str) -> EnvVarState {
     EnvVarState {
@@ -80,6 +88,8 @@ pub fn info(hub: &Hub) -> SettingsInfo {
         reflex_binary: c.reflex.binary.clone(),
         reflex_version: hub.reflex.version(&c.reflex.binary),
         run_mode: mode,
+        tmux_socket: c.workspace.tmux_socket.clone(),
+        attach_command: attach_command(c.workspace.tmux_socket.as_deref()),
     };
     let git_cli = vec![
         GitCliTool {
@@ -95,8 +105,22 @@ pub fn info(hub: &Hub) -> SettingsInfo {
             vars: vec![var(hub, "GITLAB_TOKEN", "token for GitLab"), var(hub, "GITLAB_HOST", "self-hosted GitLab's address (not secret); unset: gitlab.com")],
         },
     ];
-    let agents = c.providers.iter().map(|(name, spec)| AgentBinary { provider: name.clone(), binary: spec.binary.clone(), path: path(&spec.binary) }).collect();
-    SettingsInfo { server, git_cli, agents }
+    let agents = c
+        .providers
+        .iter()
+        .map(|(name, spec)| AgentBinary {
+            provider: name.clone(),
+            binary: spec.binary.clone(),
+            path: path(&spec.binary),
+            home: hub.provider_home(name).map(|p| p.display().to_string()),
+            home_env: hub.provider_env(name).into_iter().next().map(|(k, v)| format!("{k}={v}")),
+        })
+        .collect();
+    let agents_home = AgentsHome {
+        mode: if c.agents_home.isolated() { AgentsHomeMode::Isolated } else { AgentsHomeMode::Shared },
+        dir: abs(c.agents_home.dir()),
+    };
+    SettingsInfo { server, git_cli, agents, agents_home }
 }
 
 #[cfg(test)]
@@ -127,6 +151,32 @@ mod tests {
         assert_eq!(run_mode(false, env(&[])), RunMode::Manual);
         assert!(restart_hint(RunMode::Manual, Some("/etc/map.toml")).contains("map serve -c /etc/map.toml"));
         assert!(restart_hint(RunMode::Docker, None).contains("docker compose restart"));
+    }
+
+    #[test]
+    fn attach_command_names_the_private_socket() {
+        assert_eq!(attach_command(None), "tmux attach -t '=<session>'");
+        assert_eq!(attach_command(Some("map")), "tmux -L map attach -t '=<session>'");
+    }
+
+    #[tokio::test]
+    async fn agent_homes_and_the_tmux_socket_are_reported() {
+        let dir = tempfile::tempdir().unwrap();
+        let text = format!(
+            "[server]\ndata_dir = \"{0}/data\"\n[workspace]\ndir = \"{0}\"\ntmux_socket = \"map-t\"\n[agents_home]\nmode = \"isolated\"\ndir = \"{0}/ah\"\n",
+            dir.path().display()
+        );
+        let config = crate::config::Config::parse(&text, Path::new("/")).unwrap();
+        let hub = Hub::new(config, crate::store::Store::memory().await.unwrap(), Arc::new(crate::terminal::fake::FakeTerminal::default()));
+        let info = info(&hub);
+        assert_eq!(info.agents_home.mode, AgentsHomeMode::Isolated);
+        assert_eq!(info.agents_home.dir, dir.path().join("ah").display().to_string());
+        let claude = info.agents.iter().find(|a| a.provider == "claude").unwrap();
+        assert_eq!(claude.home.as_deref(), Some(dir.path().join("ah/claude").display().to_string().as_str()));
+        assert_eq!(claude.home_env, Some(format!("CLAUDE_CONFIG_DIR={}/ah/claude", dir.path().display())));
+        assert_eq!(info.server.tmux_socket.as_deref(), Some("map-t"));
+        assert_eq!(info.server.attach_command, "tmux -L map-t attach -t '=<session>'");
+        assert_eq!(hub.server_info().tmux_socket.as_deref(), Some("map-t"));
     }
 
     #[tokio::test]

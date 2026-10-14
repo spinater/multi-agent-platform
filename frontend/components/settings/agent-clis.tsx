@@ -1,7 +1,8 @@
 "use client";
 
-/** Settings → Agent CLIs: per provider, the binary and where it is found, the installed and latest version (from the
- * update check), the sign-in state with the shared sign-in modal, and Update through the same flow as the bell. */
+/** Settings → Agent CLIs: whose logins MAP's agents use (`[agents_home]`), then per provider the binary and where it
+ * is found, its state folder, the installed and latest version (from the update check), the sign-in state with the
+ * shared sign-in modal, and Update through the same flow as the bell. */
 
 import { RotateCw } from "lucide-react";
 
@@ -23,8 +24,10 @@ export function AgentClis({ settings }: { settings: SettingsInfo | null }) {
   const { report, checking, error } = useUpdates();
   const flow = useUpdateDialogs();
   const checkedAt = report?.checked_at ? new Date(report.checked_at).getTime() : null;
+  const isolated = settings?.agents_home.mode === "isolated";
   return (
     <div className="flex min-w-0 flex-col gap-3">
+      {settings && <AgentLogins settings={settings} />}
       <Card className="flex flex-col p-[18px] pb-1">
         <div className="flex flex-wrap items-center justify-between gap-2 pb-3">
           <SectionTitle note={checkedAt !== null ? `versions checked ${dur(now - checkedAt, false)} ago` : report?.enabled === false ? "update checks off" : undefined}>
@@ -37,7 +40,7 @@ export function AgentClis({ settings }: { settings: SettingsInfo | null }) {
         </div>
         {providers.length === 0 && <p className="pb-3 font-mono text-[11.5px] text-muted">{error ?? "loading…"}</p>}
         {providers.map((p) => (
-          <ProviderRow key={p.name} p={p} settings={settings} report={report} flow={flow} onSignIn={() => openAuth(p.name)} />
+          <ProviderRow key={p.name} p={p} settings={settings} isolated={isolated} report={report} flow={flow} onSignIn={() => openAuth(p.name)} />
         ))}
       </Card>
       <p className="px-0.5 text-[12px] leading-normal text-muted">
@@ -49,15 +52,41 @@ export function AgentClis({ settings }: { settings: SettingsInfo | null }) {
   );
 }
 
+/** `[agents_home]`: isolated (MAP's agents have their own accounts and history) or shared (the owner's). */
+function AgentLogins({ settings }: { settings: SettingsInfo }) {
+  const home = settings.agents_home;
+  const isolated = home.mode === "isolated";
+  return (
+    <Card className="flex flex-col gap-2.5 p-[18px]">
+      <SectionTitle note={isolated ? "isolated" : "shared"}>Agent logins</SectionTitle>
+      {isolated ? (
+        <p className="text-[12.5px] leading-normal text-text-2">
+          <span className="font-semibold text-text">Isolated.</span> MAP&apos;s agents use their own accounts and history, kept in{" "}
+          <code className="break-all">{home.dir}</code> (one folder per provider, below). Your own <code>claude</code>, <code>codex</code> and <code>agy</code> in a
+          terminal are unaffected, and nothing is copied from them: sign each provider in here once.
+        </p>
+      ) : (
+        <p className="text-[12.5px] leading-normal text-text-2">
+          <span className="font-semibold text-text">Shared.</span> MAP&apos;s agents use the same accounts and history as your own CLIs (each one&apos;s usual
+          folder, below): signing in or out here does it for your terminal too. To give them their own, set <code>[agents_home] mode = &quot;isolated&quot;</code> in{" "}
+          <code>map.toml</code> and restart MAP, then sign each provider in once.
+        </p>
+      )}
+    </Card>
+  );
+}
+
 function ProviderRow({
   p,
   settings,
+  isolated,
   report,
   flow,
   onSignIn,
 }: {
   p: ProviderInfo;
   settings: SettingsInfo | null;
+  isolated: boolean;
   report: ReturnType<typeof useUpdates>["report"];
   flow: ReturnType<typeof useUpdateDialogs>;
   onSignIn: () => void;
@@ -80,6 +109,11 @@ function ProviderRow({
         <span className="font-mono text-[11px] break-all text-text-2">
           {bin ? (bin.path ?? <span className="text-bad">{bin.binary} · not on the agents&apos; PATH</span>) : (p.available ? "found" : "not found")}
         </span>
+        {bin?.home && (
+          <span className="font-mono text-[10.5px] break-all text-muted" title={bin.home_env ?? undefined}>
+            home {bin.home}
+          </span>
+        )}
       </div>
       <div className="flex min-w-0 flex-col gap-1">
         <span className="label">version</span>
@@ -96,7 +130,21 @@ function ProviderRow({
       </div>
       <div className="flex min-w-0 flex-col gap-1">
         <span className="label">sign-in</span>
-        <span className={`font-mono text-[12px] ${TONE[sign.tone]}`}>{sign.text}</span>
+        {isolated && p.available && p.signed_in === false ? (
+          <span className="font-mono text-[12px] text-warn">
+            not signed in yet
+            {canSignIn && (
+              <>
+                {" — "}
+                <button type="button" onClick={onSignIn} className="cursor-pointer text-accent-soft underline underline-offset-2">
+                  Sign in
+                </button>
+              </>
+            )}
+          </span>
+        ) : (
+          <span className={`font-mono text-[12px] ${TONE[sign.tone]}`}>{sign.text}</span>
+        )}
         {p.login.api_key_env && (
           <span className="font-mono text-[10.5px] text-muted">
             or {p.login.api_key_env} in [workspace.env] · {p.login.api_key_set ? <span className="text-ok">set</span> : "not set"}

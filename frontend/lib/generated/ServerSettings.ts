@@ -37,4 +37,12 @@ static_dir_ok: boolean, reflex_binary: string, reflex_version: string | null, ru
 /**
  * The command that restarts MAP after editing `map.toml` for this run mode (by hand: starts it again).
  */
-restart_hint: string, };
+restart_hint: string, 
+/**
+ * `workspace.tmux_socket`; `None`: tmux's default server.
+ */
+tmux_socket: string | null, 
+/**
+ * How to attach to a session by hand, with `<session>` for its name (`tmux -L map attach -t '=<session>'`).
+ */
+attach_command: string, };

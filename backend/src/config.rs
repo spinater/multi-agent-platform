@@ -30,6 +30,8 @@ pub struct Config {
     pub templates: TemplatesConfig,
     #[serde(default)]
     pub projects: ProjectsConfig,
+    #[serde(default)]
+    pub agents_home: AgentsHomeConfig,
     /// Overrides merged onto the built-in `claude`, `codex` and `gemini` specs; new names add providers.
     #[serde(default, rename = "providers")]
     provider_overrides: BTreeMap<String, ProviderOverride>,
@@ -90,6 +92,11 @@ pub struct WorkspaceConfig {
     /// MAP leaves those files alone and you answer the question yourself.
     #[serde(default = "default_true")]
     pub trust_folders: bool,
+    /// A private tmux server (`tmux -L <name>`) for every session MAP runs; unset: tmux's default server. MAP always
+    /// drops `TMUX` and `TMUX_PANE` from its tmux commands, so a MAP started inside tmux never targets that server by
+    /// accident.
+    #[serde(default)]
+    pub tmux_socket: Option<String>,
 }
 
 fn default_prefix() -> String {
@@ -238,6 +245,42 @@ impl Default for ReflexConfig {
             api_model: "claude-haiku-5-5".into(),
             fallback_overhead_tokens: BTreeMap::new(),
         }
+    }
+}
+
+/// Whose logins and history MAP's agents use (`[agents_home]`).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AgentsHomeMode {
+    /// The CLIs' usual folders (`~/.claude`, `~/.codex`, `~/.gemini`): the same accounts and history as your own
+    /// `claude` / `codex` / `agy` in a terminal.
+    #[default]
+    Shared,
+    /// Each provider gets `<dir>/<provider>`, exported in its `home_env` to every CLI MAP starts: MAP's agents sign in
+    /// once with their own accounts, and keep their own history. Your own CLIs in a terminal are unaffected.
+    Isolated,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct AgentsHomeConfig {
+    pub mode: AgentsHomeMode,
+    /// The parent of the per-provider folders in `isolated` mode. Default `<folder of map.toml>/agent-home`
+    /// (`<data_dir>/agent-home` for a config without a file). `~/` is `$HOME`; relative paths resolve against the
+    /// config's folder.
+    dir: Option<PathBuf>,
+    #[serde(skip)]
+    resolved: PathBuf,
+}
+
+impl AgentsHomeConfig {
+    /// The resolved parent folder (used in `isolated` mode only).
+    pub fn dir(&self) -> &Path {
+        &self.resolved
+    }
+
+    pub fn isolated(&self) -> bool {
+        self.mode == AgentsHomeMode::Isolated
     }
 }
 
@@ -601,6 +644,19 @@ pub struct ProviderSpec {
     pub latest: Option<LatestSource>,
     /// Updates the CLI, run in a helper tmux session `<session_prefix>update-<name>`; empty: not from the dashboard.
     pub update: Vec<String>,
+    /// The variable that relocates the CLI's state (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`; `HOME` for a CLI without
+    /// one). In `[agents_home] mode = "isolated"` MAP sets it to `<agents_home.dir>/<isolated_dir>` for every launch.
+    pub home_env: Option<String>,
+    /// The CLI's state folder when `home_env` is not set (`~/.claude`). Paths MAP reads under it (credentials,
+    /// skills, transcripts, usage logs, settings) follow the folder the CLI really uses ([`Config::provider_home`]).
+    pub default_home: Option<String>,
+    /// The state folder inside `home_env`'s folder: empty for `CLAUDE_CONFIG_DIR`, `.gemini` for `HOME`.
+    pub home_subdir: Option<String>,
+    /// The folder's name under `agents_home.dir`; default: the provider's name.
+    pub isolated_dir: Option<String>,
+    /// `VAR=~/path` exported next to `home_env` in isolated mode, so tools the agent runs keep their real folders
+    /// when `home_env` is `HOME` (cargo, rustup, go). `~` is MAP's own `$HOME`; a value in MAP's environment wins.
+    pub home_keep: Vec<String>,
 }
 
 /// Where a CLI records that its user trusts a folder (`backend/src/trust.rs` writes it).
@@ -712,6 +768,11 @@ struct ProviderOverride {
     version: Option<Vec<String>>,
     latest: Option<LatestSource>,
     update: Option<Vec<String>>,
+    home_env: Option<String>,
+    default_home: Option<String>,
+    home_subdir: Option<String>,
+    isolated_dir: Option<String>,
+    home_keep: Option<Vec<String>>,
 }
 
 /// An optional override: missing keeps the built-in value, `""` clears it.
@@ -766,6 +827,11 @@ pub fn builtin_providers() -> BTreeMap<String, ProviderSpec> {
                 channel: Some(ChannelSource { file: "~/.claude/settings.json".into(), key: "autoUpdatesChannel".into(), default: "latest".into() }),
             }),
             update: strings(&["{binary}", "update"]),
+            home_env: Some("CLAUDE_CONFIG_DIR".into()),
+            default_home: Some("~/.claude".into()),
+            home_subdir: None,
+            isolated_dir: None,
+            home_keep: vec![],
         },
     );
     map.insert(
@@ -801,6 +867,11 @@ pub fn builtin_providers() -> BTreeMap<String, ProviderSpec> {
             version: strings(&["{binary}", "--version"]),
             latest: Some(LatestSource { url: "https://registry.npmjs.org/@openai/codex/latest".into(), json: Some("version".into()), channel: None }),
             update: strings(&["{binary}", "update"]),
+            home_env: Some("CODEX_HOME".into()),
+            default_home: Some("~/.codex".into()),
+            home_subdir: None,
+            isolated_dir: None,
+            home_keep: vec![],
         },
     );
     map.insert(
@@ -836,6 +907,14 @@ pub fn builtin_providers() -> BTreeMap<String, ProviderSpec> {
                 channel: None,
             }),
             update: strings(&["{binary}", "update"]),
+            // agy 1.3 has no variable for its state folder (~/.gemini: sign-in token, settings, conversations), so
+            // isolated mode gives it a HOME of its own. It may also keep a token in the system keyring, which HOME
+            // does not move.
+            home_env: Some("HOME".into()),
+            default_home: Some("~/.gemini".into()),
+            home_subdir: Some(".gemini".into()),
+            isolated_dir: Some("gemini-home".into()),
+            home_keep: strings(&["CARGO_HOME=~/.cargo", "RUSTUP_HOME=~/.rustup", "GOPATH=~/go"]),
         },
     );
     map
@@ -873,6 +952,11 @@ impl ProviderOverride {
                     version: vec![],
                     latest: None,
                     update: vec![],
+                    home_env: None,
+                    default_home: None,
+                    home_subdir: None,
+                    isolated_dir: None,
+                    home_keep: vec![],
                 }
             }
         };
@@ -906,6 +990,11 @@ impl ProviderOverride {
                 None => base.latest,
             },
             update: self.update.unwrap_or(base.update),
+            home_env: optional(self.home_env, base.home_env),
+            default_home: optional(self.default_home, base.default_home),
+            home_subdir: optional(self.home_subdir, base.home_subdir),
+            isolated_dir: optional(self.isolated_dir, base.isolated_dir),
+            home_keep: self.home_keep.unwrap_or(base.home_keep),
         })
     }
 }
@@ -914,13 +1003,19 @@ impl Config {
     pub fn load(path: &Path) -> Result<Self> {
         let text = std::fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
         let base = path.parent().unwrap_or(Path::new("."));
-        let mut config = Self::parse(&text, base)?;
+        let mut config = Self::parse_in(&text, base, Some(base))?;
         config.path = Some(std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf()));
         Ok(config)
     }
 
     /// Relative paths in the file resolve against `base` (the config file's directory).
+    #[cfg(test)]
     pub fn parse(text: &str, base: &Path) -> Result<Self> {
+        Self::parse_in(text, base, None)
+    }
+
+    /// [`Config::parse`]; `config_dir` is the folder of the file it came from, where `agents_home.dir` defaults to.
+    fn parse_in(text: &str, base: &Path, config_dir: Option<&Path>) -> Result<Self> {
         let mut config: Config = toml::from_str(text).context("parsing config")?;
         let mut providers = builtin_providers();
         for (name, over) in std::mem::take(&mut config.provider_overrides) {
@@ -968,13 +1063,51 @@ impl Config {
 
         let mut warnings = vec![];
         config.projects.resolve(base, &config.server.data_dir, &mut warnings)?;
-        config.warnings = warnings;
+        config.warnings.extend(warnings);
         config.projects.git_timeout_secs = config.projects.git_timeout_secs.clamp(5, 3600);
 
         let usage = &mut config.usage;
         for p in [&mut usage.claude_credentials, &mut usage.claude_projects, &mut usage.codex_sessions, &mut usage.codex_auth] {
             *p = resolve(&expand_home(p));
         }
+
+        config.agents_home.resolved = match config.agents_home.dir.take() {
+            Some(dir) => home(&dir),
+            None => match config_dir {
+                // `map.toml` given without a folder: its parent is "", the working directory.
+                Some(dir) => {
+                    let dir = if dir.as_os_str().is_empty() { Path::new(".") } else { dir };
+                    std::path::absolute(dir).unwrap_or_else(|_| dir.to_path_buf()).join("agent-home")
+                }
+                None => config.server.data_dir.join("agent-home"),
+            },
+        };
+        for (name, spec) in &config.providers {
+            if let Some(var) = &spec.home_env
+                && !valid_var(var)
+            {
+                bail!("providers.{name}.home_env `{var}` is not a valid variable name");
+            }
+            if let Some(dir) = &spec.isolated_dir
+                && !matches!(Path::new(dir).components().collect::<Vec<_>>().as_slice(), [std::path::Component::Normal(_)])
+            {
+                bail!("providers.{name}.isolated_dir `{dir}` must be one folder name");
+            }
+            if let Some(keep) = spec.home_keep.iter().find(|k| !k.split_once('=').is_some_and(|(k, v)| valid_var(k) && !v.is_empty())) {
+                bail!("providers.{name}.home_keep `{keep}` must be VAR=value");
+            }
+            if config.agents_home.isolated() && spec.home_env.is_none() {
+                config.warnings.push(format!("provider `{name}` has no home_env, so in isolated mode it still uses its usual folders and sign-in"));
+            }
+        }
+        config.rebase_provider_paths();
+        if let Some(sock) = config.workspace.tmux_socket.take().map(|s| s.trim().to_string()).filter(|s| !s.is_empty()) {
+            if !sock.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.')) || sock.starts_with('.') {
+                bail!("workspace.tmux_socket `{sock}` may use only letters, digits, -, _ and . (it is a name, not a path)");
+            }
+            config.workspace.tmux_socket = Some(sock);
+        }
+        let usage = &mut config.usage;
         if !(usage.skip_pct > 0.0 && usage.skip_pct <= 100.0) {
             bail!("usage.skip_pct must be above 0 and at most 100");
         }
@@ -1006,7 +1139,7 @@ impl Config {
         if !config.workspace.session_prefix.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') || config.workspace.session_prefix.is_empty() {
             bail!("workspace.session_prefix must be non-empty and use only letters, digits, - or _");
         }
-        if let Some(key) = config.workspace.env.keys().find(|k| !k.chars().enumerate().all(|(i, c)| c == '_' || c.is_ascii_alphabetic() || (i > 0 && c.is_ascii_digit()))) {
+        if let Some(key) = config.workspace.env.keys().find(|k| !valid_var(k)) {
             bail!("workspace.env key `{key}` is not a valid variable name");
         }
         if config.orchestrator.max_parallel == 0 {
@@ -1039,6 +1172,143 @@ impl Config {
         }
         Ok(config)
     }
+
+    /// The folder `providers.<name>.home_env` points the CLI at: a value in `[workspace.env]` wins, then the
+    /// isolated folder (`[agents_home] mode = "isolated"`), then MAP's own environment. `None`: the variable is not
+    /// set, so the CLI uses its `default_home`.
+    pub fn provider_home_var(&self, name: &str) -> Option<PathBuf> {
+        let spec = self.providers.get(name)?;
+        let var = spec.home_env.as_deref()?;
+        if let Some(v) = self.workspace.env.get(var).filter(|v| !v.is_empty()) {
+            return Some(expand_home(Path::new(v)));
+        }
+        if self.agents_home.isolated() {
+            return Some(self.isolated_folder(name, spec));
+        }
+        std::env::var_os(var).filter(|v| !v.is_empty()).map(|v| expand_home(Path::new(&v)))
+    }
+
+    /// The CLI's state folder as the CLI will see it (`~/.claude`, `<agents_home.dir>/claude`,
+    /// `<agents_home.dir>/gemini-home/.gemini`); `None` for a provider with neither `home_env` nor `default_home`.
+    /// Every path MAP reads under a provider's `default_home` follows this folder ([`Config::parse`] moves them).
+    pub fn provider_home(&self, name: &str) -> Option<PathBuf> {
+        let spec = self.providers.get(name)?;
+        match self.provider_home_var(name) {
+            Some(dir) => Some(match spec.home_subdir.as_deref().filter(|s| !s.is_empty()) {
+                Some(sub) => dir.join(sub),
+                None => dir,
+            }),
+            None => spec.default_home.as_deref().map(|h| expand_home(Path::new(h))),
+        }
+    }
+
+    /// What every launch of the provider exports besides `[workspace.env]`: in isolated mode its `home_env` (unless
+    /// `[workspace.env]` sets that variable itself) and its `home_keep`; nothing in shared mode.
+    pub fn provider_env(&self, name: &str) -> Vec<(String, String)> {
+        let Some(spec) = self.providers.get(name) else { return vec![] };
+        let Some(var) = spec.home_env.as_deref() else { return vec![] };
+        if !self.agents_home.isolated() || self.workspace.env.get(var).is_some_and(|v| !v.is_empty()) {
+            return vec![];
+        }
+        let mut env = vec![(var.to_string(), self.isolated_folder(name, spec).display().to_string())];
+        for (k, v) in spec.home_keep.iter().filter_map(|k| k.split_once('=')) {
+            if self.workspace.env.contains_key(k) {
+                continue;
+            }
+            let v = std::env::var(k).ok().filter(|v| !v.is_empty()).unwrap_or_else(|| expand_home(Path::new(v)).display().to_string());
+            env.push((k.to_string(), v));
+        }
+        env
+    }
+
+    fn isolated_folder(&self, name: &str, spec: &ProviderSpec) -> PathBuf {
+        self.agents_home.dir().join(spec.isolated_dir.as_deref().unwrap_or(name))
+    }
+
+    /// In isolated mode, creates `agents_home.dir` and each provider's folders (mode 0700) where missing, and returns
+    /// the provider folders. Nothing is copied into them: each provider is signed in there once.
+    pub fn create_agent_homes(&self) -> Result<Vec<PathBuf>> {
+        if !self.agents_home.isolated() {
+            return Ok(vec![]);
+        }
+        let mut dirs = vec![self.agents_home.dir().to_path_buf()];
+        for name in self.providers.keys() {
+            for dir in [self.provider_home_var(name), self.provider_home(name)].into_iter().flatten() {
+                if !dirs.contains(&dir) {
+                    dirs.push(dir);
+                }
+            }
+        }
+        for dir in &dirs {
+            if dir.is_dir() {
+                continue;
+            }
+            std::fs::create_dir_all(dir).with_context(|| format!("creating {}", dir.display()))?;
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700)).with_context(|| format!("chmod 700 {}", dir.display()))?;
+            }
+        }
+        Ok(dirs.split_off(1))
+    }
+
+    /// Moves every configured path under a provider's `default_home` (credentials, skills and agents folders,
+    /// transcripts, usage logs, the release-channel file) to the same place under [`Config::provider_home`]. A no-op
+    /// in shared mode unless the CLI's `home_env` is set.
+    fn rebase_provider_paths(&mut self) {
+        let moves: Vec<(PathBuf, PathBuf)> = self
+            .providers
+            .iter()
+            .filter_map(|(name, spec)| {
+                let from = expand_home(Path::new(spec.default_home.as_deref()?));
+                let to = self.provider_home(name)?;
+                (from != to).then_some((from, to))
+            })
+            .collect();
+        if moves.is_empty() {
+            return;
+        }
+        let rebase = |p: &mut PathBuf| {
+            if let Some((from, to)) = moves.iter().find(|(from, _)| p.starts_with(from)) {
+                let rest = p.strip_prefix(from).expect("starts_with").to_path_buf();
+                *p = if rest.as_os_str().is_empty() { to.clone() } else { to.join(rest) };
+            }
+        };
+        let s = &mut self.skills;
+        for p in s.claude_user_dirs.iter_mut().chain(s.claude_plugin_dirs.iter_mut()).chain(s.codex_user_dirs.iter_mut()) {
+            rebase(p);
+        }
+        rebase(&mut s.claude_settings);
+        rebase(&mut s.claude_transcripts);
+        let a = &mut self.agents;
+        for p in a.claude_user_dirs.iter_mut().chain(a.codex_user_dirs.iter_mut()).chain(a.gemini_user_dirs.iter_mut()) {
+            rebase(p);
+        }
+        let u = &mut self.usage;
+        for p in [&mut u.claude_credentials, &mut u.claude_projects, &mut u.codex_sessions, &mut u.codex_auth] {
+            rebase(p);
+        }
+        let rebase_str = |s: &mut String| {
+            let before = expand_home(Path::new(s.as_str()));
+            let mut p = before.clone();
+            rebase(&mut p);
+            if p != before {
+                *s = p.display().to_string();
+            }
+        };
+        for spec in self.providers.values_mut() {
+            spec.credentials.iter_mut().for_each(rebase_str);
+            if let Some(ch) = spec.latest.as_mut().and_then(|l| l.channel.as_mut()) {
+                rebase_str(&mut ch.file);
+            }
+        }
+    }
+}
+
+/// A shell variable name: letters, digits and `_`, not starting with a digit.
+fn valid_var(k: &str) -> bool {
+    !k.is_empty() && k.chars().enumerate().all(|(i, c)| c == '_' || c.is_ascii_alphabetic() || (i > 0 && c.is_ascii_digit()))
 }
 
 #[cfg(test)]
@@ -1241,6 +1511,106 @@ default_root = "Docker""#,
         // Built-in tiers drop models a changed list no longer has.
         let c = Config::parse("[workspace]\ndir = \"/r\"\n[providers.claude]\nmodels = [\"sonnet\"]\n", Path::new("/")).unwrap();
         assert_eq!((c.orchestrator.tiers["claude"].get("light"), c.orchestrator.tiers["claude"].get("standard")), (None, Some("sonnet")));
+    }
+
+    #[test]
+    fn agent_homes_follow_the_mode_and_the_provider() {
+        let home = PathBuf::from(std::env::var_os("HOME").unwrap());
+        let unset = |v: &str| std::env::var_os(v).is_none_or(|v| v.is_empty());
+        // Shared (the default): the CLIs' usual folders, nothing exported, every path as before.
+        let shared = Config::parse("[workspace]\ndir = \"/r\"\n[server]\ndata_dir = \"/var/map\"\n", Path::new("/etc/map")).unwrap();
+        assert!(!shared.agents_home.isolated());
+        assert_eq!(shared.agents_home.dir(), Path::new("/var/map/agent-home"), "no config file: under the data dir");
+        if unset("CLAUDE_CONFIG_DIR") && unset("CODEX_HOME") {
+            assert_eq!(shared.provider_home("claude"), Some(home.join(".claude")));
+            assert_eq!(shared.provider_home("codex"), Some(home.join(".codex")));
+            assert_eq!(shared.usage.codex_auth, home.join(".codex/auth.json"));
+            assert_eq!(shared.providers["claude"].credentials, ["~/.claude/.credentials.json"]);
+        }
+        assert_eq!(shared.provider_home("gemini"), Some(home.join(".gemini")));
+        for p in ["claude", "codex", "gemini"] {
+            assert!(shared.provider_env(p).is_empty(), "{p}");
+        }
+
+        // Isolated: <dir>/<provider>, exported in each CLI's own variable; agy gets a HOME of its own.
+        let text = "[workspace]\ndir = \"/r\"\n[agents_home]\nmode = \"isolated\"\ndir = \"/srv/ah\"\n[providers.aider]\nbinary = \"aider\"\ninteractive = [\"aider\"]\n";
+        let c = Config::parse(text, Path::new("/etc/map")).unwrap();
+        let ah = PathBuf::from("/srv/ah");
+        assert_eq!(c.provider_home("claude"), Some(ah.join("claude")));
+        assert_eq!(c.provider_home("codex"), Some(ah.join("codex")));
+        assert_eq!(c.provider_home("gemini"), Some(ah.join("gemini-home/.gemini")));
+        assert_eq!(c.provider_home("aider"), None);
+        assert_eq!(c.provider_env("claude"), [("CLAUDE_CONFIG_DIR".to_string(), "/srv/ah/claude".to_string())]);
+        assert_eq!(c.provider_env("codex"), [("CODEX_HOME".to_string(), "/srv/ah/codex".to_string())]);
+        let agy = c.provider_env("gemini");
+        assert_eq!(agy[0], ("HOME".to_string(), "/srv/ah/gemini-home".to_string()));
+        let cargo = std::env::var("CARGO_HOME").unwrap_or_else(|_| home.join(".cargo").display().to_string());
+        assert!(agy.contains(&("CARGO_HOME".to_string(), cargo)), "tools keep their real folders: {agy:?}");
+        assert!(c.provider_env("aider").is_empty());
+        assert!(c.warnings.iter().any(|w| w.contains("aider")), "{:?}", c.warnings);
+        // Every path MAP reads under ~/.claude, ~/.codex or ~/.gemini moved with it; others did not.
+        assert_eq!(c.providers["claude"].credentials, ["/srv/ah/claude/.credentials.json"]);
+        assert_eq!(c.providers["codex"].credentials, ["/srv/ah/codex/auth.json"]);
+        assert_eq!(c.providers["gemini"].credentials, ["/srv/ah/gemini-home/.gemini/jetski-standalone-oauth-token"]);
+        assert_eq!(c.providers["claude"].latest.as_ref().unwrap().channel.as_ref().unwrap().file, "/srv/ah/claude/settings.json");
+        assert_eq!(c.usage.claude_credentials, ah.join("claude/.credentials.json"));
+        assert_eq!(c.usage.claude_projects, ah.join("claude/projects"));
+        assert_eq!(c.usage.codex_sessions, ah.join("codex/sessions"));
+        assert_eq!(c.usage.codex_auth, ah.join("codex/auth.json"));
+        assert_eq!(c.skills.claude_user_dirs, [ah.join("claude/skills")]);
+        assert_eq!(c.skills.claude_plugin_dirs, [ah.join("claude/plugins")]);
+        assert_eq!(c.skills.codex_user_dirs, [ah.join("codex/skills")]);
+        assert_eq!(c.skills.claude_settings, ah.join("claude/settings.json"));
+        assert_eq!(c.skills.claude_transcripts, ah.join("claude/projects"));
+        assert_eq!(c.agents.claude_user_dirs, [ah.join("claude/agents")]);
+        assert_eq!(c.agents.codex_user_dirs, [ah.join("codex/agents")]);
+        assert_eq!(c.agents.gemini_user_dirs, [ah.join("gemini-home/.gemini/config/agents")]);
+        assert_eq!(c.templates.dirs, [home.join(".config/map/templates")]);
+
+        // A variable set in [workspace.env] wins over the isolated folder (and is exported from there, not twice).
+        let c = Config::parse(&format!("{text}[workspace.env]\nCODEX_HOME = \"/opt/codex\"\n"), Path::new("/")).unwrap();
+        assert_eq!(c.provider_home("codex"), Some(PathBuf::from("/opt/codex")));
+        assert!(c.provider_env("codex").is_empty());
+        assert_eq!(c.usage.codex_auth, PathBuf::from("/opt/codex/auth.json"));
+
+        for bad in [
+            "[agents_home]\nmode = \"private\"",
+            "[providers.codex]\nhome_env = \"1X\"",
+            "[providers.codex]\nisolated_dir = \"../x\"",
+            "[providers.gemini]\nhome_keep = [\"CARGO_HOME\"]",
+            "[workspace]\ndir = \"/r\"\ntmux_socket = \"/tmp/x\"",
+        ] {
+            let text = if bad.starts_with("[workspace]") { bad.to_string() } else { format!("[workspace]\ndir = \"/r\"\n{bad}\n") };
+            assert!(Config::parse(&text, Path::new("/")).is_err(), "{bad}");
+        }
+        let c = Config::parse("[workspace]\ndir = \"/r\"\ntmux_socket = \" map-dev \"\n", Path::new("/")).unwrap();
+        assert_eq!(c.workspace.tmux_socket.as_deref(), Some("map-dev"));
+        assert_eq!(Config::parse("[workspace]\ndir = \"/r\"\ntmux_socket = \"\"\n", Path::new("/")).unwrap().workspace.tmux_socket, None);
+    }
+
+    #[test]
+    fn agent_home_defaults_next_to_map_toml_and_is_created_private() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("map.toml");
+        std::fs::write(&file, format!("[workspace]\ndir = \"{0}\"\n[server]\ndata_dir = \"{0}/data\"\n[agents_home]\nmode = \"isolated\"\n", dir.path().display())).unwrap();
+        let c = Config::load(&file).unwrap();
+        let ah = dir.path().join("agent-home");
+        assert_eq!(c.agents_home.dir(), ah);
+        let made = c.create_agent_homes().unwrap();
+        for sub in ["claude", "codex", "gemini-home", "gemini-home/.gemini"] {
+            assert!(made.contains(&ah.join(sub)), "{sub}: {made:?}");
+        }
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            for d in [ah.clone(), ah.join("claude"), ah.join("gemini-home/.gemini")] {
+                assert_eq!(std::fs::metadata(&d).unwrap().permissions().mode() & 0o777, 0o700, "{}", d.display());
+            }
+        }
+        // Shared mode creates nothing.
+        let shared = Config::parse(&format!("[workspace]\ndir = \"/r\"\n[server]\ndata_dir = \"{}/s\"\n", dir.path().display()), Path::new("/")).unwrap();
+        assert!(shared.create_agent_homes().unwrap().is_empty());
+        assert!(!dir.path().join("s").exists());
     }
 
     #[test]

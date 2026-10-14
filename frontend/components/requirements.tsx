@@ -10,6 +10,7 @@ import type { PlannerInfo } from "@/lib/generated/PlannerInfo";
 import type { PlanStatus } from "@/lib/generated/PlanStatus";
 import type { PlanTask } from "@/lib/generated/PlanTask";
 import type { PlanTaskInput } from "@/lib/generated/PlanTaskInput";
+import { attachCommand } from "@/lib/tmux";
 import { plansApi, setPlan, usePlans } from "@/lib/use-plans";
 
 import { useApp } from "./app-context";
@@ -106,7 +107,7 @@ function PlannerChat({ project }: { project: string | null }) {
             <span>
               {session.provider} · {session.model}
             </span>
-            <span className="hidden sm:inline">tmux attach -t &apos;={session.name}&apos;</span>
+            <span className="hidden sm:inline">{attachCommand(server?.tmux_socket, session.name)}</span>
             <Btn size="sm" kind="danger" className="ml-auto" onClick={() => void closeSession(session, toast)}>
               End session
             </Btn>

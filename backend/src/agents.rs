@@ -915,6 +915,20 @@ mod tests {
     }
 
     #[test]
+    fn isolated_mode_keeps_user_agents_in_maps_own_cli_folders() {
+        let dir = tempfile::tempdir().unwrap();
+        let ws = tempfile::tempdir().unwrap();
+        let text = format!("[workspace]\ndir = \"/r\"\n[agents_home]\nmode = \"isolated\"\ndir = \"{}\"\n", dir.path().display());
+        let cfg = crate::config::Config::parse(&text, Path::new("/")).unwrap().agents;
+        write(&dir.path().join("claude/agents/mine.md"), "---\nname: mine\ndescription: Mine.\n---\nMine.\n");
+        let o = overview(&cfg, ws.path());
+        assert_eq!(o.rows.iter().map(|r| (r.scope, r.name.as_str())).collect::<Vec<_>>(), [(AgentScope::User, "mine")]);
+        save(&cfg, ws.path(), AgentScope::User, def("reviewer")).unwrap();
+        assert!(dir.path().join("codex/agents/reviewer.toml").is_file());
+        assert!(dir.path().join("gemini-home/.gemini/config/agents/reviewer.md").is_file());
+    }
+
+    #[test]
     fn scan_groups_by_name_and_shows_compatibility() {
         let home = tempfile::tempdir().unwrap();
         let ws = tempfile::tempdir().unwrap();

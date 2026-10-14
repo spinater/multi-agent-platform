@@ -7,6 +7,7 @@ import { api } from "@/lib/api";
 import { providerColor } from "@/lib/colors";
 import type { OrchestratorStatus } from "@/lib/generated/OrchestratorStatus";
 import type { Session } from "@/lib/generated/Session";
+import { attachCommand } from "@/lib/tmux";
 
 import { useApp } from "./app-context";
 import { keySlug, type Command } from "./command-data";
@@ -212,7 +213,7 @@ export function DetailCard({
           ["Started", rel(s.created_at, now)],
           ["Active", rel(s.last_activity_at, now)],
         ],
-        blocks: [live ? { label: "live pane", note: `tmux attach -t '=${s.name}'`, lines } : { label: "final pane", lines }],
+        blocks: [live ? { label: "live pane", note: attachCommand(server?.tmux_socket, s.name), lines } : { label: "final pane", lines }],
         actions,
         live: live ? s : undefined,
         project: s.project,

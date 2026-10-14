@@ -32,14 +32,21 @@ pub enum Marked {
     Refused(String),
 }
 
-/// The file `spec` points at: `<$dir_env>/<dir_file>` when the variable is set in `[workspace.env]` (which wins) or
-/// in MAP's environment, else `file`. `~/` is the home directory.
-pub fn trust_file(config: &Config, spec: &TrustSpec) -> PathBuf {
+/// The file `provider`'s `spec` points at: `<$dir_env>/<dir_file>` when the variable is set, else `file`. When
+/// `dir_env` is the provider's `home_env`, its value is [`Config::provider_home_var`]'s (`[workspace.env]`, then the
+/// isolated folder, then MAP's environment); another variable is read from `[workspace.env]` (which wins) or MAP's
+/// environment. `~/` is the home directory.
+pub fn trust_file(config: &Config, provider: &str, spec: &TrustSpec) -> PathBuf {
+    let home_env = config.providers.get(provider).and_then(|p| p.home_env.as_deref());
     let dir = spec.dir_env.as_deref().and_then(|var| {
-        config.workspace.env.get(var).cloned().filter(|v| !v.is_empty()).or_else(|| std::env::var(var).ok().filter(|v| !v.is_empty()))
+        if Some(var) == home_env {
+            return config.provider_home_var(provider);
+        }
+        let value = config.workspace.env.get(var).cloned().filter(|v| !v.is_empty()).or_else(|| std::env::var(var).ok().filter(|v| !v.is_empty()));
+        value.map(|v| crate::login::expand_home(&v))
     });
     match (dir, spec.dir_file.as_deref()) {
-        (Some(dir), Some(file)) => crate::login::expand_home(&dir).join(file),
+        (Some(dir), Some(file)) => dir.join(file),
         _ => crate::login::expand_home(&spec.file),
     }
 }
@@ -225,7 +232,7 @@ pub async fn ensure(hub: &Hub, provider: &str, folder: &Path, task_id: Option<i6
         return Outcome::Off;
     }
     let Some(spec) = hub.config.providers.get(provider).and_then(|s| s.trust.as_ref()) else { return Outcome::Unsupported };
-    let file = trust_file(&hub.config, spec);
+    let file = trust_file(&hub.config, provider, spec);
     // Tests never touch a real home directory's CLI config.
     #[cfg(test)]
     if !file.starts_with(std::env::temp_dir()) {
@@ -307,7 +314,7 @@ pub fn status(hub: &Hub, folder: &Path) -> FolderTrust {
             let Some(trust) = &spec.trust else {
                 return ProviderTrust { provider: name.clone(), file: None, trusted: None, note: "MAP cannot mark folders for this CLI; it asks once, answer it from the session".into() };
             };
-            let file = trust_file(&hub.config, trust);
+            let file = trust_file(&hub.config, name, trust);
             let (trusted, note) = match key.as_ref().map_err(|e| anyhow::anyhow!("{e:#}")).and_then(|k| is_trusted(trust.format, &file, k)) {
                 Ok(true) => (Some(true), "trusted".to_string()),
                 Ok(false) => (Some(false), "not trusted: the CLI will ask".to_string()),
@@ -518,23 +525,44 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn isolated_mode_marks_folders_in_maps_own_cli_configs() {
+        let dir = tempfile::tempdir().unwrap();
+        let d = dir.path().display();
+        std::fs::create_dir_all(dir.path().join("ws")).unwrap();
+        let text = format!(
+            "[projects]\npath = \"{d}\"\n[workspace]\ndir = \"{d}/ws\"\n[server]\ndata_dir = \"{d}/data\"\n[agents_home]\nmode = \"isolated\"\ndir = \"{d}/ah\"\n[reflex]\nbinary = \"/nonexistent/reflex\"\n[providers.claude]\nbinary = \"/bin/sh\"\n[providers.codex]\nbinary = \"/bin/sh\"\n"
+        );
+        let hub = Hub::new(Config::parse(&text, Path::new("/")).unwrap(), Store::memory().await.unwrap(), Arc::new(FakeTerminal::default()));
+        let spec = |p: &str| hub.config.providers[p].trust.clone().unwrap();
+        let (claude, codex) = (dir.path().join("ah/claude/.claude.json"), dir.path().join("ah/codex/config.toml"));
+        assert_eq!(trust_file(&hub.config, "claude", &spec("claude")), claude);
+        assert_eq!(trust_file(&hub.config, "codex", &spec("codex")), codex);
+        let ws = dir.path().join("ws");
+        for p in ["claude", "codex"] {
+            assert!(matches!(ensure(&hub, p, &ws, None).await, Outcome::Done { marked: Marked::Now, .. }), "{p}");
+        }
+        assert!(is_trusted(TrustFormat::ClaudeJson, &claude, &folder_key(&ws).unwrap()).unwrap());
+        assert!(is_trusted(TrustFormat::CodexToml, &codex, &folder_key(&ws).unwrap()).unwrap());
+    }
+
+    #[tokio::test]
     async fn files_follow_claude_config_dir_and_codex_home() {
         let (hub, _term, dir) = setup("").await;
         let spec = |p: &str| hub.config.providers[p].trust.clone().unwrap();
-        assert_eq!(trust_file(&hub.config, &spec("claude")), claude_file(&dir));
-        assert_eq!(trust_file(&hub.config, &spec("codex")), codex_file(&dir));
+        assert_eq!(trust_file(&hub.config, "claude", &spec("claude")), claude_file(&dir));
+        assert_eq!(trust_file(&hub.config, "codex", &spec("codex")), codex_file(&dir));
         let plain = Config::parse("[workspace]\ndir = \"/r\"\n", Path::new("/")).unwrap();
         let home = PathBuf::from(std::env::var("HOME").unwrap());
         if std::env::var_os("CLAUDE_CONFIG_DIR").is_none() {
-            assert_eq!(trust_file(&plain, &plain.providers["claude"].trust.clone().unwrap()), home.join(".claude.json"));
+            assert_eq!(trust_file(&plain, "claude", &plain.providers["claude"].trust.clone().unwrap()), home.join(".claude.json"));
         }
         if std::env::var_os("CODEX_HOME").is_none() {
-            assert_eq!(trust_file(&plain, &plain.providers["codex"].trust.clone().unwrap()), home.join(".codex/config.toml"));
+            assert_eq!(trust_file(&plain, "codex", &plain.providers["codex"].trust.clone().unwrap()), home.join(".codex/config.toml"));
         }
         assert!(plain.providers["gemini"].trust.is_none());
         // Overrides: another file, or off.
         let c = Config::parse("[workspace]\ndir = \"/r\"\n[providers.claude.trust]\nfile = \"/etc/c.json\"\ndir_env = \"\"\ndir_file = \"\"\n[providers.codex.trust]\nfile = \"\"\n", Path::new("/")).unwrap();
-        assert_eq!(trust_file(&c, &c.providers["claude"].trust.clone().unwrap()), PathBuf::from("/etc/c.json"));
+        assert_eq!(trust_file(&c, "claude", &c.providers["claude"].trust.clone().unwrap()), PathBuf::from("/etc/c.json"));
         assert!(c.providers["codex"].trust.is_none());
         assert!(Config::parse("[workspace]\ndir = \"/r\"\n[providers.aider]\nbinary = \"aider\"\ninteractive = [\"aider\"]\ntrust = { file = \"/x\" }\n", Path::new("/")).is_err());
     }

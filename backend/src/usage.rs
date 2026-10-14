@@ -1100,6 +1100,23 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn isolated_mode_reads_codex_and_claude_state_from_maps_own_folders() {
+        let (hub, dir) = hub_with("[agents_home]\nmode = \"isolated\"\n").await;
+        let ah = dir.path().join("data/agent-home");
+        let now = Utc::now();
+        let places = Places::fixed(&[], "/repo");
+        let p = read_codex(&hub, "codex", None, &places, now).await;
+        assert_eq!(p.status, UsageStatus::SignedOut);
+        assert!(p.error.as_deref().unwrap().contains(&ah.join("codex/auth.json").display().to_string()), "{:?}", p.error);
+        std::fs::create_dir_all(ah.join("codex")).unwrap();
+        std::fs::write(ah.join("codex/auth.json"), "{}").unwrap();
+        let p = read_codex(&hub, "codex", None, &places, now).await;
+        assert!(p.error.as_deref().unwrap().contains(&ah.join("codex/sessions").display().to_string()), "{:?}", p.error);
+        // Claude's sign-in for the usage call: MAP's copy, never ~/.claude.
+        assert_eq!(hub.config.usage.claude_credentials, ah.join("claude/.credentials.json"));
+    }
+
+    #[tokio::test]
     async fn orchestrator_passes_over_a_provider_past_the_skip_line() {
         let (hub, _dir) = hub_with("").await;
         assert_eq!(reader_for(&hub.config, "claude"), Some(Reader::Claude));

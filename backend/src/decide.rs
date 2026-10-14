@@ -170,6 +170,7 @@ async fn ask_fallback(hub: &Hub, project: &Project, text: &str) -> Result<Reply>
             let mut cmd = Command::new(program);
             cmd.args(args)
                 .current_dir(&dir)
+                .envs(hub.provider_env(provider))
                 .envs(&hub.config.workspace.env)
                 .stdin(Stdio::null())
                 .kill_on_drop(true);

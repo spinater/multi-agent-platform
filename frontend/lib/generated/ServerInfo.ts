@@ -15,4 +15,8 @@ database: string, watcher_interval_secs: number,
 /**
  * `reflex --version` of `reflex.binary`, e.g. `reflex 0.2.4`; `None` when it is not installed.
  */
-reflex_version: string | null, };
+reflex_version: string | null, 
+/**
+ * `workspace.tmux_socket`: the private tmux server (`tmux -L <name>`) agents run on; `None`: tmux's default.
+ */
+tmux_socket: string | null, };

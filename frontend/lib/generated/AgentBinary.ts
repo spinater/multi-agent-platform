@@ -11,4 +11,13 @@ binary: string,
 /**
  * Where it resolves on the agents' PATH; `None`: not found.
  */
-path: string | null, };
+path: string | null, 
+/**
+ * The CLI's state folder (sign-in, settings, history) as MAP's agents see it; `None`: not known.
+ */
+home: string | null, 
+/**
+ * What MAP exports to relocate it in isolated mode (`CLAUDE_CONFIG_DIR=/…/agent-home/claude`); `None` in shared
+ * mode, or when the CLI has no such variable.
+ */
+home_env: string | null, };

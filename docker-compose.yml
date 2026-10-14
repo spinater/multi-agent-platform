@@ -19,8 +19,9 @@ services:
     environment:
       # The agent CLIs are the host's, mounted below.
       PATH: ${MAP_HOME}/.local/bin:${MAP_NODE_DIR}/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-      # Claude Code keeps its settings file in ~/.claude/.claude.json instead of ~/.claude.json: the host rewrites
-      # ~/.claude.json by renaming over it, which a single-file bind mount cannot follow. Sign-in stays shared.
+      # Only for [agents_home] mode = "shared": Claude Code keeps its settings file in ~/.claude/.claude.json instead
+      # of ~/.claude.json (the host rewrites ~/.claude.json by renaming over it, which a single-file bind mount cannot
+      # follow). In isolated mode MAP sets CLAUDE_CONFIG_DIR to its own folder for every agent, so this is unused.
       CLAUDE_CONFIG_DIR: ${MAP_HOME}/.claude
     volumes:
       # The config folder, at the same path as on the host: map.toml (read-only), templates/, agents/ and data/ (the
@@ -41,7 +42,9 @@ services:
       # Only for Settings → Git & SSH → "This machine's SSH setup": mount your ~/.ssh (keys, config, known_hosts)
       # read-only, `- ${MAP_HOME}/.ssh:${MAP_HOME}/.ssh:ro`. Without it that method finds no keys in the container.
       # An ssh-agent on the host is not reachable from here unless you also mount its socket and set SSH_AUTH_SOCK.
-      # Agent sign-ins and history, shared with the host so a token refresh on one side does not log out the other.
+      # Agent sign-ins and history. With [agents_home] mode = "isolated" (deploy/map.docker.toml) they live in
+      # ${MAP_CONFIG_DIR}/agent-home, inside the config mount above, and these three mounts can be removed. Keep them
+      # for mode = "shared": the host's own sign-ins, so a token refresh on one side does not log out the other.
       - ${MAP_HOME}/.claude:${MAP_HOME}/.claude
       - ${MAP_HOME}/.codex:${MAP_HOME}/.codex
       - ${MAP_HOME}/.gemini:${MAP_HOME}/.gemini

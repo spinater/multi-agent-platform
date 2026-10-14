@@ -179,7 +179,7 @@ On the machine whose projects the agents should work on (Linux or macOS), from a
 deploy/install.sh                       # everything under ~/MAP (same as --home ~/MAP)
 deploy/install.sh --home /root/project/MAP
 deploy/install.sh --config-dir DIR --projects-dir DIR   # the two folders chosen one by one
-#   also: --port 4400 --bind 127.0.0.1 --prefix DIR --config FILE --no-service
+#   also: --port 4400 --bind 127.0.0.1 --prefix DIR --config FILE --agent-login isolated|shared --no-service
 deploy/install.sh --uninstall           # removes the service and app/; keeps config/ (with data/) and workspace/
 ```
 
@@ -192,6 +192,7 @@ An install is laid out around two folders you choose, the **config folder** and 
 │   ├── map.toml          written once (never overwritten)
 │   ├── templates/        your project templates ([templates] dirs)
 │   ├── agents/           init-agent.md here replaces the built-in init agent's instructions
+│   ├── agent-home/       MAP's own agent logins and history (claude/, codex/, gemini-home/), isolated mode
 │   └── data/             database, run files, corpus repos, MAP's git key, logs, the default workspace
 └── workspace/            --projects-dir: the project folder; projects can only be its sub-folders
 ```
@@ -199,7 +200,8 @@ An install is laid out around two folders you choose, the **config folder** and 
 It builds the server and dashboard into `app/`, adds a pinned Reflex (checked by SHA256) unless one is on PATH,
 creates the folders, writes `config/map.toml` once with a fresh `api_token`, your current PATH (so the service finds
 the same `claude`, `codex`, `agy`), `data_dir`, the default workspace `config/data/workspace` (a git repo inside the
-data folder, so it is never a project) and `[projects] path` = the project folder, then starts a systemd user service
+data folder, so it is never a project), `[projects] path` = the project folder and `[agents_home] mode` (`isolated`
+unless `--agent-login shared`; see [Agent logins](#agent-logins)), then starts a systemd user service
 (`map.service`) or a launchd agent (`com.multi-agent-platform.map`) that runs `map serve -c <config>/map.toml`, and
 prints the layout. Restarting the service leaves agent sessions in tmux running. Requirements: Rust, Bun, tmux, git,
 curl, openssl. On Linux, `sudo loginctl enable-linger $USER` keeps it running after you log out.
@@ -233,11 +235,15 @@ docker compose up -d --build
 docker compose logs -f map                  # open http://127.0.0.1:4400 and paste the token once
 ```
 
-- Mounted from the host: `~/.claude`, `~/.codex`, `~/.gemini` (read-write: sign-ins, history, transcripts for Usage
-  and Skills, user-wide agents) and the CLIs in `~/.local/bin`, `~/.local/share/claude` and the Node install
+- **Agent logins.** `deploy/map.docker.toml` sets `[agents_home] mode = "isolated"`: the agents' sign-ins and
+  history live in `<MAP_CONFIG_DIR>/agent-home`, inside the config mount, so the container needs no `~/.claude`,
+  `~/.codex` or `~/.gemini` mounts (remove them from `docker-compose.yml`); sign each provider in once under
+  Settings → Agent CLIs. With `mode = "shared"` keep those mounts (read-write: sign-ins, history, transcripts for
+  Usage and Skills, user-wide agents) to share the host's logins. See [Agent logins](#agent-logins).
+- Mounted from the host: the CLIs in `~/.local/bin`, `~/.local/share/claude` and the Node install
   (read-only). Adjust `docker-compose.yml` if yours live elsewhere. Because the CLIs are read-only there, the update
   bell still shows new releases but its Update button is disabled: update them on the host.
-- Claude Code in the container uses `CLAUDE_CONFIG_DIR=~/.claude`, so its settings file is `~/.claude/.claude.json`
+- In shared mode, Claude Code in the container uses `CLAUDE_CONFIG_DIR=~/.claude`, so its settings file is `~/.claude/.claude.json`
   (the host rewrites `~/.claude.json` by renaming over it, which a single-file mount cannot follow). Set
   `"hasCompletedOnboarding": true` in that file once, or the first interactive session stops at the setup screens.
   MAP marks the default workspace and each project's folder trusted in that same file (see
@@ -427,6 +433,48 @@ path = "/root/project/MAP/workspace"   # `root` is the older name; default ~/pro
   file count), sorted, at most 500 (`truncated`), with symlinks listed only when they lead to a folder inside the same
   root; an absolute path, `..` or a symlink out of the root is a 400.
 
+## Agent logins
+
+`[agents_home] mode` in `map.toml` decides whose accounts and history MAP's agents use.
+
+- **`shared`** (the default for an existing `map.toml`): the CLIs' usual folders, `~/.claude`, `~/.codex`,
+  `~/.gemini`. MAP's agents and your own `claude` / `codex` / `agy` in a terminal are the same login, with the same
+  history, settings and rate limits; signing in or out on one side does it for the other.
+- **`isolated`** (what `deploy/install.sh` and `deploy/map.docker.toml` write for a new config): each provider gets
+  its own folder under `[agents_home] dir` (default `agent-home` next to `map.toml`, created with mode 0700), and
+  every CLI MAP starts gets the variable that moves its state there: sessions, tasks, the planner and init agents,
+  the sign-in and update helper sessions, the headless fallback and audit calls, and the version checks.
+
+| provider | variable | folder | its files |
+| --- | --- | --- | --- |
+| claude | `CLAUDE_CONFIG_DIR=<dir>/claude` | `<dir>/claude` | `.claude.json`, `.credentials.json`, `settings.json`, `projects/` (transcripts), `skills/`, `agents/` |
+| codex | `CODEX_HOME=<dir>/codex` | `<dir>/codex` | `auth.json`, `config.toml`, `sessions/`, `skills/`, `agents/` |
+| gemini (`agy`) | `HOME=<dir>/gemini-home` | `<dir>/gemini-home/.gemini` | `jetski-standalone-oauth-token`, `config/agents/`, … |
+
+agy 1.3 has no variable for its `~/.gemini` (its binary only knows `JETSKI_APP_DATA_DIR`, which it passes to its own
+language server), so MAP gives it a `HOME` of its own; `CARGO_HOME`, `RUSTUP_HOME` and `GOPATH` are exported next to
+it so the tools an agent runs keep their real folders (`providers.gemini.home_keep`). Two consequences: agy may keep
+its token in the system keyring, which a different `HOME` does not separate, and an agy self-update (or the Update
+button) lands in that `HOME`, not in the `agy` on your PATH: update agy from your own shell.
+
+Everything MAP reads from a CLI's state follows the same folder ([`Config::provider_home`](backend/src/config.rs)):
+the sign-in check and Settings' credential paths, Usage (Claude's OAuth token for the usage call, its transcripts,
+Codex's `sessions/` and `auth.json`), Skills (user skills, plugins, `settings.json`, transcripts), user-wide Agents,
+folder trust (`.claude.json`, `config.toml`) and Claude's update channel. A variable set in `[workspace.env]` (say
+`CODEX_HOME`) wins over the isolated folder. Nothing is ever copied between your folders and MAP's: after switching
+to isolated, every provider shows **not signed in yet — Sign in** under Settings → Agent CLIs, which runs the
+provider's own login in a helper session with MAP's folder. The per-provider fields are `home_env`, `default_home`,
+`home_subdir`, `isolated_dir` and `home_keep` (see `map.example.toml`); `home_env = ""` keeps one provider shared.
+
+## tmux socket
+
+By default MAP's sessions live on tmux's default server, next to any tmux you use yourself. With
+`[workspace] tmux_socket = "map"` every tmux command MAP runs uses `tmux -L map`, a private server: attach with
+`tmux -L map attach -t '=<session>'` (Settings → Server shows the command, and the console's attach hint uses it).
+Either way MAP removes `TMUX` and `TMUX_PANE` from the environment of its tmux commands, so a MAP started from
+inside a tmux session never targets that server by accident. Changing the socket of a running install leaves its
+sessions on the old server: MAP no longer sees them.
+
 ## Settings
 
 The **Settings** screen (`#settings`, the gear in the top bar, or the last nav entry) is what someone who installs
@@ -446,13 +494,15 @@ token is set.
   `[workspace.env]` of `map.toml` or in the service's environment (systemd `Environment=`, launchd
   `EnvironmentVariables`, compose `environment:`), never in the dashboard. Settings shows only whether `gh` and
   `glab` are on the agents' PATH and whether each variable is set, and where (map.toml or MAP's own environment).
-- **Agent CLIs** (`#settings/agents`): per provider, the binary and where it resolves on the agents' PATH, the
-  installed and latest version from the [update check](#what-it-does) with **Check versions** and **Update** (the
+- **Agent CLIs** (`#settings/agents`): whose logins the agents use ([Agent logins](#agent-logins): isolated or
+  shared, and the folder), then per provider the binary and where it resolves on the agents' PATH, its state folder,
+  the installed and latest version from the [update check](#what-it-does) with **Check versions** and **Update** (the
   same confirmation and helper session as the bell), and the sign-in state with **Sign in** (the sign-in modal).
 - **Server** (`#settings/server`), read only: first the **config folder** and the **project folder** (whether it
   exists, its host path in Docker, every root with `roots`) and how to change them (reinstall with `--config-dir` /
   `--projects-dir` / `--home`, or edit `map.toml` and restart); then the config file, data dir, bind address,
-  `allowed_hosts`, whether `api_token` is set (never its value), default workspace, static dir, MAP's version, Reflex's binary
+  `allowed_hosts`, whether `api_token` is set (never its value), default workspace, the tmux socket and the attach
+  command ([tmux socket](#tmux-socket)), static dir, MAP's version, Reflex's binary
   and version, and how MAP runs: in a container (`/.dockerenv` or `/run/.containerenv`), as a systemd service
   (`INVOCATION_ID`), a launchd agent (`XPC_SERVICE_NAME`) or by hand. `map.toml` is not editable from the dashboard:
   edit it and restart (`docker compose restart map`, `systemctl --user restart map`, or
@@ -550,8 +600,8 @@ handle it (`backend/src/trust.rs`):
 1. **MAP marks the folder trusted in the CLI's own config** (`[workspace] trust_folders = true`, the default), never
    touching any other key:
    - **Claude Code**: `projects["<folder>"].hasTrustDialogAccepted = true` in `$CLAUDE_CONFIG_DIR/.claude.json` when
-     `CLAUDE_CONFIG_DIR` is set (in `[workspace.env]` or MAP's own environment; the Docker deploy sets it to
-     `~/.claude`), else `~/.claude.json`. Claude rewrites that file often, so MAP reads it, writes a temporary file next
+     `CLAUDE_CONFIG_DIR` is set (in `[workspace.env]`, by [isolated agent logins](#agent-logins), or in MAP's own
+     environment; the Docker deploy sets it to `~/.claude`), else `~/.claude.json`. Claude rewrites that file often, so MAP reads it, writes a temporary file next
      to it and renames it over the original (keeping its mode) only if the file did not change meanwhile, reads it back,
      and tries again if Claude's own write won. A file that does not parse is never written: a warning event, and
      layer 2 takes over.
@@ -770,7 +820,10 @@ the API token or a variable's value, and the container check against marker file
 folder tests cover `path`/`root`/`roots` parsing and validation, inside/outside checks (symlink escapes, `..`, the
 folder itself, new folders under missing sub-folders), the picker's listing (folders only, dot-folders, git and
 project badges, the cap, traversal refused), creation refused outside it for every source, and an older project
-outside it still loading with the warning.
+outside it still loading with the warning. Agent-login tests resolve every provider's folder in both modes, check
+that launch scripts export `CLAUDE_CONFIG_DIR` / `CODEX_HOME` / `HOME` in isolated mode and nothing extra in shared
+mode, and that credentials, usage, skills, agents and trust paths follow the folder (all in temporary folders); the
+tmux backend's command builder is tested for `-L <socket>` and for dropping `TMUX` / `TMUX_PANE`, without running tmux.
 
 ## Roadmap
 

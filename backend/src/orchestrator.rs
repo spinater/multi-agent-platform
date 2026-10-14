@@ -489,7 +489,7 @@ impl Orchestrator {
                 .map(|a| a.replace("{binary}", &spec.binary).replace("{model}", &spec.default_model).replace("{session}", "audit").replace("{prompt}", &prompt))
                 .collect();
             let mut cmd = Command::new(&argv[0]);
-            cmd.args(&argv[1..]).current_dir(hub.work_dir(task.project.as_deref()).await).envs(hub.command_env());
+            cmd.args(&argv[1..]).current_dir(hub.work_dir(task.project.as_deref()).await).envs(hub.provider_env(provider)).envs(hub.command_env());
             hub.event(Level::Info, "task.audit", None, Some(task.id), format!("Auditing with {provider}")).await;
             record(hub, Kind::AUDIT_ASK, task, format!("{provider} · reviewing git status, git diff, git log -5")).await;
             let (ok, output) = run_captured(cmd, Duration::from_secs(hub.config.orchestrator.audit.timeout_secs)).await?;

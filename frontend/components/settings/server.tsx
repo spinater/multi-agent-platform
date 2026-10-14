@@ -96,6 +96,11 @@ export function ServerSettingsView({ settings, error }: { settings: SettingsInfo
             </Row>
             <Row k="default workspace">{s.workspace_dir}</Row>
             <Row k="session prefix">{s.session_prefix}</Row>
+            <Row k="tmux socket">
+              {s.tmux_socket ?? "default"}
+              <span className="text-muted"> · {s.tmux_socket ? `a private tmux server (tmux -L ${s.tmux_socket})` : "tmux's default server"}</span>
+            </Row>
+            <Row k="attach">{s.attach_command}</Row>
             <Row k="static dir">
               {s.static_dir} · <YesNo on={s.static_dir_ok} yes="dashboard found" no="no index.html" warn />
             </Row>

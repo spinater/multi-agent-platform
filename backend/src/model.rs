@@ -246,6 +246,8 @@ pub struct ServerInfo {
     pub watcher_interval_secs: u64,
     /// `reflex --version` of `reflex.binary`, e.g. `reflex 0.2.4`; `None` when it is not installed.
     pub reflex_version: Option<String>,
+    /// `workspace.tmux_socket`: the private tmux server (`tmux -L <name>`) agents run on; `None`: tmux's default.
+    pub tmux_socket: Option<String>,
 }
 
 /// Messages pushed to dashboard clients over `/api/ws`.
@@ -1778,6 +1780,31 @@ pub struct ServerSettings {
     pub run_mode: RunMode,
     /// The command that restarts MAP after editing `map.toml` for this run mode (by hand: starts it again).
     pub restart_hint: String,
+    /// `workspace.tmux_socket`; `None`: tmux's default server.
+    pub tmux_socket: Option<String>,
+    /// How to attach to a session by hand, with `<session>` for its name (`tmux -L map attach -t '=<session>'`).
+    pub attach_command: String,
+}
+
+/// `[agents_home] mode`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum AgentsHomeMode {
+    /// The CLIs' usual folders: the same accounts and history as the owner's own `claude` / `codex` / `agy`.
+    Shared,
+    /// Each provider has its own folder under `dir`: MAP's agents sign in with their own accounts and keep their
+    /// own history; the owner's CLIs in a terminal are unaffected.
+    Isolated,
+}
+
+/// Whose logins and history MAP's agents use.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct AgentsHome {
+    pub mode: AgentsHomeMode,
+    /// `agents_home.dir`, the parent of the per-provider folders (used in isolated mode only).
+    pub dir: String,
 }
 
 /// An environment variable's state: set or not, and where. Never its value.
@@ -1815,6 +1842,11 @@ pub struct AgentBinary {
     pub binary: String,
     /// Where it resolves on the agents' PATH; `None`: not found.
     pub path: Option<String>,
+    /// The CLI's state folder (sign-in, settings, history) as MAP's agents see it; `None`: not known.
+    pub home: Option<String>,
+    /// What MAP exports to relocate it in isolated mode (`CLAUDE_CONFIG_DIR=/…/agent-home/claude`); `None` in shared
+    /// mode, or when the CLI has no such variable.
+    pub home_env: Option<String>,
 }
 
 /// `GET /api/settings`.
@@ -1824,6 +1856,7 @@ pub struct SettingsInfo {
     pub server: ServerSettings,
     pub git_cli: Vec<GitCliTool>,
     pub agents: Vec<AgentBinary>,
+    pub agents_home: AgentsHome,
 }
 
 // ---- plans: a requirement broken into tasks by the planner agent, approved by the owner (plans.rs)

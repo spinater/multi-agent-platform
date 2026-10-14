@@ -4,7 +4,9 @@ import { useEffect, useRef, useState } from "react";
 
 import { ApiError, api } from "@/lib/api";
 import type { Session } from "@/lib/generated/Session";
+import { attachCommand } from "@/lib/tmux";
 
+import { useApp } from "./app-context";
 import { Btn, Pill, SESSION_TONE } from "./command-ui";
 import { Modal } from "./shell/page";
 
@@ -157,6 +159,7 @@ export function ConsoleView({
 /** The whole terminal of a session in a modal. */
 export function ConsoleModal({ session, readOnly, onClose, toast }: { session: Session; readOnly: boolean; onClose: () => void; toast: (text: string, tone?: "ok" | "warn" | "bad") => void }) {
   const live = session.state !== "exited";
+  const { server } = useApp();
   return (
     <Modal onClose={onClose} label={`Console ${session.name}`} width={920}>
       <div className="flex items-center justify-between gap-2.5 border-b border-line px-[18px] py-3.5">
@@ -164,7 +167,7 @@ export function ConsoleModal({ session, readOnly, onClose, toast }: { session: S
           <span className="truncate font-mono text-[12.5px] font-semibold">{session.name}</span>
           <Pill tone={SESSION_TONE[session.state]}>{session.state.replace("_", " ")}</Pill>
           <span className="hidden truncate font-mono text-[10.5px] text-muted sm:inline">
-            {live ? `tmux attach -t '=${session.name}'` : "final pane"}
+            {live ? attachCommand(server?.tmux_socket, session.name) : "final pane"}
           </span>
         </span>
         <button onClick={onClose} className="size-[26px] flex-none cursor-pointer rounded-md border border-line-2 text-nav" aria-label="Close">

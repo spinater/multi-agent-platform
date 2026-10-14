@@ -7,6 +7,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import { api } from "@/lib/api";
 import { providerColor } from "@/lib/colors";
 import type { LoginState } from "@/lib/generated/LoginState";
+import { attachCommand } from "@/lib/tmux";
 
 import { useApp } from "./app-context";
 import { Btn, Inset, Segmented, TextInput, errText } from "./project-ui";
@@ -24,7 +25,7 @@ export function AuthModal() {
 }
 
 function AuthDialog({ provider, onClose }: { provider: string; onClose: () => void }) {
-  const { providers, toast, now } = useApp();
+  const { providers, toast, now, server } = useApp();
   const info = providers.find((p) => p.name === provider);
   const login = info?.login;
   const [method, setMethod] = useState<"browser" | "key">("browser");
@@ -251,7 +252,7 @@ function AuthDialog({ provider, onClose }: { provider: string; onClose: () => vo
                       {label}
                     </Btn>
                   ))}
-                  <span className="font-mono text-[10.5px] text-muted">or tmux attach -t {session.name}</span>
+                  <span className="font-mono text-[10.5px] text-muted">or {attachCommand(server?.tmux_socket, session.name)}</span>
                 </div>
               )}
               <p className="font-mono text-[11px] text-muted">

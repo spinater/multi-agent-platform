@@ -19,6 +19,24 @@ session_prefix = "map-"
 # MAP marks the default workspace and each project's folder as trusted for Claude Code and Codex before it starts an
 # agent there; set false to answer the CLIs' own trust prompts yourself.
 trust_folders = true
+# A private tmux server for MAP's sessions (`tmux -L <name>`), apart from the tmux you use yourself; attach with
+# `tmux -L <name> attach -t <session>` (Settings → Server shows the command). Unset: tmux's default server. Either
+# way MAP drops TMUX and TMUX_PANE from its tmux commands, so a MAP started inside tmux never targets that server.
+# tmux_socket = "map"
+
+# Whose logins and history MAP's agents use.
+#   "shared"   (the default) the CLIs' usual folders, ~/.claude, ~/.codex, ~/.gemini: the same accounts, settings
+#              and history as your own claude / codex / agy in a terminal.
+#   "isolated" each provider gets <dir>/<provider> (agy: <dir>/gemini-home, used as its HOME), exported to every
+#              CLI MAP starts (sessions, tasks, planner, init, sign-in and update helpers, headless fallback and audit
+#              calls, version checks): CLAUDE_CONFIG_DIR, CODEX_HOME, HOME. MAP's agents then sign in once with their own
+#              accounts (Settings → Agent CLIs → Sign in) and keep their own history; your own CLIs are unaffected.
+#              Nothing is copied between the two. Credentials, usage, skills, sub-agents and folder trust are read
+#              from (and written to) MAP's folders.
+[agents_home]
+mode = "shared"
+# Default: agent-home next to this file (<data_dir>/agent-home without a file). Created with mode 0700.
+# dir = "agent-home"
 
 # Exported in each agent's launch script and in verify/post_done commands.
 [workspace.env]
@@ -101,9 +119,21 @@ timeout_secs = 600
 #                 Built in: claude  { format = "claude_json", file = "~/.claude.json", dir_env = "CLAUDE_CONFIG_DIR", dir_file = ".claude.json" }
 #                           codex   { format = "codex_toml", file = "~/.codex/config.toml", dir_env = "CODEX_HOME", dir_file = "config.toml" }
 #                 None for gemini (agy). trust = { file = "" } turns it off for one provider.
+#                 In isolated mode ([agents_home]) the variable is MAP's folder for the CLI.
 #   trust_markers pane text of the CLI's trust question; the session then shows as needs_trust.
 #   trust_accept  the label of the option that trusts the folder ("Yes, I trust this folder"), which the dashboard's
 #                 "Trust this folder" button selects.
+#
+# State folder ([agents_home] above):
+#   home_env      the variable that relocates the CLI's state; set to MAP's folder in isolated mode.
+#                 Built in: claude CLAUDE_CONFIG_DIR, codex CODEX_HOME, gemini HOME (agy has no variable of its own).
+#   default_home  its folder otherwise (~/.claude, ~/.codex, ~/.gemini). Every path MAP reads under it (credentials,
+#                 [skills], [agents], [usage], the update channel file) follows the folder the CLI really uses.
+#   home_subdir   the state folder inside home_env's folder ("" ; gemini ".gemini").
+#   isolated_dir  the folder's name under [agents_home] dir (default: the provider's name; gemini "gemini-home").
+#   home_keep     VAR=~/path exported with home_env in isolated mode, so tools an agent runs keep their real folders
+#                 when HOME moves (gemini: CARGO_HOME, RUSTUP_HOME, GOPATH). A value in MAP's environment wins.
+#   home_env = "" opts one provider out: it keeps using its usual folders and sign-in.
 
 [providers.claude]
 # Unattended workers need this, or they stop at every permission prompt (the watcher shows them as waiting).
@@ -140,7 +170,9 @@ timeout_secs = 600
 # api_key_env = "GEMINI_API_KEY"
 # version = ["{binary}", "--version"]
 # latest = { url = "https://antigravity-cli-auto-updater-974169037036.us-central1.run.app/manifests/{os}_{arch}.json", json = "version" }
-# agy also updates itself in the background; a running session keeps the old version until it restarts.
+# agy also updates itself in the background; a running session keeps the old version until it restarts. In isolated
+# mode agy runs with HOME=<dir>/gemini-home, so a self-update lands in that HOME, not in the agy on your PATH: update
+# agy from your own shell. agy may keep its token in the system keyring, which a different HOME does not isolate.
 # update = ["{binary}", "update"]
 
 # A provider that is not built in needs at least binary and interactive:
