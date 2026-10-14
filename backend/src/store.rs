@@ -12,6 +12,7 @@ use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions, SqliteRow};
 use sqlx::{Row, SqlitePool};
 
 use crate::model::{CaseScore, Decision, DecisionStats, DecisionSummary, Event, HourBucket, Lane, LaneSummary, Level, Project, ReflexCase, Session, Task, TaskStatus};
+use crate::savings;
 
 #[derive(Clone)]
 pub struct Store {
@@ -38,6 +39,23 @@ pub struct NewTask {
     pub provider: Option<String>,
     pub model: Option<String>,
     pub project: Option<String>,
+}
+
+/// What a decision cost, or would have cost, in fallback tokens (the savings report, savings.rs).
+/// The default is a row as old as before migration 0008: nothing known.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct DecisionCost {
+    /// Length in chars of the fallback prompt, also when the fallback was not asked.
+    pub prompt_chars: Option<i64>,
+    /// Tokens the fallback used; `None` when it was not asked or failed.
+    pub tokens_in: Option<i64>,
+    pub tokens_out: Option<i64>,
+    /// The provider reported the tokens (else they are estimated).
+    pub measured: bool,
+    /// The project's fallback at the time.
+    pub fallback: Option<String>,
+    /// Thai input: Reflex was not asked.
+    pub skipped_thai: bool,
 }
 
 impl Store {
@@ -260,9 +278,11 @@ impl Store {
 
     // ---- decisions
 
-    pub async fn insert_decision(&self, d: &Decision) -> Result<i64> {
+    pub async fn insert_decision(&self, d: &Decision, cost: &DecisionCost) -> Result<i64> {
         let id = sqlx::query(
-            "INSERT INTO decisions (project, at, state, question, answer, lane, confidence, reflex_answer, ms, error) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id",
+            "INSERT INTO decisions (project, at, state, question, answer, lane, confidence, reflex_answer, ms, error,
+               prompt_chars, tokens_in, tokens_out, tokens_measured, fallback, skipped_thai)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id",
         )
         .bind(&d.project)
         .bind(d.at)
@@ -274,6 +294,12 @@ impl Store {
         .bind(d.reflex_answer.to_string())
         .bind(d.ms)
         .bind(&d.error)
+        .bind(cost.prompt_chars)
+        .bind(cost.tokens_in)
+        .bind(cost.tokens_out)
+        .bind(cost.measured)
+        .bind(&cost.fallback)
+        .bind(cost.skipped_thai)
         .fetch_one(&self.pool)
         .await?
         .get("id");
@@ -558,6 +584,58 @@ impl Store {
             buckets,
         })
     }
+
+    // ---- reflex savings (savings.rs)
+
+    /// Every decision since `since` (of `project`, or of all projects), as the savings report reads it. Rows from
+    /// before migration 0008 are estimated from their state and question.
+    pub async fn savings_samples(&self, project: Option<&str>, since: DateTime<Utc>) -> Result<Vec<savings::Sample>> {
+        let rows = sqlx::query(
+            "SELECT project, at, lane, ms, prompt_chars, tokens_in, tokens_out, tokens_measured, fallback, skipped_thai,
+               CASE WHEN prompt_chars IS NULL THEN state END AS state,
+               CASE WHEN prompt_chars IS NULL THEN question END AS question,
+               CASE WHEN prompt_chars IS NULL THEN answer END AS answer
+             FROM decisions WHERE at >= ?1 AND (?2 IS NULL OR project = ?2) ORDER BY at",
+        )
+        .bind(since)
+        .bind(project)
+        .fetch_all(&self.pool)
+        .await?;
+        rows.iter()
+            .map(|row| {
+                let (project, at, lane, ms) = (row.get("project"), row.get("at"), parse_enum(row.get("lane"))?, row.get("ms"));
+                let Some(prompt_chars) = row.get::<Option<i64>, _>("prompt_chars") else {
+                    let question = serde_json::from_str(row.get::<Option<&str>, _>("question").unwrap_or("null"))?;
+                    let answer = serde_json::from_str(row.get::<Option<&str>, _>("answer").unwrap_or("null"))?;
+                    let state: Option<String> = row.get("state");
+                    return Ok(savings::Sample::legacy(project, at, lane, ms, state.as_deref().unwrap_or_default(), &question, &answer));
+                };
+                let cost = DecisionCost {
+                    prompt_chars: Some(prompt_chars),
+                    tokens_in: row.get("tokens_in"),
+                    tokens_out: row.get("tokens_out"),
+                    measured: row.get("tokens_measured"),
+                    fallback: row.get("fallback"),
+                    skipped_thai: row.get("skipped_thai"),
+                };
+                Ok(savings::Sample::recorded(project, at, lane, ms, &cost))
+            })
+            .collect()
+    }
+
+    /// Per project: the llm-lane decisions since `since` whose tokens the provider reported, as
+    /// (count, sum of input + output tokens, sum of prompt chars).
+    pub async fn measured_calls(&self, since: DateTime<Utc>) -> Result<Vec<(String, i64, i64, i64)>> {
+        let rows = sqlx::query(
+            "SELECT project, COUNT(*) AS n, SUM(tokens_in + tokens_out) AS tokens, SUM(prompt_chars) AS chars FROM decisions
+             WHERE lane = 'llm' AND tokens_measured = 1 AND tokens_in IS NOT NULL AND tokens_out IS NOT NULL AND prompt_chars IS NOT NULL
+               AND at >= ? GROUP BY project",
+        )
+        .bind(since)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows.iter().map(|r| (r.get("project"), r.get("n"), r.get("tokens"), r.get("chars"))).collect())
+    }
 }
 
 #[cfg(test)]
@@ -646,8 +724,8 @@ mod tests {
             error: None,
             feedback: None,
         };
-        store.insert_decision(&d).await.unwrap();
-        store.insert_decision(&Decision { lane: Lane::Llm, ..d.clone() }).await.unwrap();
+        store.insert_decision(&d, &DecisionCost::default()).await.unwrap();
+        store.insert_decision(&Decision { lane: Lane::Llm, ..d.clone() }, &DecisionCost::default()).await.unwrap();
         let stats = store.decision_stats("support").await.unwrap();
         assert_eq!((stats.total, stats.reflex, stats.llm), (2, 1, 1));
         assert_eq!(store.decisions("support", 10).await.unwrap()[0].lane, Lane::Llm);
@@ -694,7 +772,7 @@ mod tests {
     #[tokio::test]
     async fn decision_feedback_round_trips() {
         let (store, d) = reflex_fixture().await;
-        let id = store.insert_decision(&d).await.unwrap();
+        let id = store.insert_decision(&d, &DecisionCost::default()).await.unwrap();
         assert_eq!(store.decision("support", id).await.unwrap().unwrap().feedback, None);
         store.set_decision_feedback("support", id, Some(false)).await.unwrap();
         assert_eq!(store.decision("support", id).await.unwrap().unwrap().feedback, Some(false));
@@ -733,11 +811,11 @@ mod tests {
         let (store, d) = reflex_fixture().await;
         let now = Utc::now();
         let hour = chrono::Duration::hours(1);
-        store.insert_decision(&Decision { at: now, ms: 2, ..d.clone() }).await.unwrap();
-        store.insert_decision(&Decision { at: now, ms: 6, ..d.clone() }).await.unwrap();
-        let llm = store.insert_decision(&Decision { at: now - hour * 3, lane: Lane::Llm, ms: 1500, ..d.clone() }).await.unwrap();
-        store.insert_decision(&Decision { at: now - hour * 5, lane: Lane::Abstain, ms: 10, ..d.clone() }).await.unwrap();
-        store.insert_decision(&Decision { at: now - hour * 30, lane: Lane::Llm, ms: 900, ..d.clone() }).await.unwrap();
+        store.insert_decision(&Decision { at: now, ms: 2, ..d.clone() }, &DecisionCost::default()).await.unwrap();
+        store.insert_decision(&Decision { at: now, ms: 6, ..d.clone() }, &DecisionCost::default()).await.unwrap();
+        let llm = store.insert_decision(&Decision { at: now - hour * 3, lane: Lane::Llm, ms: 1500, ..d.clone() }, &DecisionCost::default()).await.unwrap();
+        store.insert_decision(&Decision { at: now - hour * 5, lane: Lane::Abstain, ms: 10, ..d.clone() }, &DecisionCost::default()).await.unwrap();
+        store.insert_decision(&Decision { at: now - hour * 30, lane: Lane::Llm, ms: 900, ..d.clone() }, &DecisionCost::default()).await.unwrap();
         store.set_decision_feedback("support", llm, Some(true)).await.unwrap();
 
         let s = store.decision_summary("support", 24, now).await.unwrap();
@@ -750,5 +828,38 @@ mod tests {
         assert_eq!(s.buckets[23 - 3].llm, 1);
         assert_eq!(s.buckets[23 - 5].abstain, 1);
         assert!(s.buckets.windows(2).all(|w| w[1].start - w[0].start == hour));
+    }
+
+    #[tokio::test]
+    async fn savings_samples_read_costs_and_old_rows() {
+        let (store, d) = reflex_fixture().await;
+        let now = Utc::now();
+        let day = chrono::Duration::days(1);
+        let api = DecisionCost { prompt_chars: Some(200), tokens_in: Some(50), tokens_out: Some(2), measured: true, fallback: Some("api".into()), skipped_thai: false };
+        for _ in 0..3 {
+            store.insert_decision(&Decision { lane: Lane::Llm, ..d.clone() }, &api).await.unwrap();
+        }
+        // Estimated (CLI) and old rows are not measured calls; neither is one from 40 days ago.
+        let cli = DecisionCost { measured: false, fallback: Some("claude".into()), ..api.clone() };
+        store.insert_decision(&Decision { lane: Lane::Llm, ..d.clone() }, &cli).await.unwrap();
+        store.insert_decision(&Decision { lane: Lane::Llm, at: now - day * 40, ..d.clone() }, &api).await.unwrap();
+        let thai = DecisionCost { prompt_chars: Some(90), fallback: Some("none".into()), skipped_thai: true, ..DecisionCost::default() };
+        store.insert_decision(&Decision { lane: Lane::Abstain, state: "ด่วน".into(), ..d.clone() }, &thai).await.unwrap();
+        store.insert_decision(&d, &DecisionCost::default()).await.unwrap();
+
+        let measured = store.measured_calls(now - day * 30).await.unwrap();
+        assert_eq!(measured, vec![("support".to_string(), 3, 156, 600)]);
+
+        let samples = store.savings_samples(Some("support"), now - day * 30).await.unwrap();
+        assert_eq!(samples.len(), 6);
+        assert_eq!(samples[0].spent, Some((52, true)));
+        assert_eq!((samples[3].spent, samples[3].fallback.as_deref()), (Some((52, false)), Some("claude")));
+        assert!(samples[4].skipped_thai && samples[4].spent.is_none());
+        // The old row: its prompt rebuilt from the stored state and question.
+        let old = &samples[5];
+        assert_eq!(old.prompt_chars, crate::decide::prompt("charged twice", &d.question).chars().count() as i64);
+        assert_eq!((old.fallback.clone(), old.lane), (None, Lane::Reflex));
+        assert!(store.savings_samples(Some("other"), now - day * 30).await.unwrap().is_empty());
+        assert_eq!(store.savings_samples(None, now - day * 50).await.unwrap().len(), 7);
     }
 }

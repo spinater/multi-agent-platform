@@ -105,6 +105,7 @@ pub fn router(hub: Arc<Hub>) -> Router {
         .route("/projects/{slug}/decisions/summary", get(projects::decision_summary))
         .route("/projects/{slug}/decisions/{id}/feedback", post(projects::decision_feedback))
         .route("/projects/{slug}/corpus/archive", post(projects::archive))
+        .route("/reflex/savings", get(projects::savings))
         // ---- templates: lay a development process into a project's folder, then queue the init agent
         .route("/templates", get(templates::list))
         .route("/projects/{slug}/init/plan", post(templates::plan))

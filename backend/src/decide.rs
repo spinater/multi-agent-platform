@@ -12,6 +12,8 @@ use tokio::process::Command;
 use crate::hub::Hub;
 use crate::model::{Answer, DecideResponse, Decision, FitCaseResult, FitResult, Lane, Project, Question, QuestionKind};
 use crate::projects::validate_questions;
+use crate::savings::estimate_tokens;
+use crate::store::DecisionCost;
 
 /// Which path the caller wants.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Deserialize)]
@@ -41,7 +43,8 @@ pub fn decode(q: &Question, outcome: &Value) -> Value {
     }
 }
 
-fn prompt(state: &str, q: &Question) -> String {
+/// What the fallback is sent for one question. Its length is recorded for every decision (savings.rs).
+pub fn prompt(state: &str, q: &Question) -> String {
     let mut p = format!("State:\n{state}\n\nQuestion: {}\n", q.prompt);
     if let Some(c) = &q.criteria {
         p.push_str(&format!("Criteria: {c}\n"));
@@ -92,9 +95,40 @@ pub fn parse_answer(q: &Question, raw: &str) -> Value {
     Value::Null
 }
 
-/// Returns the fallback's raw reply.
-async fn ask_fallback(hub: &Hub, project: &Project, state: &str, q: &Question) -> Result<String> {
-    let text = prompt(state, q);
+/// The fallback's raw reply and the tokens it took.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Reply {
+    pub text: String,
+    pub tokens_in: i64,
+    pub tokens_out: i64,
+    /// The provider reported the tokens; else they are estimated from the prompt and the reply.
+    pub measured: bool,
+}
+
+impl Reply {
+    /// Tokens as the provider reported them (`usage`), else about 4 chars per token of the prompt and the reply.
+    /// A headless CLI reports nothing, and its own system prompt is not counted (`fallback_overhead_tokens`).
+    pub fn new(text: String, prompt_chars: i64, usage: Option<(i64, i64)>) -> Self {
+        match usage {
+            Some((tokens_in, tokens_out)) => Self { text, tokens_in, tokens_out, measured: true },
+            None => {
+                let tokens_out = estimate_tokens(text.chars().count() as i64);
+                Self { text, tokens_in: estimate_tokens(prompt_chars), tokens_out, measured: false }
+            }
+        }
+    }
+}
+
+/// `usage` of an Anthropic Messages response: input tokens (with cache writes and reads) and output tokens.
+pub fn api_usage(body: &Value) -> Option<(i64, i64)> {
+    let u = body.get("usage")?;
+    let input = u["input_tokens"].as_i64()? + u["cache_creation_input_tokens"].as_i64().unwrap_or(0) + u["cache_read_input_tokens"].as_i64().unwrap_or(0);
+    Some((input, u["output_tokens"].as_i64()?))
+}
+
+/// Returns the fallback's raw reply to `text`, the question's prompt.
+async fn ask_fallback(hub: &Hub, project: &Project, text: &str) -> Result<Reply> {
+    let prompt_chars = text.chars().count() as i64;
     match project.fallback.as_str() {
         "none" => bail!("this project has no fallback"),
         "api" => {
@@ -115,7 +149,8 @@ async fn ask_fallback(hub: &Hub, project: &Project, state: &str, q: &Question) -
             if !code.is_success() {
                 bail!("Anthropic API {code}: {}", body["error"]["message"].as_str().unwrap_or("?"));
             }
-            Ok(body["content"].as_array().into_iter().flatten().filter_map(|b| b["text"].as_str()).collect())
+            let reply = body["content"].as_array().into_iter().flatten().filter_map(|b| b["text"].as_str()).collect();
+            Ok(Reply::new(reply, prompt_chars, api_usage(&body)))
         }
         provider => {
             let spec = hub.spec(provider)?;
@@ -123,7 +158,7 @@ async fn ask_fallback(hub: &Hub, project: &Project, state: &str, q: &Question) -
             let argv: Vec<String> = spec
                 .headless
                 .iter()
-                .map(|a| a.replace("{binary}", &spec.binary).replace("{model}", &model).replace("{session}", "decide").replace("{prompt}", &text))
+                .map(|a| a.replace("{binary}", &spec.binary).replace("{model}", &model).replace("{session}", "decide").replace("{prompt}", text))
                 .collect();
             let Some((program, args)) = argv.split_first() else { bail!("provider `{provider}` has no headless command") };
             // An empty directory of its own: in the workspace the agent would read CLAUDE.md and call this endpoint again.
@@ -139,7 +174,7 @@ async fn ask_fallback(hub: &Hub, project: &Project, state: &str, q: &Question) -
             if !out.status.success() {
                 bail!("{provider} failed: {}", String::from_utf8_lossy(&out.stderr).trim());
             }
-            Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
+            Ok(Reply::new(String::from_utf8_lossy(&out.stdout).trim().to_string(), prompt_chars, None))
         }
     }
 }
@@ -252,14 +287,24 @@ pub async fn decide(hub: &Hub, project: &Project, state: &str, questions: &[Ques
             Route::Auto => !g.passes() && project.fallback != "none",
         };
         let mut reason = g.reason(use_fallback.then_some(project.fallback.as_str()));
+        // What the fallback is (or would have been) sent, recorded for every decision: the savings report prices a
+        // reflex-lane answer by it.
+        let text = prompt(state, q);
+        let mut cost = DecisionCost {
+            prompt_chars: Some(text.chars().count() as i64),
+            fallback: Some(project.fallback.clone()),
+            skipped_thai: g == Gate::Thai,
+            ..DecisionCost::default()
+        };
 
         let (answer, lane, llm_raw, error) = if use_fallback {
-            match ask_fallback(hub, project, state, q).await {
-                Ok(raw) => {
-                    let parsed = parse_answer(q, &raw);
+            match ask_fallback(hub, project, &text).await {
+                Ok(reply) => {
+                    (cost.tokens_in, cost.tokens_out, cost.measured) = (Some(reply.tokens_in), Some(reply.tokens_out), reply.measured);
+                    let parsed = parse_answer(q, &reply.text);
                     let lane = if parsed.is_null() { Lane::Abstain } else { Lane::Llm };
                     let error = parsed.is_null().then(|| "the fallback's reply matched no option".to_string());
-                    (parsed, lane, Some(raw), error)
+                    (parsed, lane, Some(reply.text), error)
                 }
                 Err(err) => (Value::Null, Lane::Abstain, None, Some(format!("{err:#}"))),
             }
@@ -287,7 +332,7 @@ pub async fn decide(hub: &Hub, project: &Project, state: &str, questions: &[Ques
             error: error.clone(),
             feedback: None,
         };
-        let decision_id = match hub.store.insert_decision(&record).await {
+        let decision_id = match hub.store.insert_decision(&record, &cost).await {
             Ok(id) => id,
             Err(err) => {
                 tracing::warn!("could not record a decision: {err:#}");
@@ -425,6 +470,30 @@ mod tests {
         assert_eq!(gate(Route::Llm, false, Some(1e-4), &a, Some(1e-3), true), Gate::LlmOnly);
         assert_eq!(Gate::Above(2.13e-4, 1e-4).reason(None), "Confidence 2.1e-4 is at or above the threshold 1.0e-4: answered locally, no LLM call.");
         assert_eq!(Gate::Below(3e-5, 1e-4).reason(None), "Confidence 3.0e-5 is below the threshold 1.0e-4, and no fallback was asked.");
+    }
+
+    #[test]
+    fn fallback_tokens_are_measured_or_estimated() {
+        // The shape of a Messages API response; no test calls the API.
+        let body = json!({ "content": [{ "type": "text", "text": "refund" }], "usage": { "input_tokens": 61, "output_tokens": 3 } });
+        assert_eq!(api_usage(&body), Some((61, 3)));
+        let cached = json!({ "usage": { "input_tokens": 10, "cache_read_input_tokens": 40, "cache_creation_input_tokens": 5, "output_tokens": 2 } });
+        assert_eq!(api_usage(&cached), Some((55, 2)));
+        assert_eq!(api_usage(&json!({ "content": [] })), None);
+        assert_eq!(api_usage(&json!({ "usage": { "input_tokens": 3 } })), None);
+
+        let r = Reply::new("refund".into(), 201, Some((61, 3)));
+        assert_eq!((r.tokens_in, r.tokens_out, r.measured), (61, 3, true));
+        // CLI: ceil(201 / 4) = 51 in, ceil(6 / 4) = 2 out.
+        let r = Reply::new("refund".into(), 201, None);
+        assert_eq!((r.tokens_in, r.tokens_out, r.measured), (51, 2, false));
+        // Characters, not bytes.
+        assert_eq!(Reply::new("ใช่".into(), 0, None).tokens_out, 1);
+
+        let q = choice();
+        let p = prompt("charged twice", &q);
+        assert!(p.starts_with("State:\ncharged twice\n\nQuestion: Route\n"));
+        assert!(p.ends_with("Reply with the option only."));
     }
 
     #[test]

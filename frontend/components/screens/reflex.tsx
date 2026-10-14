@@ -30,6 +30,7 @@ import {
 import { Log } from "../reflex/log";
 import { Playground } from "../reflex/playground";
 import { QuestionsModal, starterQuestion } from "../reflex/questions";
+import { Savings, ViewTabs } from "../reflex/savings";
 import { Setup, type Step } from "../reflex/setup";
 import { Banner, ModeBadge, RxButton, RxSection, errText } from "../reflex/ui";
 import { Main, PageHeader } from "../shell/page";
@@ -41,12 +42,14 @@ const LEAD =
 /** The Reflex screen, layout A · Guided (design_handoff_map_dashboard/Reflex.dc.html): how it works, set up,
  * playground and calibrate side by side, then the decision log. Everything comes from the current project. */
 export function ReflexScreen() {
-  const { current, project, projects, connection } = useApp();
+  const { current, project, projects, connection, route } = useApp();
   return (
     <>
       <TopBar />
       <div className="reflex-theme flex flex-1 flex-col bg-r-bg text-r-text">
-        {current ? (
+        {route.arg === "savings" ? (
+          <Savings />
+        ) : current ? (
           <ProjectReflex key={current.project.slug} info={current} />
         ) : project !== null && (connection === "connecting" || !projects.length) ? (
           <Main>
@@ -64,7 +67,7 @@ function NoProject() {
   const { projects, setProject, go } = useApp();
   return (
     <Main className="gap-[18px]">
-      <PageHeader kicker="default workspace · decision engine" title="Reflex" lead={LEAD} actions={<ModeBadge label="no project" color="var(--r-faint)" />} />
+      <PageHeader kicker="default workspace · decision engine" title="Reflex" lead={LEAD} actions={<><ViewTabs active="engine" /><ModeBadge label="no project" color="var(--r-faint)" /></>} />
       <Banner
         color="var(--lane-llm)"
         title="Reflex runs per project"
@@ -318,7 +321,7 @@ function ProjectReflex({ info }: { info: ProjectInfo }) {
 
   return (
     <Main className="gap-[18px]">
-      <PageHeader kicker={`project · ${p.slug} · decision engine`} title="Reflex" lead={LEAD} actions={<ModeBadge label={badge} color={badgeColor} />} />
+      <PageHeader kicker={`project · ${p.slug} · decision engine`} title="Reflex" lead={LEAD} actions={<><ViewTabs active="engine" /><ModeBadge label={badge} color={badgeColor} /></>} />
       {banner && <Banner color={BANNER_TONE[mode]} title={banner.title} text={banner.text} actions={banner.actions} />}
       {error && <Banner color="var(--lane-abstain)" title="Could not load the Reflex data" text={error} actions={<RxButton onClick={refresh}>Retry</RxButton>} />}
 

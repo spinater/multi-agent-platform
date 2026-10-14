@@ -130,6 +130,10 @@ timeout_secs = 600
 # Used by projects whose fallback is "api"; the other fallbacks are the providers above, run headless.
 # api_key_env = "ANTHROPIC_API_KEY"
 # api_model = "claude-haiku-5-5"
+# The Reflex savings page (#reflex/savings) prices each fallback call from the API's reported usage, else at
+# ~4 chars per token. A headless CLI's own system prompt is not in that count: add a headless CLI call's own
+# system-prompt cost if you want it counted (tokens per call, added to both saved and spent; default 0).
+# fallback_overhead_tokens = { claude = 0, codex = 0, gemini = 0, api = 0 }
 
 # The Skills screen: what each agent can load in a workspace, where it comes from, and which tasks used it.
 # MAP only reads these locations. The one file it writes is <workspace>/.claude/settings.local.json, when you

@@ -171,11 +171,20 @@ pub struct ReflexConfig {
     pub api_key_env: String,
     /// Model for the `api` fallback when a project does not set one.
     pub api_model: String,
+    /// Tokens added to every call of a fallback (`api`, or a provider name) in the savings report, both saved and
+    /// spent: a headless CLI's own system prompt, which its output does not report. Missing: 0.
+    pub fallback_overhead_tokens: BTreeMap<String, u64>,
 }
 
 impl Default for ReflexConfig {
     fn default() -> Self {
-        Self { binary: "reflex".into(), port_base: 7400, api_key_env: "ANTHROPIC_API_KEY".into(), api_model: "claude-haiku-5-5".into() }
+        Self {
+            binary: "reflex".into(),
+            port_base: 7400,
+            api_key_env: "ANTHROPIC_API_KEY".into(),
+            api_model: "claude-haiku-5-5".into(),
+            fallback_overhead_tokens: BTreeMap::new(),
+        }
     }
 }
 
@@ -712,9 +721,17 @@ mod tests {
         assert_eq!(c.server.static_dir, PathBuf::from("/srv/map/frontend/out"));
         assert!(c.orchestrator.audit.enabled);
         assert_eq!(c.reflex.port_base, 7400);
+        assert!(c.reflex.fallback_overhead_tokens.is_empty());
         assert_eq!(c.skills.context_files["codex"], "AGENTS.md");
         assert_eq!(c.usage.skip_pct, 90.0);
         assert_eq!(c.templates.dirs.len(), 1);
+    }
+
+    #[test]
+    fn fallback_overhead_parses() {
+        let c = Config::parse("[workspace]\ndir = \"/r\"\n[reflex]\nfallback_overhead_tokens = { claude = 1200, api = 0 }\n", Path::new("/")).unwrap();
+        assert_eq!(c.reflex.fallback_overhead_tokens.get("claude"), Some(&1200));
+        assert_eq!(c.reflex.fallback_overhead_tokens.get("codex"), None);
     }
 
     #[test]
