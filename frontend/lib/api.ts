@@ -13,7 +13,10 @@ import type { GitAccess } from "./generated/GitAccess";
 import type { GitIdentity } from "./generated/GitIdentity";
 import type { GitKey } from "./generated/GitKey";
 import type { GitOpResult } from "./generated/GitOpResult";
+import type { GitSettings } from "./generated/GitSettings";
 import type { GitStatus } from "./generated/GitStatus";
+import type { KnownHost } from "./generated/KnownHost";
+import type { SettingsInfo } from "./generated/SettingsInfo";
 import type { GitTestResult } from "./generated/GitTestResult";
 import type { InitPlan } from "./generated/InitPlan";
 import type { InitStarted } from "./generated/InitStarted";
@@ -212,6 +215,12 @@ export const gitApi = {
   /** `ssh -T git@<host>` with MAP's key: `github.com`, `gitlab.com`, `git@host:2222`. */
   test: (host: string) => request<GitTestResult>("POST", "/git/test", { host }),
   setIdentity: (identity: GitIdentity) => request<GitIdentity>("PUT", "/git/identity", identity),
+  /** MAP's own key, or this machine's `~/.ssh` and ssh-agent; the gitconfig is regenerated at once. */
+  setSettings: (settings: GitSettings) => request<GitSettings>("PUT", "/git/settings", settings),
+  /** Forgets a host recorded on first use (409 for a pinned one); returns the known hosts left. */
+  removeKnownHost: (host: string) => request<KnownHost[]>("DELETE", `/git/known-hosts/${encodeURIComponent(host)}`),
+  /** The Settings screen's read-only facts: server settings, agent binaries, gh/glab and whether their tokens are set. */
+  settings: () => request<SettingsInfo>("GET", "/settings"),
   status: (slug: string) => request<GitStatus>("GET", `/projects/${slug}/git`),
   /** Fetch; pull (fast-forward only); push (never forced; sets the upstream on a first push). */
   run: (slug: string, op: GitOp) => request<GitOpResult>("POST", `/projects/${slug}/git/${op}`, {}),

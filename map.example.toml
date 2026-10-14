@@ -20,6 +20,11 @@ session_prefix = "map-"
 # Exported in each agent's launch script and in verify/post_done commands.
 [workspace.env]
 PATH = "/opt/homebrew/bin:/usr/local/bin:/Users/you/.local/bin:/Users/you/.bun/bin:/usr/bin:/bin"
+# For agents that open pull/merge requests and issues with `gh` or `glab` (Settings → Git & SSH shows only whether
+# these are set, never their values; the dashboard never takes them). Clone, pull and push use SSH instead.
+# GH_TOKEN = "github_pat_…"
+# GITLAB_TOKEN = "glpat-…"
+# GITLAB_HOST = "gitlab.example.com"   # self-hosted GitLab only
 
 [watcher]
 interval_secs = 5
@@ -174,7 +179,7 @@ timeout_secs = 600
 
 # Projects are folders on this machine. "Clone from git" in the new-project wizard runs `git clone` into
 # <root>/<repo name> by default (any other new or empty folder can be typed instead). MAP's own git commands in
-# project folders (clone, ls-remote, fetch, pull, push) use MAP's gitconfig and SSH key (Projects → Git access, kept
+# project folders (clone, ls-remote, fetch, pull, push) use MAP's gitconfig and SSH key (Settings → Git & SSH, kept
 # in <data_dir>/git/), never prompt, and stop after git_timeout_secs. Agents get the same gitconfig as
 # GIT_CONFIG_GLOBAL; it includes your own ~/.gitconfig after MAP's defaults, so your settings win.
 [projects]

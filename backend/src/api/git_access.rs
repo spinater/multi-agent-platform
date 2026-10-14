@@ -13,7 +13,7 @@ use serde_json::Value;
 use super::{ApiError, ApiResult};
 use crate::git_access::{self, on_path};
 use crate::hub::Hub;
-use crate::model::{GitAccess, GitIdentity, GitKey, GitOpResult, GitStatus, GitTestResult, Level};
+use crate::model::{GitAccess, GitIdentity, GitKey, GitOpResult, GitSettings, GitStatus, GitTestResult, KnownHost, Level, SettingsInfo, SshMethod};
 use crate::project_git::{self, Op, OpError};
 
 /// `ssh -T` gets this long; GitHub answers within a second or two.
@@ -30,7 +30,40 @@ pub async fn access(State(hub): State<Arc<Hub>>) -> ApiResult<GitAccess> {
         includes: git_access::user_includes().iter().map(|p| p.display().to_string()).collect(),
         projects_root: hub.config.projects.root.display().to_string(),
         ssh_available: on_path("ssh") && on_path("ssh-keygen"),
+        settings: git_access::read_settings(&files),
+        system_ssh: git_access::system_ssh(&git_access::home_ssh_dir(), crate::settings::in_container()).await,
     }))
+}
+
+/// `{"ssh": "map_key" | "system"}`: which SSH setup git uses; the gitconfig is regenerated at once.
+pub async fn set_settings(State(hub): State<Arc<Hub>>, Json(b): Json<GitSettings>) -> ApiResult<GitSettings> {
+    let saved = git_access::write_settings(&hub.git_files(), &b)?;
+    let word = match saved.ssh {
+        SshMethod::MapKey => "MAP's own key",
+        SshMethod::System => "this machine's SSH setup (~/.ssh, ssh-agent)",
+    };
+    hub.event(Level::Info, "git.settings", None, None, format!("Git now uses {word}")).await;
+    Ok(Json(saved))
+}
+
+/// Forgets a host recorded on first use (409 for a pinned host, 404 when MAP's known_hosts does not name it);
+/// returns the known hosts left.
+pub async fn remove_known_host(State(hub): State<Arc<Hub>>, UrlPath(host): UrlPath<String>) -> ApiResult<Vec<KnownHost>> {
+    let files = hub.git_files();
+    if host.split(',').any(|h| git_access::is_pinned(h.trim())) {
+        return Err(ApiError(StatusCode::CONFLICT, format!("{host} is pinned: MAP ships its published host keys, which cannot be removed")));
+    }
+    let removed = git_access::remove_known_host(&files, &host)?;
+    if removed == 0 {
+        return Err(super::not_found("host"));
+    }
+    hub.event(Level::Info, "git.known_host", None, None, format!("Forgot {host}'s host key{} (recorded on first use)", if removed == 1 { "" } else { "s" })).await;
+    Ok(Json(git_access::known_hosts(&files).await))
+}
+
+/// The Settings screen's read-only facts; never a secret's value.
+pub async fn settings(State(hub): State<Arc<Hub>>) -> Json<SettingsInfo> {
+    Json(crate::settings::info(&hub))
 }
 
 #[derive(Deserialize)]

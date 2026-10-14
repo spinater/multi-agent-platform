@@ -113,6 +113,10 @@ pub fn router(hub: Arc<Hub>) -> Router {
         .route("/git/key", post(git_access::create_key))
         .route("/git/test", post(git_access::test))
         .route("/git/identity", axum::routing::put(git_access::set_identity))
+        .route("/git/settings", axum::routing::put(git_access::set_settings))
+        .route("/git/known-hosts/{host}", axum::routing::delete(git_access::remove_known_host))
+        // ---- the Settings screen: read-only server facts, agent binaries, gh/glab and whether their tokens are set
+        .route("/settings", get(git_access::settings))
         .route("/projects/{slug}/git", get(git_access::status))
         .route("/projects/{slug}/git/fetch", post(git_access::fetch))
         .route("/projects/{slug}/git/pull", post(git_access::pull))

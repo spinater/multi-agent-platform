@@ -29,9 +29,12 @@ services:
       # The folder that holds your projects, at the same path: projects are folders the agents work in place. Set
       # [projects] root in map.toml to this path so "Clone from git" puts new projects here.
       - ${MAP_PROJECTS_DIR:?set MAP_PROJECTS_DIR in .env}:${MAP_PROJECTS_DIR}
-      # No ~/.ssh is needed: clone, pull and push use MAP's own key from data/ (Projects → Git access). Optional, only
+      # No ~/.ssh is needed: clone, pull and push use MAP's own key from data/ (Settings → Git & SSH). Optional, only
       # if it exists on the host (a missing file becomes an empty directory): your global git config, which MAP's
       # gitconfig includes after its own defaults (`- ${MAP_HOME}/.gitconfig:${MAP_HOME}/.gitconfig:ro`).
+      # Only for Settings → Git & SSH → "This machine's SSH setup": mount your ~/.ssh (keys, config, known_hosts)
+      # read-only, `- ${MAP_HOME}/.ssh:${MAP_HOME}/.ssh:ro`. Without it that method finds no keys in the container.
+      # An ssh-agent on the host is not reachable from here unless you also mount its socket and set SSH_AUTH_SOCK.
       # Agent sign-ins and history, shared with the host so a token refresh on one side does not log out the other.
       - ${MAP_HOME}/.claude:${MAP_HOME}/.claude
       - ${MAP_HOME}/.codex:${MAP_HOME}/.codex

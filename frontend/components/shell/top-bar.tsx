@@ -1,7 +1,7 @@
 "use client";
 
 import clsx from "clsx";
-import { Hexagon, Moon, Sun } from "lucide-react";
+import { Hexagon, Moon, Settings, Sun } from "lucide-react";
 import { useState, type ReactNode } from "react";
 
 import { SCREEN_LABEL, SCREENS } from "@/lib/nav";
@@ -21,7 +21,7 @@ export function Clock() {
   const d = new Date(now);
   const two = (n: number) => String(n).padStart(2, "0");
   return (
-    <span className="font-mono text-[10px] font-medium tracking-[0.12em] whitespace-nowrap text-muted">
+    <span className="font-mono text-[10px] font-medium tracking-[0.12em] whitespace-nowrap text-muted max-sm:hidden">
       {two(d.getDate())}.{two(d.getMonth() + 1)} {two(d.getHours())}:{two(d.getMinutes())}:{two(d.getSeconds())}
     </span>
   );
@@ -112,9 +112,10 @@ function Nav() {
 }
 
 /** Sticky bar on every screen: logo, project switcher, nav, then `extra` (e.g. the command centre's status items),
- * the CLI updates bell, the usage pill, the clock and the theme toggle. */
+ * the CLI updates bell, the usage pill, the clock, Settings and the theme toggle. */
 export function TopBar({ extra }: { extra?: ReactNode }) {
-  const { go, theme, toggleTheme } = useApp();
+  const { go, route, theme, toggleTheme } = useApp();
+  const onSettings = route.screen === "settings";
   return (
     <header className="sticky top-0 z-30 flex min-h-11 flex-wrap items-center justify-between gap-x-5 gap-y-2 border-b border-line bg-[color-mix(in_srgb,var(--bg)_97%,transparent)] px-5 py-2">
       <div className="flex max-w-full min-w-0 flex-wrap items-center gap-x-4 gap-y-2">
@@ -135,6 +136,22 @@ export function TopBar({ extra }: { extra?: ReactNode }) {
         <UpdatesBell />
         <UsageMini />
         <Clock />
+        <a
+          href="#settings"
+          onClick={(e) => {
+            e.preventDefault();
+            go("settings");
+          }}
+          title="Settings: git and SSH access, agent CLIs, server"
+          aria-label="Settings"
+          aria-current={onSettings ? "page" : undefined}
+          className={clsx(
+            "flex size-7 items-center justify-center rounded-md no-underline",
+            onSettings ? "bg-accent-tint text-accent-soft hover:text-accent-soft" : "text-muted hover:bg-white/5 hover:text-text",
+          )}
+        >
+          <Settings className="size-3.5" />
+        </a>
         <button onClick={toggleTheme} className="flex size-7 items-center justify-center rounded-md text-muted hover:bg-white/5 hover:text-text" aria-label="Toggle theme">
           {theme === "dark" ? <Sun className="size-3.5" /> : <Moon className="size-3.5" />}
         </button>

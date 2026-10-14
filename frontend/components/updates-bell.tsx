@@ -1,7 +1,7 @@
 "use client";
 
 import { Bell, RotateCw } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 
 import { providerColor } from "@/lib/colors";
@@ -19,7 +19,7 @@ const WIDTH = 380;
 
 type Tone = "ok" | "warn" | "bad" | "info" | "idle";
 
-const BADGE: Record<Tone, string> = {
+export const BADGE: Record<Tone, string> = {
   ok: "text-ok border-ok/35",
   warn: "text-warn border-warn/45",
   bad: "text-bad border-bad/50",
@@ -42,15 +42,49 @@ export function versionLine(p: UpdateInfo): string {
   return p.installed ?? (p.latest ? `? → ${p.latest}` : "—");
 }
 
-function Row({ p, now, onUpdate, onConsole }: { p: UpdateInfo; now: number; onUpdate: () => void; onConsole: (() => void) | null }) {
-  const badge = updateBadge(p);
-  const checked = p.checked_at ? now - new Date(p.checked_at).getTime() : null;
+/** Whether the Update button is shown and enabled, and why not. Up to date: no button; an unknown installed version
+ * (the check failed): still offered. */
+export function updateActions(p: UpdateInfo): { canUpdate: boolean; offerUpdate: boolean; why: string | undefined } {
   const canUpdate = p.update_command.length > 0 && !p.update_blocked && !p.updating;
-  // Up to date: no button. Unknown installed version (the check failed): still offered.
   const offerUpdate = p.update_command.length > 0 && (p.available || p.updating || p.installed === null);
   const why = p.updating
     ? "An update is running"
     : p.update_blocked ?? (p.update_command.length ? undefined : `No update command; set providers.${p.provider}.update in map.toml`);
+  return { canUpdate, offerUpdate, why };
+}
+
+/** The update flow shared by the bell and the Settings screen: `ask(p)` opens the confirmation (exact command, then
+ * the helper session), `watch(s)` its console. Render `dialogs` once; they go on <body>, so a parent's stacking
+ * context does not cap them. */
+export function useUpdateDialogs(): { ask: (p: UpdateInfo) => void; watch: (s: Session) => void; helper: (p: UpdateInfo) => Session | null; dialogs: ReactNode } {
+  const { sessions, toast } = useApp();
+  const [confirm, setConfirm] = useState<UpdateInfo | null>(null);
+  const [consoleOf, setConsoleOf] = useState<Session | null>(null);
+  const live = (s: Session) => sessions.find((x) => x.name === s.name) ?? s;
+  const dialogs = (
+    <>
+      {confirm &&
+        createPortal(
+          <ConfirmUpdate
+            p={confirm}
+            onClose={() => setConfirm(null)}
+            onStarted={(s) => {
+              setConfirm(null);
+              setConsoleOf(s);
+            }}
+          />,
+          document.body,
+        )}
+      {consoleOf && createPortal(<ConsoleModal session={live(consoleOf)} readOnly={false} onClose={() => setConsoleOf(null)} toast={toast} />, document.body)}
+    </>
+  );
+  return { ask: setConfirm, watch: setConsoleOf, helper: (p) => sessions.find((s) => s.name === p.session) ?? null, dialogs };
+}
+
+function Row({ p, now, onUpdate, onConsole }: { p: UpdateInfo; now: number; onUpdate: () => void; onConsole: (() => void) | null }) {
+  const badge = updateBadge(p);
+  const checked = p.checked_at ? now - new Date(p.checked_at).getTime() : null;
+  const { canUpdate, offerUpdate, why } = updateActions(p);
   return (
     <div className="flex flex-col gap-1.5 border-b border-line pb-2.5">
       <div className="flex items-center gap-2">
@@ -140,17 +174,15 @@ function ConfirmUpdate({ p, onClose, onStarted }: { p: UpdateInfo; onClose: () =
 /** The top bar's bell: the number of available CLI updates, and a popover with each provider's versions, an Update
  * button (confirmed, runs in `<prefix>update-<provider>`) and Check now. */
 export function UpdatesBell() {
-  const { now, sessions, toast } = useApp();
+  const { now } = useApp();
   const { report, checking, error } = useUpdates();
   const button = useRef<HTMLButtonElement>(null);
   const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
-  const [confirm, setConfirm] = useState<UpdateInfo | null>(null);
-  const [consoleOf, setConsoleOf] = useState<Session | null>(null);
+  const flow = useUpdateDialogs();
 
   const providers = report?.providers ?? [];
   const count = providers.filter((p) => p.available).length;
   const checkedAt = report?.checked_at ? new Date(report.checked_at).getTime() : null;
-  const live = (s: Session) => sessions.find((x) => x.name === s.name) ?? s;
 
   const toggle = () => {
     if (pos) return setPos(null);
@@ -197,7 +229,7 @@ export function UpdatesBell() {
                 </button>
               </div>
               {providers.map((p) => {
-                const existing = sessions.find((s) => s.name === p.session);
+                const existing = flow.helper(p);
                 return (
                   <Row
                     key={p.provider}
@@ -205,13 +237,13 @@ export function UpdatesBell() {
                     now={now}
                     onUpdate={() => {
                       setPos(null);
-                      setConfirm(p);
+                      flow.ask(p);
                     }}
                     onConsole={
                       existing
                         ? () => {
                             setPos(null);
-                            setConsoleOf(existing);
+                            flow.watch(existing);
                           }
                         : null
                     }
@@ -228,20 +260,7 @@ export function UpdatesBell() {
           document.body,
         )}
 
-      {/* On <body>, so the top bar's stacking context does not cap the dialogs. */}
-      {confirm &&
-        createPortal(
-          <ConfirmUpdate
-            p={confirm}
-            onClose={() => setConfirm(null)}
-            onStarted={(s) => {
-              setConfirm(null);
-              setConsoleOf(s);
-            }}
-          />,
-          document.body,
-        )}
-      {consoleOf && createPortal(<ConsoleModal session={live(consoleOf)} readOnly={false} onClose={() => setConsoleOf(null)} toast={toast} />, document.body)}
+      {flow.dialogs}
     </div>
   );
 }

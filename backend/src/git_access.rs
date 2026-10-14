@@ -3,7 +3,12 @@
 //! published host keys (other hosts are trusted on first use), a git identity, and a gitconfig that puts them
 //! together. Agents get that gitconfig as `GIT_CONFIG_GLOBAL`, and MAP uses it for every git command it runs in a
 //! project folder. The gitconfig includes the user's own `~/.gitconfig` after MAP's defaults, so their settings win;
-//! a repo's own config wins over both. Nothing here reads or writes `~/.ssh`.
+//! a repo's own config wins over both.
+//!
+//! The SSH method (`<data_dir>/git/settings.json`) can instead be the machine's own setup (`~/.ssh`, ssh-agent):
+//! then the gitconfig sets no `sshCommand` and plain `ssh` does what it does in the user's shell. Nothing here ever
+//! writes `~/.ssh` or reads a private key from it; for that method only the names and fingerprints of its `*.pub`
+//! files are shown.
 
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
@@ -15,7 +20,7 @@ use chrono::{DateTime, Utc};
 use regex::Regex;
 use tokio::process::Command;
 
-use crate::model::{GitIdentity, GitKey, GitTestResult, KnownHost};
+use crate::model::{GitIdentity, GitKey, GitSettings, GitTestResult, KnownHost, SshMethod, SshPublicKey, SystemSsh};
 
 /// GitHub's and GitLab's SSH host keys, as published on 2026-10-14 at https://api.github.com/meta (`ssh_keys`) and
 /// https://docs.gitlab.com/user/gitlab_com/#ssh-host-keys-fingerprints. Fingerprints, checked against both pages:
@@ -33,6 +38,11 @@ gitlab.com ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQCsj2bNKTBSpIYDEGk9KxsGh3mySTRgM
 ";
 
 const PINNED_HOSTS: [&str; 2] = ["github.com", "gitlab.com"];
+
+/// One of the hosts whose published keys MAP ships.
+pub fn is_pinned(host: &str) -> bool {
+    PINNED_HOSTS.contains(&host)
+}
 
 /// Transports MAP's own git commands may use; `ext::` and `fd::` (which run commands) are never among them.
 const ALLOWED_PROTOCOLS: &str = "https:http:ssh:git:file";
@@ -63,6 +73,9 @@ impl GitFiles {
     }
     fn identity_file(&self) -> PathBuf {
         self.dir.join("identity.json")
+    }
+    fn settings_file(&self) -> PathBuf {
+        self.dir.join("settings.json")
     }
 }
 
@@ -173,6 +186,19 @@ pub fn write_identity(files: &GitFiles, id: &GitIdentity) -> Result<GitIdentity>
     Ok(id)
 }
 
+/// The SSH method; MAP's own key when the file is missing or unreadable.
+pub fn read_settings(files: &GitFiles) -> GitSettings {
+    std::fs::read_to_string(files.settings_file()).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or_default()
+}
+
+/// Saves the SSH method and regenerates the gitconfig (with or without MAP's `sshCommand`).
+pub fn write_settings(files: &GitFiles, settings: &GitSettings) -> Result<GitSettings> {
+    make_dir(&files.dir)?;
+    std::fs::write(files.settings_file(), serde_json::to_string_pretty(settings)?)?;
+    ensure(files)?;
+    Ok(*settings)
+}
+
 /// The user's own global git config files that exist: `~/.gitconfig`, then `$XDG_CONFIG_HOME/git/config` (or
 /// `~/.config/git/config`). `GIT_CONFIG_GLOBAL` replaces both, so MAP's gitconfig includes them.
 pub fn user_includes() -> Vec<PathBuf> {
@@ -275,13 +301,15 @@ pub fn render_known_hosts(existing: &str) -> String {
 }
 
 /// Creates `<data_dir>/git/` (0700) and brings `known_hosts` and `gitconfig` up to date; returns the gitconfig's
-/// path. Cheap when nothing changed, so it runs before every launch and every git command MAP runs.
+/// path. Cheap when nothing changed, so it runs before every launch and every git command MAP runs. With the
+/// "system" SSH method the gitconfig leaves `sshCommand` out, so ssh uses `~/.ssh` and ssh-agent.
 pub fn ensure(files: &GitFiles) -> Result<PathBuf> {
     make_dir(&files.dir)?;
     let kh = files.known_hosts();
     write_if_changed(&kh, &render_known_hosts(&std::fs::read_to_string(&kh).unwrap_or_default()))?;
     let key = files.key();
-    let text = render_gitconfig(&read_identity(files), key.is_file().then_some(key.as_path()), &kh, &user_includes());
+    let use_key = read_settings(files).ssh == SshMethod::MapKey && key.is_file();
+    let text = render_gitconfig(&read_identity(files), use_key.then_some(key.as_path()), &kh, &user_includes());
     let path = files.gitconfig();
     write_if_changed(&path, &text)?;
     Ok(path)
@@ -475,16 +503,23 @@ pub fn greeted(output: &str, exit_ok: bool) -> bool {
     exit_ok || o.contains("successfully authenticated") || o.contains("welcome to gitlab") || o.contains("authenticated via ssh key") || o.contains("logged in as")
 }
 
-/// `ssh -T git@<host>` with MAP's key alone (`-F /dev/null`: the user's own ssh config and keys play no part), so it
-/// answers whether the host accepts MAP's key.
+/// `ssh -T git@<host>` the way git will connect. With MAP's key: that key alone (`-F /dev/null`: the user's own ssh
+/// config and keys play no part), so it answers whether the host accepts MAP's key. With the "system" method: plain
+/// `ssh` with the user's own config, keys, agent and known_hosts (in batch mode, so an unknown host fails instead of
+/// asking), as git will run it.
 pub async fn test(files: &GitFiles, host: &SshHost, timeout: Duration) -> Result<GitTestResult> {
-    if files.key().is_file() {
-        ensure(files)?;
-    } else {
+    let system = read_settings(files).ssh == SshMethod::System;
+    if !system && !files.key().is_file() {
         bail!("MAP has no SSH key yet: create one first");
     }
-    let mut args: Vec<String> = vec!["-F".into(), "/dev/null".into()];
-    args.extend(ssh_options(&files.key(), &files.known_hosts()));
+    ensure(files)?;
+    let mut args: Vec<String> = vec![];
+    if system {
+        args.extend(["-o".into(), "BatchMode=yes".into()]);
+    } else {
+        args.extend(["-F".into(), "/dev/null".into()]);
+        args.extend(ssh_options(&files.key(), &files.known_hosts()));
+    }
     args.extend(["-o".into(), format!("ConnectTimeout={}", timeout.as_secs().clamp(1, 20)), "-T".into()]);
     if let Some(p) = host.port {
         args.extend(["-p".into(), p.to_string()]);
@@ -495,21 +530,81 @@ pub async fn test(files: &GitFiles, host: &SshHost, timeout: Duration) -> Result
     let out = run(cmd, timeout).await?;
     let shown = format!("ssh -T {}{}@{}", host.port.map(|p| format!("-p {p} ")).unwrap_or_default(), host.user, host.host);
     let name = host.known_hosts_name();
-    let host_keys = known_hosts(files).await.into_iter().filter(|k| k.host.split(',').any(|h| h == name)).collect();
+    // The system method records host keys in ~/.ssh/known_hosts, which MAP does not read.
+    let host_keys = if system { vec![] } else { known_hosts(files).await.into_iter().filter(|k| k.host.split(',').any(|h| h == name)).collect() };
     Ok(GitTestResult { ok: greeted(&out.output, out.ok), host: name, command: shown, output: out.output, host_keys })
+}
+
+/// Removes a host recorded on first use from MAP's `known_hosts` (every line that names it), so the next connection
+/// records its key again. Pinned hosts are refused: their keys are the published ones. Returns how many keys went.
+pub fn remove_known_host(files: &GitFiles, host: &str) -> Result<usize> {
+    let host = host.trim();
+    if host.is_empty() || host.len() > 300 || !host.chars().all(|c| c.is_ascii_alphanumeric() || ".-_:[],".contains(c)) {
+        bail!("`{host}` is not a known_hosts host name");
+    }
+    let names: Vec<&str> = host.split(',').collect();
+    if names.iter().any(|h| is_pinned(h)) {
+        bail!("{host} is pinned: MAP ships its published host keys, which cannot be removed");
+    }
+    let kh = files.known_hosts();
+    let text = std::fs::read_to_string(&kh).unwrap_or_default();
+    let (mut kept, mut removed) = (String::new(), 0);
+    for line in text.lines() {
+        let hosts = line_hosts(line);
+        if !hosts.is_empty() && (hosts.iter().any(|h| names.contains(h)) || hosts.join(",") == host) {
+            removed += 1;
+        } else {
+            kept.push_str(line);
+            kept.push('\n');
+        }
+    }
+    if removed > 0 {
+        std::fs::write(&kh, render_known_hosts(&kept)).with_context(|| format!("writing {}", kh.display()))?;
+    }
+    Ok(removed)
+}
+
+/// The machine's own SSH setup in `dir` (`~/.ssh`): which files exist, and the names and fingerprints of its `*.pub`
+/// files. Only `*.pub` files are ever opened (by `ssh-keygen -lf`); private keys are not read.
+pub async fn system_ssh(dir: &Path, in_container: bool) -> SystemSsh {
+    let mut public_keys = vec![];
+    if let Ok(entries) = std::fs::read_dir(dir) {
+        let mut files: Vec<PathBuf> = entries.filter_map(|e| e.ok().map(|e| e.path())).filter(|p| p.extension().is_some_and(|x| x == "pub") && p.is_file()).collect();
+        files.sort();
+        for path in files.into_iter().take(32) {
+            let file = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+            if let Some((comment, fingerprint, key_type)) = fingerprints(&path).await.into_iter().next() {
+                public_keys.push(SshPublicKey { file, fingerprint, key_type, comment });
+            }
+        }
+    }
+    SystemSsh {
+        dir: dir.display().to_string(),
+        dir_exists: dir.is_dir(),
+        config_exists: dir.join("config").is_file(),
+        known_hosts_exists: dir.join("known_hosts").is_file(),
+        public_keys,
+        agent_socket: std::env::var_os("SSH_AUTH_SOCK").is_some_and(|s| !s.is_empty()),
+        in_container,
+    }
+}
+
+/// `~/.ssh` of the user MAP runs as.
+pub fn home_ssh_dir() -> PathBuf {
+    std::env::var_os("HOME").map(PathBuf::from).unwrap_or_else(|| PathBuf::from("~")).join(".ssh")
 }
 
 /// A friendly next step for a failed clone, ls-remote, fetch or push.
 pub fn auth_hint(output: &str, has_key: bool) -> Option<String> {
     let o = output.to_lowercase();
     if o.contains("host key verification failed") || o.contains("remote host identification has changed") {
-        return Some("The host's key could not be confirmed or has changed: check its fingerprint under Git access before trusting it.".into());
+        return Some("The host's key could not be confirmed or has changed: check its fingerprint under Settings → Git & SSH before trusting it.".into());
     }
     if o.contains("permission denied (publickey") || o.contains("could not read from remote repository") {
         return Some(if has_key {
-            "The host refused MAP's key: add MAP's public key (Projects → Git access) to your GitHub or GitLab account, or as a deploy key of the repo (with write access to push), then try again.".into()
+            "The host refused MAP's key: add MAP's public key (Settings → Git & SSH) to your GitHub or GitLab account, or as a deploy key of the repo (with write access to push), then try again.".into()
         } else {
-            "Create MAP's SSH key under Projects → Git access, add its public key to your GitHub or GitLab account (or as a deploy key of the repo), then try again.".into()
+            "Create MAP's SSH key under Settings → Git & SSH, add its public key to your GitHub or GitLab account (or as a deploy key of the repo), then try again.".into()
         });
     }
     if o.contains("could not read username") || o.contains("terminal prompts disabled") || o.contains("authentication failed") {
@@ -653,6 +748,82 @@ mod tests {
         assert_eq!(old.len(), 2, "the old key and its .pub are kept: {old:?}");
         let old_pub = old.iter().find(|n| n.ends_with(".pub")).unwrap();
         assert_eq!(std::fs::read_to_string(files.dir.join(old_pub)).unwrap().trim(), made.public_key);
+    }
+
+    #[tokio::test]
+    async fn the_system_method_persists_and_drops_maps_ssh_command() {
+        let dir = tempfile::tempdir().unwrap();
+        let files = GitFiles::new(dir.path());
+        assert_eq!(read_settings(&files).ssh, SshMethod::MapKey, "MAP's key by default");
+        // A key file is enough for the gitconfig; no ssh-keygen needed.
+        make_dir(&files.dir).unwrap();
+        std::fs::write(files.key(), "not read").unwrap();
+        ensure(&files).unwrap();
+        assert!(std::fs::read_to_string(files.gitconfig()).unwrap().contains("sshCommand"));
+
+        write_identity(&files, &GitIdentity { name: "Ada".into(), email: "ada@example.com".into() }).unwrap();
+        write_settings(&files, &GitSettings { ssh: SshMethod::System }).unwrap();
+        let saved: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(files.dir.join("settings.json")).unwrap()).unwrap();
+        assert_eq!(saved["ssh"], "system");
+        assert_eq!(read_settings(&GitFiles::new(dir.path())).ssh, SshMethod::System, "read back from the file");
+        let config = std::fs::read_to_string(files.gitconfig()).unwrap();
+        assert!(!config.contains("sshCommand") && !config.contains("id_ed25519"), "{config}");
+        assert!(config.contains("name = \"Ada\""), "the identity stays: {config}");
+
+        write_settings(&files, &GitSettings { ssh: SshMethod::MapKey }).unwrap();
+        assert!(std::fs::read_to_string(files.gitconfig()).unwrap().contains("sshCommand"), "back to MAP's key");
+        assert!(serde_json::from_str::<GitSettings>("{\"ssh\": \"other\"}").is_err(), "only the two methods");
+    }
+
+    #[test]
+    fn removing_a_known_host_refuses_pinned_ones_and_forgets_a_learned_one() {
+        let dir = tempfile::tempdir().unwrap();
+        let files = GitFiles::new(dir.path());
+        make_dir(&files.dir).unwrap();
+        let learned = "git.example.com ssh-ed25519 AAAAlearned\n[git.example.com]:2222 ssh-ed25519 AAAAport\nother.example ssh-rsa AAAAother\n";
+        std::fs::write(files.known_hosts(), render_known_hosts(learned)).unwrap();
+
+        for pinned in ["github.com", "gitlab.com", "github.com,140.82.112.3"] {
+            let err = remove_known_host(&files, pinned).unwrap_err().to_string();
+            assert!(err.contains("pinned"), "{pinned}: {err}");
+        }
+        assert!(remove_known_host(&files, "-oProxyCommand=x y").is_err());
+        assert_eq!(remove_known_host(&files, "nowhere.example").unwrap(), 0);
+
+        assert_eq!(remove_known_host(&files, "git.example.com").unwrap(), 1);
+        let text = std::fs::read_to_string(files.known_hosts()).unwrap();
+        assert!(text.starts_with(PINNED_KNOWN_HOSTS), "the pins stay");
+        assert!(!text.contains("AAAAlearned"));
+        assert!(text.contains("AAAAport") && text.contains("AAAAother"), "other hosts and ports stay: {text}");
+        assert_eq!(remove_known_host(&files, "[git.example.com]:2222").unwrap(), 1);
+        assert!(!std::fs::read_to_string(files.known_hosts()).unwrap().contains("AAAAport"));
+    }
+
+    #[tokio::test]
+    async fn system_ssh_lists_public_keys_only() {
+        let dir = tempfile::tempdir().unwrap();
+        let ssh = dir.path().join(".ssh");
+        let missing = system_ssh(&ssh, true).await;
+        assert!(!missing.dir_exists && missing.public_keys.is_empty() && missing.in_container);
+        std::fs::create_dir(&ssh).unwrap();
+        // A private key without a .pub: never opened, so it does not show up.
+        std::fs::write(ssh.join("id_ed25519"), "-----BEGIN OPENSSH PRIVATE KEY-----\nsecret\n").unwrap();
+        std::fs::write(ssh.join("config"), "Host *\n").unwrap();
+        if on_path("ssh-keygen") {
+            let out = std::process::Command::new("ssh-keygen").args(["-q", "-t", "ed25519", "-N", "", "-C", "me@test", "-f"]).arg(ssh.join("id_test")).output().unwrap();
+            assert!(out.status.success());
+        }
+        let found = system_ssh(&ssh, false).await;
+        assert!(found.dir_exists && found.config_exists && !found.known_hosts_exists);
+        let json = serde_json::to_string(&found).unwrap();
+        assert!(!json.contains("PRIVATE") && !json.contains("secret"), "{json}");
+        assert!(found.public_keys.iter().all(|k| k.file.ends_with(".pub")), "{json}");
+        if on_path("ssh-keygen") {
+            assert_eq!(found.public_keys.len(), 1, "{json}");
+            let k = &found.public_keys[0];
+            assert_eq!((k.file.as_str(), k.key_type.as_str(), k.comment.as_str()), ("id_test.pub", "ED25519", "me@test"));
+            assert!(k.fingerprint.starts_with("SHA256:"));
+        }
     }
 
     #[tokio::test]

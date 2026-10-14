@@ -10,7 +10,8 @@ import type { SourceInspection } from "@/lib/generated/SourceInspection";
 import type { SourceKind } from "@/lib/generated/SourceKind";
 
 import { useApp } from "./app-context";
-import { GitAccessDialog, useGitAccess } from "./git-access";
+import { GitAccessDialog } from "./git-access";
+import { useGitAccess } from "./settings/git-ssh";
 import {
   Btn,
   Check,

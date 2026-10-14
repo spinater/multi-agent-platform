@@ -8,7 +8,7 @@ import type { CheckLine } from "@/lib/generated/CheckLine";
 import type { ProjectInfo } from "@/lib/generated/ProjectInfo";
 
 import { useApp } from "../app-context";
-import { GitAccessDialog, GitLine } from "../git-access";
+import { GitLine } from "../git-access";
 import { ProjectInit } from "../project-init";
 import { ProjectDetail } from "../projects";
 import { ProviderChip, STATUS_TONE, StatusPill, TaskBar, ago, figures, projectProviders, useDefaults } from "../project-ui";
@@ -80,7 +80,6 @@ function ProjectList({ reveal, offer, onDismissOffer }: { reveal: Reveal | null;
   const { projects, tasks, sessions, orchestrator, providers, server, now, go, setProject, setScope, scope, project, openAuth } = useApp();
   const defaults = useDefaults();
   const [query, setQuery] = useState("");
-  const [gitAccess, setGitAccess] = useState(false);
 
   const cards: Card[] = [
     {
@@ -128,13 +127,17 @@ function ProjectList({ reveal, offer, onDismissOffer }: { reveal: Reveal | null;
                 className="w-40 border-0 bg-transparent font-mono text-[12.5px] text-text outline-none placeholder:text-muted/70"
               />
             </label>
-            <button
-              onClick={() => setGitAccess(true)}
-              title="MAP's SSH key for GitHub and GitLab, host tests and the git identity"
-              className="flex h-9 items-center gap-2 rounded-lg border border-line-3 px-3.5 text-[13px] font-semibold whitespace-nowrap text-text hover:border-muted"
+            <a
+              href="#settings/git"
+              onClick={(e) => {
+                e.preventDefault();
+                go("settings", "git");
+              }}
+              title="Settings → Git & SSH: the SSH key for GitHub and GitLab, host tests and the git identity"
+              className="flex h-9 items-center gap-2 rounded-lg border border-line-3 px-3.5 text-[13px] font-semibold whitespace-nowrap text-text no-underline hover:border-muted hover:text-text"
             >
               <KeyRound className="size-3.5 text-accent" /> Git access
-            </button>
+            </a>
             <button onClick={() => go("projects", "new")} className="h-9 rounded-lg border border-accent bg-accent px-4 text-[13px] font-semibold whitespace-nowrap text-accent-text hover:opacity-90">
               + New project
             </button>
@@ -259,7 +262,6 @@ function ProjectList({ reveal, offer, onDismissOffer }: { reveal: Reveal | null;
           <span className="font-mono text-[11px] text-muted">existing folder, new folder or clone from git</span>
         </button>
       </div>
-      {gitAccess && <GitAccessDialog onClose={() => setGitAccess(false)} />}
     </Main>
   );
 }

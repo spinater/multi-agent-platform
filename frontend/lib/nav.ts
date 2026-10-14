@@ -1,7 +1,8 @@
 /** Screens of the dashboard and their hash routes: `#<screen>` or `#<screen>/<arg>`, e.g. `#reflex`,
  * `#command/sessions/map-task-4-1`, `#projects/new`,
- * `#projects/init/<slug>`. The static export is one page, so routing lives in the hash. */
-export const SCREENS = ["projects", "command", "skills", "agents", "decisions", "reflex", "usage"] as const;
+ * `#projects/init/<slug>`, `#settings/git` (or `agents`, `server`). The static export is one page, so routing lives
+ * in the hash. */
+export const SCREENS = ["projects", "command", "skills", "agents", "decisions", "reflex", "usage", "settings"] as const;
 export type Screen = (typeof SCREENS)[number];
 
 export const SCREEN_LABEL: Record<Screen, string> = {
@@ -12,6 +13,7 @@ export const SCREEN_LABEL: Record<Screen, string> = {
   decisions: "Decisions",
   reflex: "Reflex",
   usage: "Usage",
+  settings: "Settings",
 };
 
 export type Route = { screen: Screen; arg: string | null };

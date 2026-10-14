@@ -1565,6 +1565,60 @@ pub struct GitAccess {
     pub projects_root: String,
     /// `ssh-keygen` and `ssh` were found on PATH.
     pub ssh_available: bool,
+    /// Which SSH setup git uses (`<data_dir>/git/settings.json`).
+    pub settings: GitSettings,
+    /// This machine's own SSH setup, for the "system" method: public keys only, never a private one.
+    pub system_ssh: SystemSsh,
+}
+
+/// Which SSH setup agents' and MAP's git commands use.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum SshMethod {
+    /// MAP's own key in `<data_dir>/git/` with MAP's `known_hosts` (the gitconfig sets `core.sshCommand`).
+    #[default]
+    MapKey,
+    /// The machine's own ssh: `~/.ssh` (keys, config, known_hosts) and ssh-agent; the gitconfig sets no `sshCommand`.
+    System,
+}
+
+/// `<data_dir>/git/settings.json`, set with `PUT /api/git/settings`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct GitSettings {
+    #[serde(default)]
+    pub ssh: SshMethod,
+}
+
+/// A public key in `~/.ssh` (a `*.pub` file; private keys are never read).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct SshPublicKey {
+    /// The file name, `id_ed25519.pub`.
+    pub file: String,
+    pub fingerprint: String,
+    /// `ED25519`, `RSA`…
+    pub key_type: String,
+    pub comment: String,
+}
+
+/// This machine's SSH setup as the "system" method would use it.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct SystemSsh {
+    /// `~/.ssh` of the user MAP runs as.
+    pub dir: String,
+    pub dir_exists: bool,
+    /// `~/.ssh/config` exists.
+    pub config_exists: bool,
+    /// `~/.ssh/known_hosts` exists.
+    pub known_hosts_exists: bool,
+    pub public_keys: Vec<SshPublicKey>,
+    /// `SSH_AUTH_SOCK` is set for MAP (an ssh-agent it may reach).
+    pub agent_socket: bool,
+    /// MAP runs in a container (`/.dockerenv`), where `~/.ssh` is not mounted unless docker-compose.yml says so.
+    pub in_container: bool,
 }
 
 /// `POST /api/git/test`: `ssh -T` to a host with MAP's key.
@@ -1613,4 +1667,94 @@ pub struct GitOpResult {
     pub command: String,
     pub output: String,
     pub status: GitStatus,
+}
+
+// ---- the Settings screen (`GET /api/settings`): read-only facts about the server, the agent CLIs' binaries and the
+// git host CLIs. Never a secret: whether `api_token` or a token variable is set, never its value.
+
+/// How MAP was started, as far as it can tell.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum RunMode {
+    /// In a container (`/.dockerenv`): the Docker Compose deploy.
+    Docker,
+    /// A systemd service (`INVOCATION_ID` is set), e.g. `deploy/install.sh`'s `map.service`.
+    Systemd,
+    /// A launchd agent (`XPC_SERVICE_NAME` is set), e.g. `com.multi-agent-platform.map`.
+    Launchd,
+    /// Started by hand (`map serve`).
+    Manual,
+}
+
+/// The server's settings from `map.toml`, read only.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct ServerSettings {
+    pub version: String,
+    /// The `map.toml` this server read; `None` when it was given no file (tests).
+    pub config_path: Option<String>,
+    pub data_dir: String,
+    pub bind: String,
+    pub allowed_hosts: Vec<String>,
+    /// `server.api_token` is set. Its value is never returned.
+    pub api_token_set: bool,
+    pub projects_root: String,
+    /// `workspace.dir`, the default workspace.
+    pub workspace_dir: String,
+    pub session_prefix: String,
+    pub static_dir: String,
+    /// `static_dir` holds the dashboard (`index.html`).
+    pub static_dir_ok: bool,
+    pub reflex_binary: String,
+    pub reflex_version: Option<String>,
+    pub run_mode: RunMode,
+    /// The command that restarts MAP after editing `map.toml` for this run mode (by hand: starts it again).
+    pub restart_hint: String,
+}
+
+/// An environment variable's state: set or not, and where. Never its value.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct EnvVarState {
+    pub name: String,
+    /// What it is for, e.g. "token for github.com".
+    pub purpose: String,
+    /// Set (non-empty) in `[workspace.env]` of `map.toml`.
+    pub in_workspace_env: bool,
+    /// Set (non-empty) in MAP's own environment (the service's or container's), which agents inherit.
+    pub in_server_env: bool,
+}
+
+/// `gh` or `glab`: on the agents' PATH, and the variables it signs in with.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct GitCliTool {
+    /// `gh`, `glab`.
+    pub name: String,
+    /// `GitHub CLI`, `GitLab CLI`.
+    pub title: String,
+    /// Where it is on the agents' PATH (`workspace.env` PATH, else MAP's); `None`: not found.
+    pub path: Option<String>,
+    pub vars: Vec<EnvVarState>,
+}
+
+/// An agent CLI's binary as configured, and where it is found.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct AgentBinary {
+    pub provider: String,
+    /// `providers.<name>.binary`.
+    pub binary: String,
+    /// Where it resolves on the agents' PATH; `None`: not found.
+    pub path: Option<String>,
+}
+
+/// `GET /api/settings`.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct SettingsInfo {
+    pub server: ServerSettings,
+    pub git_cli: Vec<GitCliTool>,
+    pub agents: Vec<AgentBinary>,
 }

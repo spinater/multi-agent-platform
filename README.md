@@ -122,6 +122,7 @@ nothing is tied to one repository, session name or provider.
 | `backend/src/repo.rs` | The corpus repo written with git plumbing, corpus export, a read-only look at a project's folder |
 | `backend/src/git_access.rs` | MAP's SSH key, pinned known_hosts, git identity, the gitconfig agents get as `GIT_CONFIG_GLOBAL`, URL and host checks |
 | `backend/src/project_git.rs` | Git in a project's folder: status, fetch, ff-only pull, push, connect a remote, clone, ls-remote |
+| `backend/src/settings.rs` | The Settings screen's read-only facts: server settings, run mode (container, systemd, launchd), agent binaries, gh/glab and their token variables (set or not) |
 | `backend/src/reflex.rs` | One Reflex process per project: export the corpus, start, health-check, restart |
 | `backend/src/usage.rs` | Plan-usage readers (Claude endpoint, Codex logs), token scans, pace, the skip line |
 | `backend/src/updates.rs` | CLI update checks (version command vs. latest source), update helper sessions |
@@ -213,7 +214,7 @@ docker compose logs -f map                  # open http://127.0.0.1:4400 and pas
 - Projects are folders under `MAP_PROJECTS_DIR`, mounted at the same path, so a project's path is the same in the
   container and on the host; set `[projects] root` to it so "Clone from git" puts new projects there. State lives in
   `MAP_DIR/data` (database, run files, corpus repos, and MAP's git key and gitconfig under `data/map/git`); config in
-  `MAP_DIR/map.toml`. Git needs no `~/.ssh` mount: create MAP's key under Projects → Git access and add it to
+  `MAP_DIR/map.toml`. Git needs no `~/.ssh` mount: create MAP's key under Settings → Git & SSH and add it to
   GitHub or GitLab (see [Git access](#git-access)).
 - On macOS, use `deploy/install.sh` instead: a Linux container cannot run the Mac's agent CLIs.
 - Agent sessions are tmux sessions inside the container, so `docker compose restart` ends them (the watcher marks
@@ -241,7 +242,8 @@ all projects, read-only):
   column lists projects with "Open →", and cards offer only "Open in <project> →".
 
 Deep links: `#command/tasks`, `#command/tasks/<id>`, `#command/tasks/new`, `#command/sessions/<name>`,
-`#command/sessions/new`, `#projects/<slug>`, `#projects/init/<slug>`. Every layout number lives in `TUNING` in
+`#command/sessions/new`, `#projects/<slug>`, `#projects/init/<slug>`, `#settings/git`, `#settings/agents`,
+`#settings/server`. Every layout number lives in `TUNING` in
 `frontend/components/graph/layouts.ts`.
 
 ### Skills (`#skills`, `#skills/<name>`)
@@ -306,7 +308,8 @@ outside it), never as a percentage.
 ## Git access
 
 One git setup for every project, so agents can clone, pull and push GitHub, GitLab or any ssh git host
-(`backend/src/git_access.rs`, `project_git.rs`; **Git access** on the Projects screen).
+(`backend/src/git_access.rs`, `project_git.rs`; [Settings → Git & SSH](#settings), also linked from **Git access** on
+the Projects screen and a project's Git panel).
 
 - **MAP's SSH key.** "Create key" runs `ssh-keygen -t ed25519 -N "" -C map@<hostname>` into
   `<data_dir>/git/id_ed25519` (folder 0700, key 0600). Only the public key and its `SHA256:` fingerprint are ever
@@ -318,8 +321,15 @@ One git setup for every project, so agents can clone, pull and push GitHub, GitL
   key, token or password; https URLs with a password in them are refused.
 - **Host keys.** `<data_dir>/git/known_hosts` pins GitHub's and GitLab's published host keys (a constant in
   `git_access.rs`, with the source pages and date). Other hosts are trusted on first use
-  (`StrictHostKeyChecking=accept-new`), and the dialog shows the fingerprint a test recorded, to compare with the
-  host's own.
+  (`StrictHostKeyChecking=accept-new`), and a test shows the fingerprint it recorded, to compare with the host's
+  own. Settings lists every key, pinned or learned; a learned host can be forgotten (so its next key is recorded
+  again), a pinned one cannot.
+- **SSH method.** `<data_dir>/git/settings.json` (`{"ssh": "map_key"}` by default): MAP's own key as above, or
+  `"system"`, this machine's own SSH setup (`~/.ssh` keys, config and known_hosts, ssh-agent). With `system` the
+  gitconfig leaves `core.sshCommand` out (it keeps the identity and the includes), and **Test** runs plain
+  `ssh -o BatchMode=yes -T git@<host>`, as git will. MAP never reads a private key or writes `~/.ssh`: it only lists
+  the `*.pub` files there and their fingerprints. In Docker `~/.ssh` is not mounted, so `system` finds no keys
+  unless you add the read-only mount shown in a comment in `docker-compose.yml`.
 - **Identity.** A name and email for agents' commits (`<data_dir>/git/identity.json`), optional.
 - **`GIT_CONFIG_GLOBAL`.** MAP writes `<data_dir>/git/gitconfig`, regenerated on every change: its defaults first
   (`[user]` when set, `[core] sshCommand = ssh -i <key> -o IdentitiesOnly=yes -o UserKnownHostsFile=<known_hosts>
@@ -340,6 +350,35 @@ One git setup for every project, so agents can clone, pull and push GitHub, GitL
   `-u origin <branch>`) and **Connect a remote** (sets or replaces `origin`, after `git init -b main` when the folder
   is not a repo yet). Each shows its commands and output and logs a `project.git.*` event. Pull, push and remote
   changes are refused while a task of the project is running; fetch and status are not.
+
+## Settings
+
+The **Settings** screen (`#settings`, the gear in the top bar, or the last nav entry) is what someone who installs
+MAP sets up once (`frontend/components/screens/settings.tsx`, `components/settings/`; `backend/src/settings.rs`).
+Its sections are listed on the left (stacked on a phone) and have their own links: `#settings/git`,
+`#settings/agents`, `#settings/server`. No secret is ever typed or shown there: only public keys, and whether a
+token is set.
+
+- **Git & SSH** (`#settings/git`): the SSH method (MAP's own key, or this machine's `~/.ssh` and ssh-agent; see
+  [Git access](#git-access)), MAP's key (create, copy, replace), a card each for GitHub, GitLab.com and a
+  self-hosted GitLab or other git host (host and optional port) with the steps for an account key or a repo deploy
+  key with write access and a **Test** button, MAP's known hosts (forget a learned one), and the git identity. The
+  Projects screen's **Git access** button and a project's Git panel link here; the New project wizard opens the same
+  panel over itself, so what was typed is kept.
+- **GitHub / GitLab CLI** (in Git & SSH): agents that open pull or merge requests and issues with `gh` or `glab`
+  need `GH_TOKEN` (or `GITHUB_TOKEN`) and `GITLAB_TOKEN` (plus `GITLAB_HOST` for a self-hosted GitLab). Set them in
+  `[workspace.env]` of `map.toml` or in the service's environment (systemd `Environment=`, launchd
+  `EnvironmentVariables`, compose `environment:`), never in the dashboard. Settings shows only whether `gh` and
+  `glab` are on the agents' PATH and whether each variable is set, and where (map.toml or MAP's own environment).
+- **Agent CLIs** (`#settings/agents`): per provider, the binary and where it resolves on the agents' PATH, the
+  installed and latest version from the [update check](#what-it-does) with **Check versions** and **Update** (the
+  same confirmation and helper session as the bell), and the sign-in state with **Sign in** (the sign-in modal).
+- **Server** (`#settings/server`), read only: the config file, data dir, bind address, `allowed_hosts`, whether
+  `api_token` is set (never its value), projects root, default workspace, static dir, MAP's version, Reflex's binary
+  and version, and how MAP runs: in a container (`/.dockerenv` or `/run/.containerenv`), as a systemd service
+  (`INVOCATION_ID`), a launchd agent (`XPC_SERVICE_NAME`) or by hand. `map.toml` is not editable from the dashboard:
+  edit it and restart (`docker compose restart map`, `systemctl --user restart map`, or
+  `launchctl kickstart -k gui/$(id -u)/com.multi-agent-platform.map`).
 
 ## Init a project
 
@@ -492,9 +531,12 @@ All routes are under `/api`. When `server.api_token` is set, send `Authorization
 | POST | `/projects/{slug}/init/plan` | `{"template"}`: per file `create`, `skip` (exists) or `append` (missing lines); writes nothing |
 | POST | `/projects/{slug}/init` | `{"template", "description", "provider", "model"?, "set_verify"}`: writes the plan, optionally sets the project's verify to the template's, queues the "Init project" task; returns `plan`, `checks` and `task` |
 | POST | `/projects/inspect` | `{"kind": "local"\|"empty", "location"}`: the folder's git branch, branches, commits and top-level entries, or whether a new folder can go there; `{"kind": "clone", "location": <url>, "branch"?}`: `git ls-remote` (default branch, branches, `hint` on an auth failure, suggested `folder`) |
-| GET | `/git/access` | MAP's public key and fingerprint (or `null`), git identity, known hosts, gitconfig path and includes, projects root |
+| GET | `/git/access` | MAP's public key and fingerprint (or `null`), git identity, known hosts, gitconfig path and includes, projects root, the SSH method (`settings`) and `system_ssh` (`~/.ssh`: which files exist, `*.pub` names and fingerprints, ssh-agent socket, container) |
+| PUT | `/git/settings` | `{"ssh": "map_key" \| "system"}`: the SSH method, saved in `<data_dir>/git/settings.json`; the gitconfig is regenerated |
+| DELETE | `/git/known-hosts/{host}` | Forget a host learned on first use (`git.example.com`, `[host]:2222`); 409 for a pinned host, 404 when unknown; returns the known hosts left |
+| GET | `/settings` | The Settings screen's read-only facts: server settings from `map.toml` (`api_token_set`, never the token), run mode and restart command, each agent CLI's binary path, `gh` / `glab` on PATH and whether `GH_TOKEN`, `GITHUB_TOKEN`, `GITLAB_TOKEN`, `GITLAB_HOST` are set (never their values) |
 | POST | `/git/key` | `{"replace"?: bool}`: create MAP's ed25519 key (409 when one exists without `replace`; the old one is moved aside) |
-| POST | `/git/test` | `{"host"}` (`github.com`, `git@host:2222`): `ssh -T` with MAP's key; `ok`, output, the host's recorded keys |
+| POST | `/git/test` | `{"host"}` (`github.com`, `git@host:2222`): `ssh -T` with MAP's key, or plain `ssh` with the `system` method; `ok`, output, the host's recorded keys |
 | PUT | `/git/identity` | `{"name", "email"}` (both empty: none) |
 | GET | `/projects/{slug}/git` | The folder's `is_repo`, branch, upstream, origin, ahead/behind, dirty count, last fetch and commit, `busy` |
 | POST | `/projects/{slug}/git/fetch`, `…/pull`, `…/push` | `{}`: run it; returns `ok`, commands, output, new status (409 with the reason when refused) |
@@ -559,7 +601,9 @@ Backend tests cover reset-time parsing, pending-input detection (faint suggestio
 wake-up cycle, the orchestrator's dependency order, retries and human protection, its Reflex gates (against a fake
 Reflex on a local port), and the store, all against an in-memory terminal. Git access tests make a key in a temporary
 data dir (skipped without `ssh-keygen`) and clone, fetch, pull and push only against local bare repos over `file://`;
-nothing contacts GitHub or GitLab.
+nothing contacts GitHub or GitLab. Settings tests check the SSH method in `settings.json` and a gitconfig without
+`sshCommand`, that a pinned known host cannot be removed and a learned one can, that `/api/settings` never carries
+the API token or a variable's value, and the container check against marker files in a temporary folder.
 
 ## Roadmap
 

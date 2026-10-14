@@ -12,6 +12,7 @@ import { CommandScreen } from "./screens/command";
 import { DecisionsScreen } from "./screens/decisions";
 import { ProjectsScreen } from "./screens/projects";
 import { ReflexScreen } from "./screens/reflex";
+import { SettingsScreen } from "./screens/settings";
 import { SkillsScreen } from "./screens/skills";
 import { UsageScreen } from "./screens/usage";
 import { Button, Input } from "./ui";
@@ -74,6 +75,8 @@ function Router() {
       return <ReflexScreen />;
     case "usage":
       return <UsageScreen />;
+    case "settings":
+      return <SettingsScreen />;
     default:
       return <CommandScreen />;
   }

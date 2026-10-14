@@ -35,6 +35,9 @@ pub struct Config {
     provider_overrides: BTreeMap<String, ProviderOverride>,
     #[serde(skip)]
     pub providers: BTreeMap<String, ProviderSpec>,
+    /// The file this config was loaded from (absolute); `None` for a config parsed from text.
+    #[serde(skip)]
+    pub path: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -667,7 +670,9 @@ impl Config {
     pub fn load(path: &Path) -> Result<Self> {
         let text = std::fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
         let base = path.parent().unwrap_or(Path::new("."));
-        Self::parse(&text, base)
+        let mut config = Self::parse(&text, base)?;
+        config.path = Some(std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf()));
+        Ok(config)
     }
 
     /// Relative paths in the file resolve against `base` (the config file's directory).
