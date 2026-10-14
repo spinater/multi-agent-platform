@@ -144,7 +144,8 @@ impl Orchestrator {
         }
         if let Some(slug) = &task.project {
             p.push_str(&format!(
-                "- This is project `{slug}`. Before using an LLM to classify, route or decide something, POST it to $MAP_DECIDE_URL: \
+                "- This is project `{slug}`. Before using an LLM to classify, route or decide something, POST it to $MAP_DECIDE_URL \
+                 (with `-H \"Authorization: Bearer $MAP_PROJECT_TOKEN\"`): \
                  {{\"state\": \"<the facts>\", \"questions\": [{{\"id\", \"kind\": \"choice\"|\"score\"|\"noul\", \"prompt\", \"options\"}}]}}. \
                  Each answer has a `lane`; `abstain` means nobody decided, so handle it yourself.\n"
             ));

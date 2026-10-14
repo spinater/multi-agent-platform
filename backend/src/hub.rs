@@ -161,6 +161,18 @@ impl Hub {
         }
     }
 
+    /// The token an agent of `slug` gets as `$MAP_PROJECT_TOKEN`: HMAC-SHA256 of the slug under `api_token`. It opens
+    /// only that project's decision endpoints and its corpus (see `api::project_scope`), never the rest of the API.
+    /// `None` without an `api_token`, when the API is open anyway.
+    pub fn project_token(&self, slug: &str) -> Option<String> {
+        use hmac::{KeyInit, Mac};
+        let key = self.config.server.api_token.as_deref()?;
+        let mut mac = hmac::Hmac::<sha2::Sha256>::new_from_slice(key.as_bytes()).expect("HMAC takes any key length");
+        mac.update(b"map-project:");
+        mac.update(slug.as_bytes());
+        Some(mac.finalize().into_bytes().iter().map(|b| format!("{b:02x}")).collect())
+    }
+
     /// The API as agents on this machine reach it (a wildcard bind is reached through loopback).
     pub fn local_api_url(&self) -> String {
         let bind = &self.config.server.bind;
@@ -398,6 +410,8 @@ impl Hub {
             // Agents ask the project's decision endpoint before spending an LLM call on a classification.
             script.push_str(&format!("export MAP_PROJECT={}\n", quote(slug)?));
             script.push_str(&format!("export MAP_DECIDE_URL={}\n", quote(&format!("{}/projects/{slug}/decide", self.local_api_url()))?));
+            script.push_str(&format!("export MAP_API_URL={}\n", quote(&self.local_api_url())?));
+            script.push_str(&format!("export MAP_PROJECT_TOKEN={}\n", quote(&self.project_token(slug).unwrap_or_default())?));
         }
         script.push_str(&format!("exec {}\n", argv.join(" ")));
         let script_path = dir.join("launch.sh");

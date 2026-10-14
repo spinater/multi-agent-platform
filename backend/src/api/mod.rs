@@ -151,6 +151,19 @@ pub(crate) fn same(a: &str, b: &str) -> bool {
     a.len() == b.len() && a.bytes().zip(b.bytes()).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
 }
 
+/// The project whose token may call `method path`: asking and correcting its decisions, reading its decision log,
+/// and reading or writing its corpus. Everything else needs the API token.
+pub(crate) fn project_scope<'a>(method: &axum::http::Method, path: &'a str) -> Option<&'a str> {
+    use axum::http::Method;
+    let rest = path.strip_prefix("/api").unwrap_or(path).strip_prefix("/projects/")?;
+    let (slug, tail) = rest.split_once('/')?;
+    let ok = matches!(
+        (method, tail),
+        (&Method::POST, "decide" | "feedback") | (&Method::GET, "decisions" | "decisions/summary" | "repos/corpus" | "repos/corpus/file") | (&Method::PUT, "repos/corpus/file")
+    );
+    (ok && !slug.is_empty()).then_some(slug)
+}
+
 async fn require_token(State(hub): State<Arc<Hub>>, headers: HeaderMap, request: Request, next: Next) -> Response {
     let Some(expected) = hub.config.server.api_token.as_deref() else {
         return next.run(request).await;
@@ -163,6 +176,13 @@ async fn require_token(State(hub): State<Arc<Hub>>, headers: HeaderMap, request:
         .and_then(|q| q.split('&').find_map(|kv| kv.strip_prefix("token=")))
         .map(String::from);
     if bearer.is_some_and(|t| same(t, expected)) || query.is_some_and(|t| same(&t, expected)) {
+        return next.run(request).await;
+    }
+    // An agent's project token opens only its own project's decisions and corpus.
+    let path = request.extensions().get::<axum::extract::OriginalUri>().map_or_else(|| request.uri().path().to_string(), |u| u.path().to_string());
+    if let (Some(token), Some(slug)) = (bearer, project_scope(request.method(), &path))
+        && hub.project_token(slug).is_some_and(|t| same(token, &t))
+    {
         return next.run(request).await;
     }
     ApiError(StatusCode::UNAUTHORIZED, "missing or wrong API token".into()).into_response()
@@ -484,6 +504,45 @@ mod tests {
         assert_eq!(host_name("127.0.0.1"), "127.0.0.1");
         assert_eq!(host_name("[::1]:4400"), "::1");
         assert_eq!(host_name("agents.example.com"), "agents.example.com");
+    }
+
+    #[test]
+    fn project_tokens_open_only_their_projects_decisions_and_corpus() {
+        use axum::http::Method;
+        assert_eq!(project_scope(&Method::POST, "/api/projects/support/decide"), Some("support"));
+        assert_eq!(project_scope(&Method::POST, "/projects/support/feedback"), Some("support"));
+        assert_eq!(project_scope(&Method::GET, "/projects/support/repos/corpus/file"), Some("support"));
+        assert_eq!(project_scope(&Method::PUT, "/projects/support/repos/corpus/file"), Some("support"));
+        assert_eq!(project_scope(&Method::GET, "/projects/support/decisions"), Some("support"));
+        for (method, path) in [
+            (Method::GET, "/projects/support"),
+            (Method::PATCH, "/projects/support"),
+            (Method::DELETE, "/projects/support"),
+            (Method::PUT, "/projects/support/repos/code/file"),
+            (Method::POST, "/projects/support/init"),
+            (Method::POST, "/projects/support/reflex/restart"),
+            (Method::GET, "/tasks"),
+            (Method::POST, "/sessions"),
+            (Method::POST, "/projects//decide"),
+        ] {
+            assert_eq!(project_scope(&method, path), None, "{method} {path}");
+        }
+    }
+
+    #[tokio::test]
+    async fn project_tokens_differ_per_project_and_need_the_api_token() {
+        let dir = tempfile::tempdir().unwrap();
+        let hub = |token: &str| {
+            let text = format!("[workspace]\ndir = \"{0}\"\n[server]\ndata_dir = \"{0}/data\"\n{token}", dir.path().display());
+            crate::config::Config::parse(&text, std::path::Path::new("/")).unwrap()
+        };
+        let open = Hub::new(hub(""), crate::store::Store::memory().await.unwrap(), Arc::new(crate::terminal::fake::FakeTerminal::default()));
+        assert_eq!(open.project_token("a"), None);
+        let locked = Hub::new(hub("api_token = \"secret\""), crate::store::Store::memory().await.unwrap(), Arc::new(crate::terminal::fake::FakeTerminal::default()));
+        let (a, b) = (locked.project_token("a").unwrap(), locked.project_token("b").unwrap());
+        assert_eq!(a.len(), 64);
+        assert_ne!(a, b);
+        assert!(!a.contains("secret"));
     }
 
     #[test]

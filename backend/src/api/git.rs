@@ -1,5 +1,7 @@
 //! `/git/<slug>/corpus.git`: git smart HTTP through `git http-backend`, so a project's Reflex corpus can be cloned
-//! and pushed with plain git. The project's code is never served: it stays in the project's folder. With `server.api_token` set, git sends it as the Basic-auth password (any user name).
+//! and pushed with plain git. The project's code is never served: it stays in the project's folder. With
+//! `server.api_token` set, git sends it (or the project's own `$MAP_PROJECT_TOKEN`) as the Basic-auth password
+//! (any user name).
 //! A successful push to the corpus repo restarts the project's Reflex.
 
 use std::process::Stdio;
@@ -16,16 +18,18 @@ use tokio::process::Command;
 use super::same;
 use crate::hub::Hub;
 
-fn authorized(hub: &Hub, headers: &HeaderMap) -> bool {
+/// The API token, or the project's own token (`$MAP_PROJECT_TOKEN`, so its agents can push the corpus).
+fn authorized(hub: &Hub, slug: &str, headers: &HeaderMap) -> bool {
     let Some(expected) = hub.config.server.api_token.as_deref() else { return true };
     let Some(value) = headers.get("authorization").and_then(|v| v.to_str().ok()) else { return false };
+    let accepts = |token: &str| same(token, expected) || hub.project_token(slug).is_some_and(|t| same(token, &t));
     if let Some(token) = value.strip_prefix("Bearer ") {
-        return same(token, expected);
+        return accepts(token);
     }
     let Some(encoded) = value.strip_prefix("Basic ") else { return false };
     let Ok(decoded) = base64::engine::general_purpose::STANDARD.decode(encoded.trim()) else { return false };
     let decoded = String::from_utf8_lossy(&decoded);
-    decoded.split_once(':').is_some_and(|(_, password)| same(password, expected))
+    decoded.split_once(':').is_some_and(|(_, password)| accepts(password))
 }
 
 fn plain(status: StatusCode, text: &str) -> Response {
@@ -40,7 +44,7 @@ pub async fn handler(
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
-    if !authorized(&hub, &headers) {
+    if !authorized(&hub, &slug, &headers) {
         let mut resp = plain(StatusCode::UNAUTHORIZED, "the API token is required (as the password)");
         resp.headers_mut().insert("www-authenticate", HeaderValue::from_static("Basic realm=\"multi-agent-platform\""));
         return resp;

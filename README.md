@@ -35,6 +35,8 @@ nothing is tied to one repository, session name or provider.
     milliseconds). Answers at or above the project's confidence threshold are final; only the rest go to the
     project's fallback: the Anthropic API, or any provider run headless (`claude -p`, `codex exec`, `agy -p`).
     Agents started in a project get the endpoint as `$MAP_DECIDE_URL`, and their prompt tells them to use it.
+    With `api_token` set they also get `$MAP_PROJECT_TOKEN` (and `$MAP_API_URL`): a token derived from the API token
+    that opens only that project's decide/feedback/decision-log endpoints and its corpus (files and `corpus.git`).
   - **Corpus content.** One top-level folder per Reflex domain (1–8), prose `.md` files inside. A push or an edit
     restarts the project's Reflex on the new corpus.
   - **Create.** Creating a project returns check lines: the folder used (its git branch and commits) or created,
