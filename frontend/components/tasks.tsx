@@ -17,6 +17,7 @@ import { PhaseBar } from "./activity";
 import { useApp } from "./app-context";
 import { Btn, Chip, Pill, TASK_TONE } from "./command-ui";
 import { isDecision } from "./decisions/model";
+import { HeldBadge, isHeld } from "./intake";
 import { ScopeChip, waitText } from "./parallel";
 import { Modal } from "./shell/page";
 
@@ -55,7 +56,8 @@ export function TaskRows({ tasks, label, selected, onSelect, projectOf }: { task
         const age = ageOf(mark?.at, now);
         const recent = mark?.to === t.status && age < 3000;
         const color = providerColor((t.session && sessions.find((x) => x.name === t.session)?.provider) || t.provider);
-        const wait = t.status === "pending" && !isBlocked ? waitText(latest.get(t.id)) : null;
+        const held = isHeld(t);
+        const wait = t.status === "pending" && !isBlocked && !held ? waitText(latest.get(t.id)) : null;
         return (
           <button
             key={t.id}
@@ -71,8 +73,9 @@ export function TaskRows({ tasks, label, selected, onSelect, projectOf }: { task
             <span className="font-mono text-[10.5px] leading-none text-muted">{label(t)}</span>
             <span className="flex min-w-0 flex-col gap-1">
               <span className="text-[12.5px] leading-[1.25] font-medium text-pretty">{t.title}</span>
-              {(t.git || t.scope) && (
+              {(t.git || t.scope || held) && (
                 <span className="flex min-w-0 flex-wrap items-center gap-1">
+                  <HeldBadge task={t} />
                   {t.git && <BranchChip git={t.git} />}
                   {t.scope && <ScopeChip scope={t.scope} />}
                 </span>
@@ -90,7 +93,7 @@ export function TaskRows({ tasks, label, selected, onSelect, projectOf }: { task
               </span>
             </span>
             <span key={t.status} className={clsx("flex", recent && "map-phase-in")}>
-              <Pill tone={isBlocked ? "bad" : TASK_TONE[t.status]}>{isBlocked ? "blocked" : t.status}</Pill>
+              <Pill tone={isBlocked ? "bad" : held ? "accent" : TASK_TONE[t.status]}>{isBlocked ? "blocked" : held ? "held" : t.status}</Pill>
             </span>
             {(IN_PIPELINE.includes(t.status) || (t.status === "done" && age < 5000)) && (
               <span className="col-span-3">

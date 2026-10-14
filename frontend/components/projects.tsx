@@ -56,11 +56,28 @@ function Box({ title, note, children, className }: { title: ReactNode; note?: Re
   );
 }
 
+/** Whether MAP suggests setting up knowledge cards for the project (read once per project page). */
+function useKnowledgeSuggested(slug: string): boolean {
+  const [loaded, setLoaded] = useState<{ slug: string; on: boolean } | null>(null);
+  useEffect(() => {
+    let live = true;
+    api.knowledge(slug).then(
+      (k) => live && setLoaded({ slug, on: k.suggestion.verdict === "recommended" }),
+      () => live && setLoaded({ slug, on: false }),
+    );
+    return () => {
+      live = false;
+    };
+  }, [slug]);
+  return loaded?.slug === slug && loaded.on;
+}
+
 /** A project's page (`#projects/<slug>`): its folder, activity, Reflex, the corpus editor, settings. */
 export function ProjectDetail({ slug }: { slug: string }) {
   const { projects, tasks, sessions, orchestrator, go, setProject, setScope, scope, project, toast, connection, now } = useApp();
   const [tab, setTab] = useState<Tab>("overview");
   const info = projects.find((p) => p.project.slug === slug) ?? null;
+  const suggested = useKnowledgeSuggested(slug);
 
   if (!info) {
     return (
@@ -98,8 +115,12 @@ export function ProjectDetail({ slug }: { slug: string }) {
             </Btn>
             <Btn onClick={togglePause}>{p.settings.paused ? "Resume" : "Pause"}</Btn>
             <Btn onClick={() => open("reflex")}>Reflex</Btn>
-            <Btn onClick={() => open("knowledge", slug)} title="Its docs, their health, search, and what agents looked up">
+            <Btn
+              onClick={() => open("knowledge", slug)}
+              title={suggested ? "MAP suggests setting up knowledge cards for this project" : "Its docs, their health, search, and what agents looked up"}
+            >
               Knowledge
+              {suggested && <span className="rounded bg-accent px-1 font-mono text-[10px] leading-4 text-accent-text">suggested</span>}
             </Btn>
             <Btn tone="primary" onClick={() => open("command")}>
               Open command centre →
@@ -639,7 +660,7 @@ function Settings({ info }: { info: ProjectInfo }) {
         )}
         {form && (
           <Box title="Checks">
-            <ChecksEditor form={form} onChange={patch} defaults={defaults} providers={providers} domains={info.reflex.domains.length || info.reflex.state === "no_corpus" ? info.reflex.domains : undefined} />
+            <ChecksEditor form={form} onChange={patch} defaults={defaults} providers={providers} />
             <div className="flex items-center gap-2">
               <Btn tone="primary" onClick={saveSettings} disabled={!edited}>
                 Save orchestrator settings

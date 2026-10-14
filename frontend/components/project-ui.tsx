@@ -23,6 +23,7 @@ import type { ReflexGates } from "@/lib/generated/ReflexGates";
 import type { Session } from "@/lib/generated/Session";
 import type { Task } from "@/lib/generated/Task";
 import type { TaskStatus } from "@/lib/generated/TaskStatus";
+import { isHeld } from "@/lib/intake";
 
 export const errText = (e: unknown) => (e as Error).message;
 
@@ -210,6 +211,8 @@ export type SettingsForm = {
   branches: ProjectBranches;
   knowledge: KnowledgeSettings;
   parallel: ProjectParallel;
+  /** The project's Thai words for Reflex, kept as they are (edited on the Reflex screen). */
+  thai: Record<string, string>;
 };
 
 /** The backend's `ProjectParallel::default()`: no project limit, the analyst on. */
@@ -244,10 +247,11 @@ export function formFromSettings(s: ProjectSettings | null, providers: ProviderI
     verify: s?.verify ?? null,
     audit: !s?.audit ? "global" : s.audit.enabled ? "on" : "off",
     auditor: s?.audit?.provider ?? "",
-    gates: s?.reflex_gates ?? { audit: false, tier: false },
+    gates: s?.reflex_gates ?? { intake: false, audit: false, tier: false },
     branches: s?.branches ?? DEFAULT_BRANCHES,
     knowledge: s?.knowledge ?? DEFAULT_KNOWLEDGE,
     parallel: s?.parallel ?? DEFAULT_PARALLEL,
+    thai: s?.thai_glossary ?? {},
   };
 }
 
@@ -266,6 +270,7 @@ export function settingsFromForm(f: SettingsForm, defaults: ProjectDefaults | nu
     branches: { ...f.branches, base: f.branches.base?.trim() || null },
     knowledge: { ...f.knowledge, index: f.knowledge.index.trim() || DEFAULT_KNOWLEDGE.index },
     parallel: f.parallel,
+    thai_glossary: f.thai,
   };
 }
 
@@ -374,15 +379,12 @@ export function ChecksEditor({
   defaults,
   providers,
   suggestions = [],
-  domains,
 }: {
   form: SettingsForm;
   onChange: (patch: Partial<SettingsForm>) => void;
   defaults: ProjectDefaults | null;
   providers: ProviderInfo[];
   suggestions?: string[];
-  /** The corpus's Reflex domains; `undefined` for a project not created yet. */
-  domains?: string[];
 }) {
   const [draft, setDraft] = useState("");
   const own = form.verify !== null;
@@ -472,7 +474,7 @@ export function ChecksEditor({
           </Field>
         )}
       </div>
-      <GatesEditor gates={form.gates} onChange={(gates) => onChange({ gates })} defaults={defaults} domains={domains} />
+      <GatesEditor gates={form.gates} onChange={(gates) => onChange({ gates })} defaults={defaults} />
       <p className="font-mono text-[11px] leading-snug text-muted">
         post_done hooks run for every project and are set in map.toml{defaults?.post_done.length ? `: ${defaults.post_done.join(" · ")}` : " (none)"}.
       </p>
@@ -480,25 +482,22 @@ export function ChecksEditor({
   );
 }
 
-/** The corpus domain the Reflex gates read; the server seeds `orchestration/gates.md` when a gate is turned on. */
-export const GATES_DOMAIN = "orchestration";
-
-/** The two Reflex gates: decisions the orchestrator asks the project's Reflex first, never an LLM. */
-function GatesEditor({ gates, onChange, defaults, domains }: { gates: ReflexGates; onChange: (g: ReflexGates) => void; defaults: ProjectDefaults | null; domains?: string[] }) {
+/** The three Reflex gates: decisions the orchestrator asks the gates' own Reflex first (one Reflex shared by every
+ * project, Settings → Reflex gates), never an LLM. */
+function GatesEditor({ gates, onChange, defaults }: { gates: ReflexGates; onChange: (g: ReflexGates) => void; defaults: ProjectDefaults | null }) {
   const tiers = defaults?.tiers ?? [];
   const tierText = tiers.length
     ? tiers.map((t) => `${t.provider} ${[t.light, t.standard, t.heavy].map((m) => m ?? "–").join(" / ")}`).join(" · ")
     : "no provider has [orchestrator.tiers] in map.toml";
-  const has = domains?.includes(GATES_DOMAIN);
-  const corpus =
-    domains === undefined
-      ? `Both need an ${GATES_DOMAIN}/ domain in the corpus: turning one on adds a seed ${GATES_DOMAIN}/gates.md.`
-      : has
-        ? `✓ Both read the corpus's ${GATES_DOMAIN}/ domain.`
-        : `Both need an ${GATES_DOMAIN}/ domain in the corpus: saving with a gate turned on adds a seed ${GATES_DOMAIN}/gates.md (unless the corpus already has 8 domains).`;
   return (
     <div className="flex flex-col gap-2.5">
       <span className="font-mono text-[10.5px] font-medium tracking-[0.1em] text-muted uppercase">reflex gates</span>
+      <Check
+        on={gates.intake}
+        onClick={() => onChange({ ...gates, intake: !gates.intake })}
+        label="Intake"
+        sub="Before any LLM sees a task, Reflex checks it: too unclear (asks you first), big enough to plan first, or light/heavy (picks the model). A near-copy of a done task waits too. Unsure: it runs as before."
+      />
       <Check
         on={gates.audit}
         onClick={() => onChange({ ...gates, audit: !gates.audit })}
@@ -511,8 +510,8 @@ function GatesEditor({ gates, onChange, defaults, domains }: { gates: ReflexGate
         label="Model tier"
         sub={`Reflex rates a task without a pinned model light, standard or heavy, and it starts on that tier's model: ${tierText}`}
       />
-      <p className={clsx("font-mono text-[11px] leading-snug", (gates.audit || gates.tier) && domains !== undefined && !has ? "text-warn" : "text-muted")}>
-        {corpus} Reflex answers only at or above the project&apos;s threshold; unsure, abstaining or stopped, the orchestrator does what it does without the gate.
+      <p className="font-mono text-[11px] leading-snug text-muted">
+        The gates use their own Reflex, shared by every project (Settings → Reflex gates), not this project&apos;s corpus. Until it has a threshold it runs in shadow: answers are logged, none is acted on. Unsure, abstaining or stopped, the orchestrator does what it does without the gate.
       </p>
     </div>
   );
@@ -567,9 +566,10 @@ export function tomlLines(
   } else c(`inherits map.toml: enabled = ${defaults?.audit_enabled ?? false}, chain = ${arr(defaults?.audit_chain ?? [])}`);
   blank();
   sec("[project.orchestrator.reflex_gates]");
+  kv("intake", String(s.reflex_gates.intake));
   kv("audit", String(s.reflex_gates.audit));
   kv("tier", String(s.reflex_gates.tier));
-  if (s.reflex_gates.audit || s.reflex_gates.tier) c(`answered from the corpus's ${GATES_DOMAIN}/ domain; tier models from map.toml [orchestrator.tiers]`);
+  if (s.reflex_gates.intake || s.reflex_gates.audit || s.reflex_gates.tier) c("answered by the gates' own Reflex (Settings → Reflex gates); tier models from map.toml [orchestrator.tiers]");
   blank();
   sec("[project.branches]");
   kv("mode", q(s.branches.mode));
@@ -656,7 +656,8 @@ export type ProjectFigures = {
   counts: Partial<Record<TaskStatus, number>>;
   total: number;
   live: number;
-  /** Sessions waiting for input, signed out, stalled or in error, plus failed tasks and tasks waiting for review. */
+  /** Sessions waiting for input, signed out, stalled or in error, plus failed tasks, tasks waiting for review and
+   * tasks the intake gate holds. */
   attention: number;
   last: number | null;
   status: ProjectStatus;
@@ -670,7 +671,7 @@ export function figures(slug: string | null, info: ProjectInfo | null, tasks: Ta
   const live = sessions.filter((s) => (s.project ?? null) === slug && s.state !== "exited");
   const counts: Partial<Record<TaskStatus, number>> = {};
   for (const t of own) counts[t.status] = (counts[t.status] ?? 0) + 1;
-  const attention = live.filter((s) => ["waiting_input", "needs_auth", "needs_trust", "stalled", "error"].includes(s.state)).length + (counts.failed ?? 0) + (counts.review ?? 0);
+  const attention = live.filter((s) => ["waiting_input", "needs_auth", "needs_trust", "stalled", "error"].includes(s.state)).length + (counts.failed ?? 0) + (counts.review ?? 0) + own.filter(isHeld).length;
   const times = [...own.map((t) => t.updated_at), ...sessions.filter((s) => (s.project ?? null) === slug).map((s) => s.last_activity_at)].map((x) => new Date(x).getTime());
   const busy = (counts.running ?? 0) + (counts.verifying ?? 0) + (counts.auditing ?? 0) + (counts.landing ?? 0) > 0;
   const status: ProjectStatus = info?.project.settings.paused ? "paused" : orchestrator?.running && busy ? "running" : "idle";

@@ -28,7 +28,7 @@ type Path = { p0: Pt; p3: Pt; h: boolean; c1?: Pt; c2?: Pt };
 const LABEL_T: Record<string, number> = { "watch>retry": 0.3, "retry>watch": 0.3, "audit>retry": 0.35 };
 
 const HEIGHT = 470;
-const MIN_WIDTH = 1140;
+const MIN_WIDTH = 1240;
 const NODE_H = 66;
 
 function geometry(width: number) {
@@ -134,7 +134,7 @@ export function DecisionGraph({
   for (const t of [...tokens].sort((a, b) => a.id - b.id)) here.set(t.node, [...(here.get(t.node) ?? []), t]);
 
   return (
-    <div ref={box} className="relative h-[470px] min-w-[1140px]">
+    <div ref={box} className="relative h-[470px] min-w-[1240px]">
       <svg width={width} height={HEIGHT} className="absolute inset-0 block select-none" role="img" aria-label="Orchestrator decision graph">
         <text x={24} y={14} style={{ font: `500 9px ${MONO}`, letterSpacing: "2px", fill: "var(--muted)" }}>
           HAPPY PATH →

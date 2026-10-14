@@ -3,6 +3,7 @@
 import { useEffect, useRef, type RefObject } from "react";
 
 import { activityMarks, prefersReducedMotion } from "@/lib/activity";
+import { isHeld } from "@/lib/intake";
 
 import type { Graph, GraphNode, NodeType } from "./model";
 import { depthStep, graphColumns, hash, layout, type View } from "./layouts";
@@ -681,7 +682,8 @@ class Engine {
         let fillA = 1;
         let stroke: string | null = null;
         let strokeA = 1;
-        if (t.status === "pending") stroke = this.c("var(--text-2)");
+        // A task the intake gate holds waits for the owner: outlined in the accent.
+        if (t.status === "pending") stroke = this.c(isHeld(t) ? "var(--accent)" : "var(--text-2)");
         else if (t.status === "running") fill = color;
         else if (t.status === "verifying" || t.status === "auditing" || t.status === "landing") fill = this.c("var(--info)");
         else if (t.status === "review") fill = this.c("var(--warn)");

@@ -219,7 +219,7 @@ export function ProjectInit({ slug }: { slug: string }) {
               on={draftCorpus}
               onClick={() => !result && setDraftCorpus(!draftCorpus)}
               label="Draft the Reflex corpus from this description"
-              sub="written in English (Reflex reads English only) · up to 8 domains, including an orchestration domain used by the orchestrator's Reflex gates"
+              sub="written in English (Reflex reads English only) · up to 8 domains"
             />
           </Card>
 

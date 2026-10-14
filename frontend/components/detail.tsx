@@ -16,6 +16,7 @@ import { Btn, LEVEL_TONE, Pill, SESSION_TONE, TASK_TONE, TONE_TEXT, hms, rel, ty
 import { PromptBar, closeSession, usePane } from "./console";
 import { useTrace } from "./decisions/use-decisions";
 import { QUEUE } from "./graph/model";
+import { IntakePanel, SharedFilesLine, isHeld } from "./intake";
 import { ScopePanel, waitText } from "./parallel";
 import { TaskGitPanel, blocked, taskActions } from "./tasks";
 
@@ -234,7 +235,8 @@ export function DetailCard({
       if (!t) return null;
       const s = t.session ? cmd.sessions.find((x) => x.name === t.session) : undefined;
       const isBlocked = blocked(t, cmd.tasks);
-      const wait = t.status === "pending" && !isBlocked ? waitText(trace[0]) : null;
+      const held = isHeld(t);
+      const wait = t.status === "pending" && !isBlocked && !held ? waitText(trace[0]) : null;
       const actions: Action[] = [];
       if (s) actions.push({ label: `Open ${s.name}`, run: () => select(`s:${s.name}`), nav: true });
       for (const a of taskActions(t, act)) actions.push({ label: a.label, kind: a.kind, run: a.run });
@@ -245,8 +247,8 @@ export function DetailCard({
         kicker: `${cmd.all ? `${cmd.projectName(t.project)} · ` : ""}task #${t.id}`,
         title: t.title,
         color: s ? (cmd.all ? cmd.colorOfProject(t.project) : providerColor(s.provider)) : "var(--idle)",
-        badge: isBlocked ? "blocked" : t.status,
-        tone: isBlocked ? "bad" : TASK_TONE[t.status],
+        badge: isBlocked ? "blocked" : held ? "waiting for you" : t.status,
+        tone: isBlocked ? "bad" : held ? "accent" : TASK_TONE[t.status],
         rows: [
           ["Depends on", t.depends_on.length ? t.depends_on.map((x) => `#${x}`).join(", ") : "none"],
           ["Provider", t.provider ? `pinned · ${t.provider}${t.model ? ` (${t.model})` : ""}` : "any · failover"],
@@ -265,7 +267,9 @@ export function DetailCard({
                 <PhaseBar status={t.status} color={s ? providerColor(s.provider) : "var(--accent)"} labels />
               </div>
             )}
+            {t.intake && <IntakePanel key={`intake-${t.id}`} task={t} act={act} actions={!cmd.all} onOpenTask={(n) => select(`t:${n}`)} />}
             {t.git && <TaskGitPanel key={t.id} task={t} act={act} actions={!cmd.all} />}
+            <SharedFilesLine task={t} />
             {t.scope && <ScopePanel key={`scope-${t.id}`} scope={t.scope} now={now} />}
           </>
         ),

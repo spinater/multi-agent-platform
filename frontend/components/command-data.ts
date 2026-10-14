@@ -9,6 +9,7 @@ import type { PipelineInfo } from "@/lib/generated/PipelineInfo";
 import type { ProviderInfo } from "@/lib/generated/ProviderInfo";
 import type { Session } from "@/lib/generated/Session";
 import type { Task } from "@/lib/generated/Task";
+import { heldReason, isHeld } from "@/lib/intake";
 
 import { useApp } from "./app-context";
 import { SESSION_TONE, type Tone } from "./command-ui";
@@ -138,6 +139,8 @@ export function useCommand() {
         needs.push({ id: `s:${s.name}`, title: s.name, reason: s.detail || s.state.replace("_", " "), tag: NEED_TAG[s.state], tone: SESSION_TONE[s.state] });
     for (const t of tasks) if (t.status === "failed") needs.push({ id: `t:${t.id}`, title: `${taskLabel(t)} ${t.title}`, reason: t.result?.split("\n")[0] || "failed", tag: "failed", tone: "bad" });
     for (const t of tasks)
+      if (isHeld(t)) needs.push({ id: `t:${t.id}`, title: `${taskLabel(t)} ${t.title}`, reason: t.intake?.reason || heldReason(t), tag: heldReason(t).toLowerCase(), tone: "accent" });
+    for (const t of tasks)
       if (t.status === "review") needs.push({ id: `t:${t.id}`, title: `${taskLabel(t)} ${t.title}`, reason: t.result?.split("\n")[0] || `${t.git?.branch ?? "branch"} waits for your review`, tag: "review", tone: "warn" });
 
     const summary = (slug: string | null): ProjectSummary => {
@@ -148,7 +151,7 @@ export function useCommand() {
       for (const t of ts) counts[t.status] = (counts[t.status] ?? 0) + 1;
       const busy = live.length > 0 || ts.some((t) => LIVE_BUSY.includes(t.status));
       const state = !ts.length && !live.length ? "idle" : !orchestrator?.running ? "paused" : busy ? "running" : "idle";
-      const need = ss.filter((s) => (NEEDS_YOU as readonly string[]).includes(s.state)).length + (counts.failed ?? 0) + (counts.review ?? 0);
+      const need = ss.filter((s) => (NEEDS_YOU as readonly string[]).includes(s.state)).length + (counts.failed ?? 0) + (counts.review ?? 0) + ts.filter(isHeld).length;
       return { key: projectKey(slug), slug, name: projectName(slug), color: colorOfProject(slug), state, live: live.length, running: counts.running ?? 0, done: counts.done ?? 0, total: ts.length, need, counts };
     };
 

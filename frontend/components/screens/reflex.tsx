@@ -32,6 +32,7 @@ import { Playground } from "../reflex/playground";
 import { QuestionsModal, starterQuestion } from "../reflex/questions";
 import { Savings, ViewTabs } from "../reflex/savings";
 import { Setup, type Step } from "../reflex/setup";
+import { ThaiWords } from "../reflex/thai";
 import { Banner, ModeBadge, RxButton, RxSection, errText } from "../reflex/ui";
 import { Main, PageHeader } from "../shell/page";
 import { TopBar } from "../shell/top-bar";
@@ -355,6 +356,9 @@ function ProjectReflex({ info }: { info: ProjectInfo }) {
           now={now}
           emptyText={p.questions.length ? "No decisions yet. Ask one in the playground." : "No questions defined yet, so nothing has been routed."}
         />
+      </RxSection>
+      <RxSection id="rx-thai" n="06" title="Thai words" meta="Thai → English for Reflex">
+        <ThaiWords info={info} toast={toast} />
       </RxSection>
       {editing && (
         <QuestionsModal

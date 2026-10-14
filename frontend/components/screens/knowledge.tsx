@@ -14,6 +14,7 @@ import { useApp } from "../app-context";
 import { DocViewer } from "../knowledge/doc-viewer";
 import { Box, Browse, Budgets, Health, Queries, SearchBox } from "../knowledge/sections";
 import { KIND_LABEL, knowledgeHash } from "../knowledge/shared";
+import { Suggestion } from "../knowledge/suggestion";
 import { Btn, Inset, ago, errText } from "../project-ui";
 import { Main, PageHeader } from "../shell/page";
 import { TopBar } from "../shell/top-bar";
@@ -189,6 +190,7 @@ export function KnowledgeScreen() {
 
         {data && s && (
           <>
+            <Suggestion key={slug} slug={slug} data={data} onChange={(next) => (next ? setLoaded({ slug, data: next }) : setTick((t) => t + 1))} />
             {data.docs.length === 0 && (
               <Box title="Nothing to know yet" glyph="◇">
                 <p className="text-[13px] leading-normal text-text-2">

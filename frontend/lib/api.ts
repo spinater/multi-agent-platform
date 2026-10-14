@@ -13,6 +13,7 @@ import type { FsListing } from "./generated/FsListing";
 import type { FsRoot } from "./generated/FsRoot";
 import type { FolderTrusted } from "./generated/FolderTrusted";
 import type { FitResult } from "./generated/FitResult";
+import type { GatesInfo } from "./generated/GatesInfo";
 import type { GitAccess } from "./generated/GitAccess";
 import type { GitIdentity } from "./generated/GitIdentity";
 import type { GitKey } from "./generated/GitKey";
@@ -47,6 +48,8 @@ import type { SkillFile } from "./generated/SkillFile";
 import type { SkillsOverview } from "./generated/SkillsOverview";
 import type { Task } from "./generated/Task";
 import type { TemplateInfo } from "./generated/TemplateInfo";
+import type { ThaiPreview } from "./generated/ThaiPreview";
+import type { ThaiReport } from "./generated/ThaiReport";
 import type { TrustAnswer } from "./generated/TrustAnswer";
 import type { WorktreeEstimate } from "./generated/WorktreeEstimate";
 // Reflex screen.
@@ -122,7 +125,7 @@ export const api = {
   trustSession: (name: string) => request<TrustAnswer>("POST", `/sessions/${encodeURIComponent(name)}/trust`, {}),
   createTask: (body: { title: string; prompt: string; depends_on: number[]; provider?: string; model?: string; project?: string }) =>
     request<Task>("POST", "/tasks", body),
-  /** `note` (send_back only) goes into the agent's next prompt. 409 with the reason when the task's status refuses it. */
+  /** `note` (send_back, clarify) goes into the agent's next prompt. 409 with the reason when the task's status refuses it. */
   taskAction: (id: number, action: TaskAction, note?: string) => request<Task>("PATCH", `/tasks/${id}`, note ? { action, note } : { action }),
   deleteTask: (id: number) => request("DELETE", `/tasks/${id}`),
   /** Pause or run the orchestrator. */
@@ -150,6 +153,20 @@ export const api = {
   fit: (slug: string, body: { cases: { state: string; question: Question; expected: string | boolean }[]; rho: number; apply: boolean }) =>
     request<FitResult>("POST", `/projects/${slug}/fit`, body),
   decisions: (slug: string, limit = 200) => request<Decision[]>("GET", `/projects/${slug}/decisions?limit=${limit}`),
+  // ---- Thai for Reflex: the built-in glossary plus the project's own words (Thai → English, `-` skips a word)
+  thai: (slug: string) => request<ThaiReport>("GET", `/projects/${slug}/thai`),
+  /** What Reflex reads for `text`; `words` tries the editor's unsaved table instead of the saved one. */
+  thaiPreview: (slug: string, text: string, words?: Record<string, string>) => request<ThaiPreview>("POST", `/projects/${slug}/thai/preview`, words ? { text, words } : { text }),
+  /** Replaces the project's words; 400 with the reason for a bad one. */
+  setThaiWords: (slug: string, words: Record<string, string>) => request<ThaiReport>("PUT", `/projects/${slug}/thai/words`, { words }),
+  // ---- the orchestrator gates' own Reflex, shared by every project
+  gates: () => request<GatesInfo>("GET", "/gates"),
+  /** `null` goes back to map.toml's `[reflex] gates_threshold` (unset there: shadow). */
+  setGatesThreshold: (threshold: number | null) => request<GatesInfo>("POST", "/gates", { threshold }),
+  restartGates: () => request<GatesInfo>("POST", "/gates/restart", {}),
+  gatesFile: (path: string) => request<{ path: string; content: string }>("GET", `/gates/file?path=${encodeURIComponent(path)}`),
+  /** Saves one domain's file and restarts the gates Reflex. */
+  saveGatesFile: (path: string, content: string) => request<GatesInfo>("PUT", "/gates/file", { path, content }),
 
   // ---- skills (Skills screen). `project: null` is the default workspace.
   skills: (project: string | null) => request<SkillsOverview>("GET", `/skills?project=${encodeURIComponent(project ?? "")}`),
@@ -206,6 +223,10 @@ export const api = {
   /** Reindexes first when the index is stale. */
   knowledge: (slug: string) => request<KnowledgeOverview>("GET", `/projects/${slug}/knowledge`),
   reindexKnowledge: (slug: string) => request<KnowledgeOverview>("POST", `/projects/${slug}/knowledge/reindex`, {}),
+  /** Accepts the knowledge suggestion: queues the setup task (once) and returns it. */
+  acceptKnowledge: (slug: string) => request<Task>("POST", `/projects/${slug}/knowledge/accept`, {}),
+  /** `dismissed: false` shows the suggestion again. */
+  dismissKnowledge: (slug: string, dismissed: boolean) => request<KnowledgeOverview>("POST", `/projects/${slug}/knowledge/dismiss`, { dismissed }),
   /** Substring search (Thai or English); recorded as an owner query. `kind: null` searches every kind. */
   searchKnowledge: (slug: string, q: string, kind: KnowledgeKind | null, limit = 30) =>
     request<KnowledgeSearch>("GET", `/projects/${slug}/knowledge/search?q=${encodeURIComponent(q)}&kind=${kind ?? ""}&limit=${limit}`),
@@ -222,8 +243,9 @@ export const api = {
 };
 
 /** `merge`, `pull_request`, `send_back` act on a task in `review`; `discard` removes its worktree and (unless merged
- * or pushed) its branch. */
-export type TaskAction = "retry" | "cancel" | "merge" | "pull_request" | "send_back" | "discard";
+ * or pushed) its branch. `start_anyway` releases a task the intake gate holds; `clarify` (with a note) adds to a
+ * pending task's prompt and the intake gate looks again. */
+export type TaskAction = "retry" | "cancel" | "merge" | "pull_request" | "send_back" | "discard" | "start_anyway" | "clarify";
 
 /** The platform hosts one repo per project: the Reflex corpus. The code stays in the project's own folder. */
 export type RepoName = "corpus";

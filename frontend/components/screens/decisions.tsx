@@ -5,6 +5,7 @@ import { useMemo, useState } from "react";
 import { api, decisionsApi } from "@/lib/api";
 import type { DecisionNode } from "@/lib/generated/DecisionNode";
 import type { Task } from "@/lib/generated/Task";
+import { heldReason } from "@/lib/intake";
 
 import { useApp } from "../app-context";
 import { DecisionGraph, type Selection, type Token } from "../decisions/graph";
@@ -42,6 +43,8 @@ export function DecisionsScreen() {
       const sub =
         node === "watch"
           ? `${task.session ?? ""} · ${(s?.state ?? "working").replace("_", " ")}`
+          : node === "intake"
+            ? `waiting for you · ${heldReason(task).toLowerCase()}`
           : node === "ready"
             ? (waitText(last) ?? (task.depends_on.length
               ? `waiting on ${task.depends_on.filter((d) => tasks.find((t) => t.id === d)?.status !== "done").map((d) => `#${d}`).join(", ") || "a worker slot"}`

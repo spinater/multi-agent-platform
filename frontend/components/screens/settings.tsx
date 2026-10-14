@@ -1,7 +1,7 @@
 "use client";
 
 import clsx from "clsx";
-import { Bot, KeyRound, Server } from "lucide-react";
+import { Bot, KeyRound, Server, Zap } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 
 import { gitApi } from "@/lib/api";
@@ -11,6 +11,7 @@ import { useApp } from "../app-context";
 import { errText } from "../project-ui";
 import { AgentClis } from "../settings/agent-clis";
 import { GitSshSettings } from "../settings/git-ssh";
+import { ReflexGatesSettings } from "../settings/reflex-gates";
 import { ServerSettingsView } from "../settings/server";
 import { Main, PageHeader } from "../shell/page";
 import { TopBar } from "../shell/top-bar";
@@ -18,6 +19,7 @@ import { TopBar } from "../shell/top-bar";
 const SECTIONS = [
   { id: "git", label: "Git & SSH", sub: "GitHub, GitLab, any ssh host", icon: KeyRound },
   { id: "agents", label: "Agent CLIs", sub: "versions, sign-in, updates", icon: Bot },
+  { id: "gates", label: "Reflex gates", sub: "shared Reflex, threshold, corpus", icon: Zap },
   { id: "server", label: "Server", sub: "map.toml, read only", icon: Server },
 ] as const;
 
@@ -25,7 +27,7 @@ type SectionId = (typeof SECTIONS)[number]["id"];
 
 const isSection = (s: string | null): s is SectionId => SECTIONS.some((x) => x.id === s);
 
-/** Settings (`#settings`, `#settings/git`, `#settings/agents`, `#settings/server`): what someone who installs MAP
+/** Settings (`#settings`, `#settings/git`, `#settings/agents`, `#settings/gates`, `#settings/server`): what someone who installs MAP
  * sets up once. Git & SSH is editable (the SSH method, MAP's key, hosts, identity); Agent CLIs reuse the sign-in
  * modal and the update flow; Server is `map.toml`, read only. No secret is ever taken or shown here. */
 export function SettingsScreen() {
@@ -59,7 +61,7 @@ export function SettingsScreen() {
         <PageHeader
           kicker="Configuration"
           title="Settings"
-          lead="Set up this MAP once: how agents reach GitHub, GitLab or your own git host, the agent CLIs they run, and the server's own settings. Keys, tokens and passwords are never typed or shown here: only public keys, and whether a secret is set."
+          lead="Set up this MAP once: how agents reach GitHub, GitLab or your own git host, the agent CLIs they run, the Reflex gates, and the server's own settings. Keys, tokens and passwords are never typed or shown here: only public keys, and whether a secret is set."
         />
         <div className="grid min-w-0 gap-6 lg:grid-cols-[220px_minmax(0,1fr)] lg:gap-8">
           <nav aria-label="Settings sections" className="flex min-w-0 flex-wrap gap-1.5 self-start lg:sticky lg:top-20 lg:flex-col lg:gap-1">
@@ -91,6 +93,13 @@ export function SettingsScreen() {
             </Section>
             <Section id="agents" title="Agent CLIs" lead="The coding-agent CLIs MAP runs: where each binary is, its version against the latest release, and its sign-in.">
               <AgentClis settings={settings} />
+            </Section>
+            <Section
+              id="gates"
+              title="Reflex gates"
+              lead="Before an LLM, the orchestrator can ask Reflex: is this task clear, does it need planning, which model, does it need an audit. These gates have their own Reflex, shared by every project; each project turns them on in its settings."
+            >
+              <ReflexGatesSettings />
             </Section>
             <Section id="server" title="Server" lead="How this server is set up. Read only: these come from map.toml.">
               <ServerSettingsView settings={settings} error={error} />

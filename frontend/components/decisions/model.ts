@@ -9,35 +9,38 @@ import type { Event } from "@/lib/generated/Event";
 import type { Session } from "@/lib/generated/Session";
 import type { Task } from "@/lib/generated/Task";
 import { providerColor } from "@/lib/colors";
+import { heldReason, isHeld } from "@/lib/intake";
 
 export const DECISION_PREFIX = "decision.";
 export const isDecision = (e: Event) => e.kind.startsWith(DECISION_PREFIX) && e.task_id !== null;
 
-/** Grid position of each node: column, row (0 happy path, 1 recovery). Review sits under Land, the only way in;
- * Failed sits between Retry and Review so the Retry → Failed edge crosses no node. */
+/** Grid position of each node: column, row (0 happy path, 1 recovery). Intake comes first, left of Ready; Blocked
+ * sits under Ready, Review under Land, the only way in; Failed sits between Retry and Review so the Retry → Failed
+ * edge crosses no node. */
 export const LAYOUT: Record<DecisionNode, { c: number; r: number }> = {
-  ready: { c: 0, r: 0 },
-  pick: { c: 1, r: 0 },
-  launch: { c: 2, r: 0 },
-  watch: { c: 3, r: 0 },
-  verify: { c: 4, r: 0 },
-  audit: { c: 5, r: 0 },
-  land: { c: 6, r: 0 },
-  post: { c: 7, r: 0 },
-  end: { c: 8, r: 0 },
-  done: { c: 9, r: 0 },
-  blocked: { c: 0, r: 1 },
-  retry: { c: 3.5, r: 1 },
-  failed: { c: 5.5, r: 1 },
-  review: { c: 7, r: 1 },
+  intake: { c: 0, r: 0 },
+  ready: { c: 1, r: 0 },
+  pick: { c: 2, r: 0 },
+  launch: { c: 3, r: 0 },
+  watch: { c: 4, r: 0 },
+  verify: { c: 5, r: 0 },
+  audit: { c: 6, r: 0 },
+  land: { c: 7, r: 0 },
+  post: { c: 8, r: 0 },
+  end: { c: 9, r: 0 },
+  done: { c: 10, r: 0 },
+  blocked: { c: 1, r: 1 },
+  retry: { c: 4.5, r: 1 },
+  failed: { c: 6.5, r: 1 },
+  review: { c: 8, r: 1 },
 };
 /** Columns of `LAYOUT`. */
 export const COLUMNS = Math.max(...Object.values(LAYOUT).map((p) => p.c)) + 1;
 
 /** List order: the furthest along first. */
-export const ORDER: DecisionNode[] = ["ready", "pick", "launch", "watch", "verify", "audit", "land", "post", "end", "retry", "blocked", "review", "failed", "done"];
+export const ORDER: DecisionNode[] = ["intake", "ready", "pick", "launch", "watch", "verify", "audit", "land", "post", "end", "retry", "blocked", "review", "failed", "done"];
 /** The chips row above the canvas. */
-export const CHIPS: DecisionNode[] = ["watch", "verify", "audit", "land", "review", "pick", "ready", "retry", "blocked", "failed", "done"];
+export const CHIPS: DecisionNode[] = ["watch", "verify", "audit", "land", "review", "pick", "ready", "intake", "retry", "blocked", "failed", "done"];
 
 export const edgeKey = (from: DecisionNode, to: DecisionNode) => `${from}>${to}`;
 export const isFailEdge = (to: DecisionNode) => to === "retry" || to === "failed" || to === "blocked";
@@ -48,6 +51,7 @@ export function nodeTone(n: DecisionNode): string {
   if (n === "blocked" || n === "retry" || n === "review") return "var(--warn)";
   if (n === "watch") return "var(--ok)";
   if (n === "verify" || n === "audit" || n === "land") return "var(--info)";
+  if (n === "intake") return "var(--accent)";
   if (n === "pick" || n === "ready") return "var(--idle)";
   return "var(--text-2)";
 }
@@ -81,6 +85,7 @@ export function nodeOf(task: Task, last: Event | undefined, kinds: KindMap): Dec
       return "failed";
     case "pending":
       if (task.result?.startsWith("Blocked")) return "blocked";
+      if (isHeld(task)) return "intake";
       if (last?.kind === "decision.pick.none") return "pick";
       return "ready";
     case "running":
@@ -105,6 +110,7 @@ export function providerOf(task: Task, sessions: Session[]): { name: string | nu
 
 /** A session state that needs a person (dashed ring on the token). */
 export function attention(task: Task, node: DecisionNode | null, sessions: Session[], last: Event | undefined): string | null {
+  if (node === "intake" && isHeld(task)) return `waiting for you · ${heldReason(task).toLowerCase()}`;
   if (node === "pick" && last?.kind === "decision.pick.none") return "no provider available";
   if (node !== "watch" && node !== "end") return null;
   const s = sessions.find((x) => x.name === task.session);
@@ -193,6 +199,17 @@ export function nowChecks(args: {
   const attempt = currentAttempt(trace);
   const label = (n: DecisionNode | null) => model.nodes.find((x) => x.id === n)?.label ?? n ?? "hidden";
   switch (node) {
+    case "intake": {
+      const i = task.intake;
+      if (!i) return [{ mark: "…", color: IDLE, text: "the intake gate has not looked yet" }];
+      const held = isHeld(task);
+      return [
+        { mark: held ? "!" : "✓", color: held ? WARN : OK, text: `${heldReason(task)}${i.reason ? ` · ${i.reason}` : ""}` },
+        ...(i.tier ? [{ mark: "·", color: IDLE, text: `tier ${i.tier}` }] : []),
+        ...(i.shared_files ? [{ mark: "·", color: INFO, text: "changes shared files · runs alone, no analyst call" }] : []),
+        ...(held ? [{ mark: "·", color: IDLE, text: "Start anyway, Clarify or Cancel on the task card" }] : []),
+      ];
+    }
     case "ready": {
       const deps = task.depends_on.map((d): Check => {
         const t = tasks.find((x) => x.id === d);
