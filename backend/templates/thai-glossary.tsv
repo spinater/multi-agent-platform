@@ -1,0 +1,793 @@
+# Thai → English glossary for Reflex, which reads English words only (backend/src/thai.rs).
+# One entry per line: <thai><TAB><english>. "-" marks a word that carries no meaning for Reflex (it counts as read
+# but adds nothing). Thai has no spaces, so text is split by longest match against these entries: list compounds
+# (เงินคืน, ฐานข้อมูล) as well as their parts. A project adds its own words in Settings → Reflex → Thai words.
+
+# ---- function words, particles
+และ	-
+หรือ	or
+แต่	but
+ที่	-
+ซึ่ง	-
+ของ	-
+ใน	in
+บน	on
+ที่จะ	-
+จะ	-
+ได้	-
+ได้แล้ว	-
+แล้ว	-
+ด้วย	-
+กับ	with
+แก่	-
+แก้	fix
+ให้	-
+โดย	by
+จาก	from
+ถึง	to
+ไป	-
+มา	-
+ไว้	-
+อยู่	-
+คือ	is
+เป็น	is
+มี	has
+ไม่มี	no
+ไม่	not
+ไม่ได้	not
+ไม่ต้อง	no need
+ยัง	still
+ยังไม่	not yet
+ก็	-
+ก่อน	before
+หลัง	after
+หลังจาก	after
+ตอน	when
+เมื่อ	when
+ถ้า	if
+หาก	if
+เพราะ	because
+เพื่อ	for
+สำหรับ	for
+ทุก	every
+ทั้งหมด	all
+ทั้ง	all
+บาง	some
+อื่น	other
+อื่นๆ	other
+นี้	this
+นั้น	that
+นั่น	that
+นี่	this
+อัน	-
+ตัว	-
+ครับ	-
+ค่ะ	-
+คะ	-
+นะ	-
+จ้า	-
+หน่อย	-
+ช่วย	please
+กรุณา	please
+ด้วยครับ	-
+ด้วยค่ะ	-
+เลย	-
+อีก	again
+อีกครั้ง	again
+ซ้ำ	again
+แค่	only
+เท่านั้น	only
+เฉพาะ	only
+ประมาณ	about
+เกี่ยวกับ	about
+ระหว่าง	between
+ภายใน	inside
+ภายนอก	outside
+ข้างใน	inside
+ทำให้	cause
+ทำไม	why
+อะไร	what
+อย่างไร	how
+ยังไง	how
+แบบไหน	which
+ไหน	which
+ใคร	who
+เมื่อไร	when
+เมื่อไหร่	when
+กี่	how many
+ควร	should
+ต้อง	must
+ต้องการ	want
+อยาก	want
+อยากให้	want
+สามารถ	can
+ได้ไหม	can
+ไหม	-
+หรือไม่	-
+หรือเปล่า	-
+เปล่า	-
+มาก	very
+มากๆ	very
+น้อย	few
+เยอะ	many
+หลาย	many
+ทีละ	one at a time
+เดียว	single
+เดียวกัน	same
+เหมือน	same
+เหมือนเดิม	same as before
+ต่าง	different
+แตกต่าง	different
+ใหม่	new
+เก่า	old
+เดิม	existing
+ปัจจุบัน	current
+ตอนนี้	now
+ทันที	immediately
+ด่วน	urgent
+เร่งด่วน	urgent
+สำคัญ	important
+ง่าย	easy
+ยาก	hard
+ซับซ้อน	complex
+เล็ก	small
+เล็กน้อย	minor
+ใหญ่	large
+ทั้งระบบ	whole system
+บางส่วน	partial
+เพิ่มเติม	more
+นิดหน่อย	minor
+ๆ	-
+
+# ---- numbers
+หนึ่ง	one
+สอง	two
+สาม	three
+สี่	four
+ห้า	five
+สิบ	ten
+ร้อย	hundred
+พัน	thousand
+ล้าน	million
+ครั้ง	times
+สองครั้ง	twice
+ครั้งแรก	first time
+แรก	first
+สุดท้าย	last
+ล่าสุด	latest
+
+# ---- time
+วัน	day
+วันนี้	today
+เมื่อวาน	yesterday
+พรุ่งนี้	tomorrow
+สัปดาห์	week
+อาทิตย์	week
+เดือน	month
+ปี	year
+ชั่วโมง	hour
+นาที	minute
+วินาที	second
+เวลา	time
+ช้า	slow
+เร็ว	fast
+ล่าช้า	delayed
+หมดเวลา	timeout
+หมดอายุ	expired
+กำหนด	schedule
+กำหนดการ	schedule
+ตารางเวลา	schedule
+รายวัน	daily
+รายเดือน	monthly
+
+# ---- people, roles
+ผู้ใช้	user
+ผู้ใช้งาน	user
+ลูกค้า	customer
+คน	person
+ผู้ดูแล	admin
+ผู้ดูแลระบบ	admin
+แอดมิน	admin
+พนักงาน	staff
+ทีม	team
+เจ้าของ	owner
+สมาชิก	member
+ผู้ขาย	seller
+ร้านค้า	shop
+ผู้ป่วย	patient
+หมอ	doctor
+แพทย์	doctor
+คลินิก	clinic
+นักพัฒนา	developer
+ผู้ตรวจ	reviewer
+บทบาท	role
+สิทธิ์	permission
+สิทธิ	permission
+สิทธิ์การเข้าถึง	access permission
+
+# ---- actions: code work
+ทำ	do
+สร้าง	create
+เพิ่ม	add
+ใส่	add
+ลบ	delete
+ลบออก	remove
+เอาออก	remove
+ถอด	remove
+แก้ไข	fix
+แก้บั๊ก	fix bug
+ปรับ	adjust
+ปรับปรุง	improve
+ปรับแต่ง	tune
+เปลี่ยน	change
+เปลี่ยนแปลง	change
+เปลี่ยนชื่อ	rename
+ย้าย	move
+แยก	split
+รวม	merge
+รวมกัน	combine
+ผสาน	merge
+เขียน	write
+เขียนใหม่	rewrite
+อ่าน	read
+เปิด	open
+ปิด	close
+ปิดการใช้งาน	disable
+เปิดใช้งาน	enable
+เปิดใช้	enable
+ใช้	use
+ใช้งาน	use
+ใช้ได้	works
+ใช้ไม่ได้	broken
+ทำงาน	work
+ไม่ทำงาน	not working
+รัน	run
+เรียก	call
+เรียกใช้	call
+ส่ง	send
+รับ	receive
+ดึง	fetch
+ดึงข้อมูล	fetch data
+โหลด	load
+ดาวน์โหลด	download
+อัปโหลด	upload
+อัพโหลด	upload
+บันทึก	save
+เซฟ	save
+เก็บ	store
+จัดเก็บ	store
+คัดลอก	copy
+ก๊อปปี้	copy
+วาง	paste
+ค้นหา	search
+หา	find
+ค้น	search
+กรอง	filter
+เรียง	sort
+เรียงลำดับ	sort
+จัดเรียง	sort
+แสดง	show
+แสดงผล	display
+ซ่อน	hide
+ดู	view
+ตรวจสอบ	check
+ตรวจ	check
+เช็ค	check
+ทดสอบ	test
+เทส	test
+ยืนยัน	confirm
+อนุมัติ	approve
+ปฏิเสธ	reject
+ยกเลิก	cancel
+เริ่ม	start
+เริ่มต้น	start
+หยุด	stop
+พัก	pause
+ต่อ	continue
+ทำต่อ	continue
+รีสตาร์ท	restart
+เริ่มใหม่	restart
+ติดตั้ง	install
+ถอนการติดตั้ง	uninstall
+อัปเดต	update
+อัพเดท	update
+อัปเกรด	upgrade
+อัพเกรด	upgrade
+ตั้งค่า	configure
+กำหนดค่า	configure
+เชื่อมต่อ	connect
+เชื่อม	connect
+ตัดการเชื่อมต่อ	disconnect
+ซิงค์	sync
+ส่งออก	export
+นำเข้า	import
+แปลง	convert
+แปล	translate
+คำนวณ	calculate
+นับ	count
+วัด	measure
+จำกัด	limit
+ป้องกัน	prevent
+บล็อก	block
+อนุญาต	allow
+ห้าม	forbid
+รองรับ	support
+เตือน	warn
+แจ้ง	notify
+แจ้งเตือน	notification
+ออกแบบ	design
+วางแผน	plan
+วิเคราะห์	analyze
+ศึกษา	research
+สำรวจ	explore
+ทบทวน	review
+รีวิว	review
+อธิบาย	explain
+สรุป	summarize
+จัดการ	manage
+ควบคุม	control
+ดูแล	maintain
+ย้อนกลับ	revert
+ย้อน	revert
+คืนค่า	restore
+กู้คืน	restore
+สำรอง	backup
+สำรองข้อมูล	backup
+ล้าง	clear
+เคลียร์	clear
+รีเซ็ต	reset
+เขียนเทสต์	write tests
+เขียนเทส	write tests
+ทำความสะอาด	cleanup
+จัดรูปแบบ	format
+ฟอร์แมต	format
+รีแฟคเตอร์	refactor
+ปรับโครงสร้าง	refactor
+พอร์ต	port
+เทียบ	compare
+เปรียบเทียบ	compare
+ตรวจจับ	detect
+ติดตาม	track
+บันทึกล็อก	log
+
+# ---- states, problems
+บั๊ก	bug
+บัก	bug
+ข้อผิดพลาด	error
+ผิดพลาด	error
+ผิด	wrong
+ถูก	correct
+ถูกต้อง	correct
+เออเร่อ	error
+เออเรอร์	error
+พัง	broken
+เสีย	broken
+เสียหาย	damaged
+ล่ม	down
+ค้าง	hang
+แฮงค์	hang
+ติด	stuck
+ช้ามาก	very slow
+หาย	missing
+หายไป	missing
+ขาด	missing
+ซ้ำกัน	duplicate
+ไม่ตรง	mismatch
+ไม่ครบ	incomplete
+ครบ	complete
+เสร็จ	done
+เสร็จแล้ว	done
+สำเร็จ	success
+ล้มเหลว	failed
+ไม่ผ่าน	failed
+ผ่าน	passed
+รอ	waiting
+กำลัง	in progress
+ปัญหา	problem
+ความเสี่ยง	risk
+เสี่ยง	risky
+ปลอดภัย	safe
+ไม่ปลอดภัย	unsafe
+ช่องโหว่	vulnerability
+รั่ว	leak
+รั่วไหล	leak
+ชัดเจน	clear
+ไม่ชัดเจน	unclear
+คลุมเครือ	vague
+งง	confusing
+สับสน	confusing
+ไม่แน่ใจ	unsure
+ไม่รู้	unknown
+ตัวอย่าง	example
+ทดลอง	experiment
+ชั่วคราว	temporary
+ถาวร	permanent
+
+# ---- software things
+ระบบ	system
+โปรแกรม	program
+แอป	app
+แอพ	app
+แอปพลิเคชัน	application
+เว็บ	web
+เว็บไซต์	website
+หน้าเว็บ	web page
+หน้า	page
+หน้าจอ	screen
+หน้าแรก	home page
+หน้าหลัก	main page
+เมนู	menu
+ปุ่ม	button
+ฟอร์ม	form
+แบบฟอร์ม	form
+ช่อง	field
+กล่อง	box
+ตาราง	table
+รายการ	list
+ลิสต์	list
+ไอคอน	icon
+รูป	image
+รูปภาพ	image
+ภาพ	image
+สี	color
+ฟอนต์	font
+ตัวอักษร	text
+ข้อความ	message
+คำ	word
+ข้อความแสดงข้อผิดพลาด	error message
+หัวข้อ	heading
+ชื่อ	name
+คำอธิบาย	description
+ป้าย	label
+ลิงก์	link
+ลิงค์	link
+ไฟล์	file
+โฟลเดอร์	folder
+ไดเรกทอรี	directory
+เอกสาร	document
+คู่มือ	guide
+โค้ด	code
+ซอร์สโค้ด	source code
+ฟังก์ชัน	function
+ฟังก์ชั่น	function
+ตัวแปร	variable
+คลาส	class
+โมดูล	module
+ไลบรารี	library
+แพ็กเกจ	package
+แพคเกจ	package
+คอมโพเนนต์	component
+ส่วน	part
+ส่วนประกอบ	component
+ฟีเจอร์	feature
+คุณสมบัติ	feature
+ความสามารถ	capability
+ฟังก์ชันการทำงาน	functionality
+โครงสร้าง	structure
+สถาปัตยกรรม	architecture
+ระบบย่อย	subsystem
+ข้อมูล	data
+ฐานข้อมูล	database
+ดาต้าเบส	database
+คอลัมน์	column
+แถว	row
+ฟิลด์	field
+ดัชนี	index
+คิวรี	query
+คำสั่ง	command
+สคริปต์	script
+เซิร์ฟเวอร์	server
+เซิฟเวอร์	server
+ไคลเอนต์	client
+หลังบ้าน	backend
+หน้าบ้าน	frontend
+แบ็กเอนด์	backend
+ฟรอนต์เอนด์	frontend
+เอพีไอ	api
+บริการ	service
+คิว	queue
+แคช	cache
+หน่วยความจำ	memory
+เมมโมรี	memory
+ดิสก์	disk
+พื้นที่	space
+ประสิทธิภาพ	performance
+ความเร็ว	speed
+ความปลอดภัย	security
+ความเป็นส่วนตัว	privacy
+การเข้ารหัส	encryption
+เข้ารหัส	encrypt
+ถอดรหัส	decrypt
+แฮช	hash
+ใบรับรอง	certificate
+โดเมน	domain
+เครือข่าย	network
+อินเทอร์เน็ต	internet
+พอร์ต	port
+ล็อก	log
+บันทึกการทำงาน	log
+เวอร์ชัน	version
+เวอร์ชั่น	version
+รุ่น	version
+สาขา	branch
+บรานช์	branch
+คอมมิต	commit
+การเปลี่ยนแปลง	change
+ไมเกรชัน	migration
+การย้ายข้อมูล	migration
+สคีมา	schema
+ค่าตั้ง	setting
+การตั้งค่า	settings
+ตั้งค่าระบบ	system settings
+ค่า	value
+ค่าเริ่มต้น	default
+ตัวเลือก	option
+เงื่อนไข	condition
+กฎ	rule
+นโยบาย	policy
+ขั้นตอน	step
+กระบวนการ	process
+เวิร์กโฟลว์	workflow
+งาน	task
+ทาสก์	task
+ภารกิจ	task
+โปรเจกต์	project
+โปรเจค	project
+โครงการ	project
+แผน	plan
+ความต้องการ	requirement
+ข้อกำหนด	requirement
+สเปก	spec
+เอกสารประกอบ	documentation
+ความคิดเห็น	comment
+คอมเมนต์	comment
+การทดสอบ	test
+ชุดทดสอบ	test suite
+เทสต์	test
+ผลลัพธ์	result
+ผล	result
+รายงาน	report
+สถิติ	statistics
+กราฟ	chart
+แดชบอร์ด	dashboard
+การแจ้งเตือน	notification
+อีเมล	email
+อีเมล์	email
+ข้อความแชท	chat message
+แชท	chat
+โทรศัพท์	phone
+มือถือ	mobile
+เดสก์ท็อป	desktop
+คอมพิวเตอร์	computer
+เบราว์เซอร์	browser
+ธีม	theme
+โหมดมืด	dark mode
+ภาษา	language
+ภาษาไทย	thai language
+ภาษาอังกฤษ	english language
+คำแปล	translation
+การแปล	translation
+ตัวสะกด	spelling
+คำผิด	typo
+พิมพ์ผิด	typo
+ระยะห่าง	spacing
+ขนาด	size
+ความกว้าง	width
+ความสูง	height
+ตำแหน่ง	position
+จัดวาง	layout
+เลย์เอาต์	layout
+การจัดวาง	layout
+แอนิเมชัน	animation
+ภาพเคลื่อนไหว	animation
+ไลบรารีที่มีอยู่	existing library
+ปลั๊กอิน	plugin
+ส่วนขยาย	extension
+ตัวกรอง	filter
+การค้นหา	search
+ผลการค้นหา	search results
+หน้าต่าง	window
+ป๊อปอัป	popup
+แท็บ	tab
+แถบ	bar
+แถบด้านข้าง	sidebar
+ส่วนหัว	header
+ส่วนท้าย	footer
+การ์ด	card
+โมดัล	modal
+ตัวเลข	number
+วันที่	date
+รูปแบบ	format
+ค่าคงที่	constant
+เทมเพลต	template
+แม่แบบ	template
+ไฟล์ตั้งค่า	config file
+คอนฟิก	config
+ตัวแปรสภาพแวดล้อม	environment variable
+สภาพแวดล้อม	environment
+โปรดักชัน	production
+ระบบจริง	production
+เทสต์เซิร์ฟเวอร์	staging
+ดีพลอย	deploy
+ปรับใช้	deploy
+ขึ้นระบบ	deploy
+ปล่อย	release
+การปล่อย	release
+คอนเทนเนอร์	container
+ด็อกเกอร์	docker
+คลาวด์	cloud
+ไปป์ไลน์	pipeline
+ไลบรารีภายนอก	dependency
+การพึ่งพา	dependency
+ไลบรารีที่ใช้	dependency
+งานพื้นหลัง	background job
+ตั้งเวลา	schedule
+ครอน	cron
+เว็บฮุก	webhook
+อินทิเกรชัน	integration
+เชื่อมระบบ	integration
+
+# ---- account, auth
+บัญชี	account
+บัญชีผู้ใช้	user account
+เข้าสู่ระบบ	login
+ล็อกอิน	login
+ล็อคอิน	login
+ออกจากระบบ	logout
+สมัคร	sign up
+สมัครสมาชิก	sign up
+ลงทะเบียน	register
+รหัสผ่าน	password
+พาสเวิร์ด	password
+ลืมรหัสผ่าน	forgot password
+เปลี่ยนรหัสผ่าน	change password
+รีเซ็ตรหัสผ่าน	reset password
+ยืนยันตัวตน	authentication
+การยืนยันตัวตน	authentication
+โทเคน	token
+โทเค็น	token
+เซสชัน	session
+คุกกี้	cookie
+กุญแจ	key
+คีย์	key
+รหัส	code
+รหัสยืนยัน	verification code
+โปรไฟล์	profile
+ข้อมูลส่วนตัว	personal data
+
+# ---- money, commerce
+เงิน	money
+เงินคืน	refund
+คืนเงิน	refund
+ขอคืนเงิน	refund request
+ตัดเงิน	charge
+หักเงิน	charge
+เรียกเก็บเงิน	charge
+ชำระ	pay
+ชำระเงิน	payment
+จ่าย	pay
+จ่ายเงิน	payment
+การชำระเงิน	payment
+โอน	transfer
+โอนเงิน	transfer money
+ราคา	price
+ค่าใช้จ่าย	cost
+ค่าบริการ	fee
+ค่าธรรมเนียม	fee
+ส่วนลด	discount
+คูปอง	coupon
+โปรโมชัน	promotion
+โปรโมชั่น	promotion
+ภาษี	tax
+ใบเสร็จ	receipt
+ใบแจ้งหนี้	invoice
+บิล	bill
+ยอด	amount
+ยอดเงิน	balance
+จำนวน	amount
+จำนวนเงิน	amount
+ยอดรวม	total
+รวมทั้งหมด	total
+บัตร	card
+บัตรเครดิต	credit card
+เครดิต	credit
+แต้ม	points
+คะแนน	score
+สมาชิกภาพ	membership
+แพ็กเกจรายเดือน	subscription
+สมัครรายเดือน	subscription
+ต่ออายุ	renew
+สั่งซื้อ	order
+คำสั่งซื้อ	order
+ออเดอร์	order
+ซื้อ	buy
+ขาย	sell
+ตะกร้า	cart
+ตะกร้าสินค้า	cart
+สินค้า	product
+บริการลูกค้า	customer service
+สต็อก	stock
+คลังสินค้า	inventory
+จอง	booking
+การจอง	booking
+นัด	appointment
+นัดหมาย	appointment
+คิวนัด	appointment queue
+เลื่อนนัด	reschedule
+ใบสั่งยา	prescription
+ยา	medicine
+ประวัติ	history
+ประวัติการรักษา	medical history
+
+# ---- shipping
+ส่งของ	ship
+จัดส่ง	shipping
+การจัดส่ง	shipping
+ขนส่ง	delivery
+พัสดุ	parcel
+ที่อยู่	address
+เลขพัสดุ	tracking number
+ติดตามพัสดุ	tracking
+ไม่ได้รับ	not received
+ได้รับ	received
+ถึงแล้ว	arrived
+ส่งช้า	late delivery
+ตีกลับ	returned
+คืนสินค้า	return item
+เปลี่ยนสินค้า	exchange item
+
+# ---- orchestration words (the gates' own questions)
+ตรวจโค้ด	code review
+ออดิท	audit
+การตรวจสอบ	audit
+งานเล็ก	small task
+งานใหญ่	large task
+งานง่าย	easy task
+งานยาก	hard task
+หลายไฟล์	many files
+ไฟล์เดียว	one file
+หลายส่วน	many parts
+ทั้งโปรเจกต์	whole project
+ข้ามระบบ	cross system
+ล็อกไฟล์	lockfile
+ไฟล์ที่สร้างอัตโนมัติ	generated file
+สร้างอัตโนมัติ	generated
+อัตโนมัติ	automatic
+ด้วยมือ	manual
+ร่วมกัน	shared
+ใช้ร่วมกัน	shared
+แชร์	share
+พร้อมกัน	parallel
+ขนานกัน	parallel
+อิสระ	independent
+ขึ้นอยู่กับ	depends on
+ทับกัน	overlap
+ชนกัน	conflict
+ความขัดแย้ง	conflict
+
+# ---- quality, direction
+ดี	good
+ดีขึ้น	better
+ให้ดีขึ้น	improve
+ทำให้ดีขึ้น	improve
+แย่	bad
+แย่ลง	worse
+สวย	pretty
+สวยขึ้น	prettier
+ขึ้น	up
+ลง	down
+เพิ่มขึ้น	increase
+ลด	reduce
+ลดลง	decrease
+มากขึ้น	more
+น้อยลง	less
+เร็วขึ้น	faster
+ช้าลง	slower
+ง่ายขึ้น	easier
+ชัดขึ้น	clearer
+ทั่วไป	general
+พิเศษ	special
+ปกติ	normal
+ผิดปกติ	abnormal
+เหมาะสม	appropriate
+สมบูรณ์	complete

@@ -3,4 +3,4 @@
 /**
  * A decision point of the orchestrator's task flow (`orchestrator.rs`), or a terminal state.
  */
-export type DecisionNode = "ready" | "pick" | "launch" | "watch" | "verify" | "audit" | "land" | "post" | "end" | "retry" | "review" | "blocked" | "failed" | "done";
+export type DecisionNode = "intake" | "ready" | "pick" | "launch" | "watch" | "verify" | "audit" | "land" | "post" | "end" | "retry" | "review" | "blocked" | "failed" | "done";

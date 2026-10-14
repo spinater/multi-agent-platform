@@ -6,6 +6,11 @@
  */
 export type ReflexGates = { 
 /**
+ * Ask `intake` (ready, unclear, plan_first) before a task reaches any LLM, and hold a near-duplicate of a done
+ * task; with the parallel analyst on, also `shared_files`, whose confident "yes" runs the task alone.
+ */
+intake: boolean, 
+/**
  * Ask `needs_audit` before the LLM audit; a confident "no" accepts the task on verification.
  */
 audit: boolean, 

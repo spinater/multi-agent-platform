@@ -29,6 +29,8 @@ pub struct Hub {
     orchestrator_running: AtomicBool,
     /// Tasks at once across all projects: `[orchestrator] max_parallel`, or the dashboard's value.
     max_parallel: AtomicUsize,
+    /// The gates Reflex's port and threshold (`[reflex] gates_port`, `gates_threshold`, or the dashboard's value).
+    gates: Mutex<crate::decide::Target>,
     /// Runs one orchestrator tick on request (`POST /api/orchestrator/step`).
     pub step: crate::decisions::Stepper,
     cooldowns: Mutex<HashMap<String, DateTime<Utc>>>,
@@ -68,6 +70,10 @@ impl Hub {
         let usage = crate::usage::UsageState::new(&config);
         let updates = crate::updates::UpdatesState::new(&config);
         let max_parallel = config.orchestrator.max_parallel;
+        let gates = crate::decide::Target {
+            port: config.reflex.gates_port.unwrap_or(config.reflex.port_base.saturating_sub(1)),
+            threshold: config.reflex.gates_threshold,
+        };
         Arc::new(Self {
             config,
             store,
@@ -75,6 +81,7 @@ impl Hub {
             tx,
             orchestrator_running: AtomicBool::new(running),
             max_parallel: AtomicUsize::new(max_parallel),
+            gates: Mutex::new(gates),
             step: Default::default(),
             cooldowns: Mutex::new(HashMap::new()),
             reflex: reflex::Manager::default(),
@@ -144,6 +151,56 @@ impl Hub {
 
     pub fn project_dir(&self, slug: &str) -> PathBuf {
         self.config.server.data_dir.join("projects").join(slug)
+    }
+
+    /// The orchestrator gates' Reflex: its corpus repo, the export it reads and its log.
+    pub fn gates_dir(&self) -> PathBuf {
+        self.config.server.data_dir.join("gates")
+    }
+
+    pub fn gates_target(&self) -> crate::decide::Target {
+        *self.gates.lock().unwrap()
+    }
+
+    /// Tests: point the gates at a fake Reflex.
+    #[cfg(test)]
+    pub fn set_gates_target(&self, t: crate::decide::Target) {
+        *self.gates.lock().unwrap() = t;
+    }
+
+    /// The gates' threshold from the dashboard (kept across restarts); `None` goes back to map.toml's.
+    pub async fn set_gates_threshold(&self, t: Option<f64>) -> Result<()> {
+        if t.is_some_and(|t| !(t > 0.0 && t.is_finite())) {
+            bail!("the threshold must be a positive number");
+        }
+        self.store.set_runtime_setting("reflex.gates_threshold", t.map(|t| t.to_string()).as_deref()).await?;
+        self.gates.lock().unwrap().threshold = t.or(self.config.reflex.gates_threshold);
+        Ok(())
+    }
+
+    /// The gates corpus repo, seeded on first use.
+    pub async fn gates_corpus(&self) -> Result<PathBuf> {
+        let dir = self.gates_dir();
+        let repo_path = dir.join("corpus.git");
+        if !repo_path.exists() {
+            std::fs::create_dir_all(&dir)?;
+            crate::repo::init_bare(&repo_path).await?;
+            let seed: Vec<(String, Option<String>)> = crate::gates::SEED.iter().map(|(p, t)| (p.to_string(), Some(t.to_string()))).collect();
+            crate::repo::commit(&repo_path, &seed, "Seed the gates corpus").await?;
+        }
+        Ok(repo_path)
+    }
+
+    /// Seeds the gates corpus on first use, then (re)starts the gates Reflex.
+    pub async fn restart_gates(&self) -> Result<ReflexStatus> {
+        let dir = self.gates_dir();
+        let repo_path = self.gates_corpus().await?;
+        let (live, log) = (dir.join("corpus-live"), dir.join("reflex.log"));
+        let port = self.gates_target().port;
+        let status = self.reflex.restart(&self.config.reflex.binary, crate::gates::KEY, port, reflex::Paths { corpus_repo: &repo_path, corpus_live: &live, log: &log }).await;
+        let level = if status.state == crate::model::ReflexState::Error { Level::Warning } else { Level::Info };
+        self.event(level, "reflex.gates", None, None, format!("gates Reflex {:?} {}", status.state, status.message.lines().next().unwrap_or(""))).await;
+        Ok(status)
     }
 
     pub fn corpus_repo(&self, slug: &str) -> PathBuf {
@@ -351,6 +408,12 @@ impl Hub {
             && n > 0
         {
             self.max_parallel.store(n, Ordering::Relaxed);
+        }
+        if let Ok(Some(v)) = self.store.runtime_setting("reflex.gates_threshold").await
+            && let Ok(t) = v.parse::<f64>()
+            && t > 0.0
+        {
+            self.gates.lock().unwrap().threshold = Some(t);
         }
     }
 

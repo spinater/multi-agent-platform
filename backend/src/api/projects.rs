@@ -194,6 +194,42 @@ pub async fn reflex_log(State(hub): State<Arc<Hub>>, UrlPath(slug): UrlPath<Stri
     Ok(Json(json!({ "log": reflex::tail(&hub.reflex_log(&slug), 200).await })))
 }
 
+pub async fn thai(State(hub): State<Arc<Hub>>, UrlPath(slug): UrlPath<String>) -> ApiResult<crate::model::ThaiReport> {
+    let p = load(&hub, &slug).await?;
+    Ok(Json(crate::thai::report(&hub, &p).await?))
+}
+
+#[derive(Deserialize)]
+pub struct ThaiPreviewBody {
+    text: String,
+    /// Unsaved words to try with (the editor's current table); the saved ones when absent.
+    #[serde(default)]
+    words: Option<std::collections::BTreeMap<String, String>>,
+}
+
+pub async fn thai_preview(State(hub): State<Arc<Hub>>, UrlPath(slug): UrlPath<String>, Json(b): Json<ThaiPreviewBody>) -> ApiResult<crate::model::ThaiPreview> {
+    let p = load(&hub, &slug).await?;
+    let words = match b.words {
+        Some(w) => crate::thai::clean_words(w).map_err(|e| ApiError(StatusCode::BAD_REQUEST, format!("{e:#}")))?,
+        None => p.settings.thai_glossary.clone(),
+    };
+    Ok(Json(crate::thai::preview(&b.text.chars().take(4000).collect::<String>(), &words)))
+}
+
+#[derive(Deserialize)]
+pub struct ThaiWordsBody {
+    words: std::collections::BTreeMap<String, String>,
+}
+
+/// Replaces the project's Thai words.
+pub async fn thai_words(State(hub): State<Arc<Hub>>, UrlPath(slug): UrlPath<String>, Json(b): Json<ThaiWordsBody>) -> ApiResult<crate::model::ThaiReport> {
+    let mut p = load(&hub, &slug).await?;
+    p.settings.thai_glossary = crate::thai::clean_words(b.words).map_err(|e| ApiError(StatusCode::BAD_REQUEST, format!("{e:#}")))?;
+    hub.put_project(&p).await?;
+    hub.event(crate::model::Level::Info, "project.thai_words", None, None, format!("{slug}: {} Thai word(s) for Reflex", p.settings.thai_glossary.len())).await;
+    Ok(Json(crate::thai::report(&hub, &p).await?))
+}
+
 #[derive(Deserialize)]
 pub struct DecideBody {
     state: String,
@@ -451,6 +487,23 @@ pub async fn knowledge(State(hub): State<Arc<Hub>>, UrlPath(slug): UrlPath<Strin
 pub async fn knowledge_reindex(State(hub): State<Arc<Hub>>, UrlPath(slug): UrlPath<String>) -> ApiResult<crate::model::KnowledgeOverview> {
     let project = load(&hub, &slug).await?;
     Ok(Json(crate::knowledge::overview(&hub, &project, true).await?))
+}
+
+/// Accepts the knowledge suggestion: queues the setup task (once) and returns it.
+pub async fn knowledge_accept(State(hub): State<Arc<Hub>>, UrlPath(slug): UrlPath<String>) -> ApiResult<crate::model::Task> {
+    let project = load(&hub, &slug).await?;
+    Ok(Json(crate::knowledge::accept(&hub, &project).await?))
+}
+
+#[derive(Deserialize)]
+pub struct DismissBody {
+    dismissed: bool,
+}
+
+pub async fn knowledge_dismiss(State(hub): State<Arc<Hub>>, UrlPath(slug): UrlPath<String>, Json(b): Json<DismissBody>) -> ApiResult<crate::model::KnowledgeOverview> {
+    let project = load(&hub, &slug).await?;
+    crate::knowledge::dismiss(&hub, &slug, b.dismissed).await?;
+    Ok(Json(crate::knowledge::overview(&hub, &project, false).await?))
 }
 
 #[derive(Deserialize)]

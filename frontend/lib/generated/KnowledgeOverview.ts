@@ -4,6 +4,7 @@ import type { KnowledgeDoc } from "./KnowledgeDoc";
 import type { KnowledgeIssue } from "./KnowledgeIssue";
 import type { KnowledgeQuery } from "./KnowledgeQuery";
 import type { KnowledgeSettings } from "./KnowledgeSettings";
+import type { KnowledgeSuggestion } from "./KnowledgeSuggestion";
 import type { RulebookSize } from "./RulebookSize";
 import type { ScratchInfo } from "./ScratchInfo";
 
@@ -26,4 +27,8 @@ issues: Array<KnowledgeIssue>, rulebooks: Array<RulebookSize>, scratch: Array<Sc
 /**
  * Newest first.
  */
-recent_queries: Array<KnowledgeQuery>, };
+recent_queries: Array<KnowledgeQuery>, 
+/**
+ * Whether the project should set up its knowledge now, and what accepting does.
+ */
+suggestion: KnowledgeSuggestion, };

@@ -31,6 +31,14 @@ const fn k(kind: &'static str, from: N, to: N, level: Level, outcome: &'static s
 use Level::{Error as E, Info as I, Success as S, Warning as W};
 
 impl Kind {
+    // intake.rs: the project's intake gate, before any LLM sees the task.
+    pub const INTAKE_READY: Kind = k("decision.intake.ready", N::Intake, N::Ready, S, "Reflex: ready → queue");
+    pub const INTAKE_UNSURE: Kind = k("decision.intake.unsure", N::Intake, N::Ready, I, "Reflex unsure or not running → queue as before");
+    pub const INTAKE_UNCLEAR: Kind = k("decision.intake.unclear", N::Intake, N::Intake, W, "Reflex: too unclear to start · waiting for the owner");
+    pub const INTAKE_PLAN_FIRST: Kind = k("decision.intake.plan_first", N::Intake, N::Intake, W, "Reflex: plan it first · waiting for the owner");
+    pub const INTAKE_DUPLICATE: Kind = k("decision.intake.duplicate", N::Intake, N::Intake, W, "repeats a done task · waiting for the owner");
+    pub const INTAKE_SHARED: Kind = k("decision.intake.shared_files", N::Intake, N::Intake, I, "Reflex: changes shared files · runs alone, no analyst call");
+    pub const INTAKE_RELEASED: Kind = k("decision.intake.released", N::Intake, N::Ready, I, "the owner started it anyway → queue");
     // Orchestrator::tick: dependencies and worker slots.
     pub const READY_GO: Kind = k("decision.ready.go", N::Ready, N::Pick, I, "ready → pick provider");
     pub const READY_FULL: Kind = k("decision.ready.project_full", N::Ready, N::Ready, I, "project at its parallel limit · waiting");
@@ -117,6 +125,13 @@ impl Kind {
 }
 
 pub const ALL: &[Kind] = &[
+    Kind::INTAKE_READY,
+    Kind::INTAKE_UNSURE,
+    Kind::INTAKE_UNCLEAR,
+    Kind::INTAKE_PLAN_FIRST,
+    Kind::INTAKE_DUPLICATE,
+    Kind::INTAKE_SHARED,
+    Kind::INTAKE_RELEASED,
     Kind::READY_GO,
     Kind::READY_BLOCKED,
     Kind::READY_FULL,
@@ -187,7 +202,7 @@ pub async fn record(hub: &Hub, kind: Kind, task: &Task, detail: impl AsRef<str>)
         Err(err) => tracing::warn!(task = task.id, "reading the decision trace: {err:#}"),
     }
     // Before a launch, `task.session` is still the previous attempt's.
-    let fresh = matches!(kind.from, N::Ready | N::Pick) || kind.kind == Kind::LAUNCH_ERROR.kind;
+    let fresh = matches!(kind.from, N::Intake | N::Ready | N::Pick) || kind.kind == Kind::LAUNCH_ERROR.kind;
     let session = if fresh { None } else { task.session.as_deref() };
     hub.event(kind.level, kind.kind, session, Some(task.id), detail).await;
 }
@@ -251,6 +266,7 @@ fn edge(from: N, to: N, label: &str) -> DecisionEdge {
 pub fn model(hub: &Hub, tick_secs: u64) -> DecisionModel {
     let cfg = &hub.config.orchestrator;
     let nodes = vec![
+        point(N::Intake, "Intake", "Is the task ready for an agent, before any LLM sees it?", "with the project's intake gate on: a done task of the project with ≥ 70% the same text holds it (duplicate); then one Reflex call (Thai through the glossary) asks `intake` (ready | unclear | plan_first), plus `tier` and, in a shared folder with the analyst on, `shared_files`; a confident unclear or plan_first holds it for the owner (start anyway, edit or cancel), a confident shared_files runs it alone without the analyst; unsure or not running → on as before", "intake.rs · project reflex_gates.intake · orchestration/intake.md", false),
         point(N::Ready, "Ready?", "Are all depends_on tasks done, and is a worker slot free?", "every depends_on task is done && active < max_parallel (machine-wide, live) && the project's active tasks < parallel.max; in a shared-folder project a task starts beside running ones only when the parallel analyst cleared all of them as independent with disjoint paths; a failed or cancelled dependency blocks", "Orchestrator::tick · max_parallel · project parallel · parallel.rs", false),
         point(N::Pick, "Pick provider", "Which provider takes this task, with which model?", "task.provider if pinned, else the first of the project's providers (or provider_order) that is on PATH, not cooling down and under its session limit; with the project's tier gate on and no pinned model, a confident Reflex `tier` answer (light | standard | heavy) takes that provider's model from orchestrator.tiers, an unsure one keeps the usual model", "pick_provider() · tier_gate() · project settings · orchestrator.provider_order · orchestrator.tiers", false),
         point(N::Launch, "Launch", "Did the worker session start?", "hub.launch(LaunchRequest) returns Ok; an error cools the provider down for 5m", "start() · hub.launch", false),
@@ -267,6 +283,7 @@ pub fn model(hub: &Hub, tick_secs: u64) -> DecisionModel {
         point(N::Done, "Done", "Task is done.", "verified, audited (or accepted), hooks ran", "TaskStatus::Done", true),
     ];
     let edges = vec![
+        edge(N::Intake, N::Ready, "ready · unsure · started anyway"),
         edge(N::Ready, N::Pick, "deps done · slot free"),
         edge(N::Ready, N::Blocked, "dep failed"),
         edge(N::Pick, N::Launch, "first available"),

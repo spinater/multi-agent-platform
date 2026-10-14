@@ -42,4 +42,8 @@ knowledge: KnowledgeSettings,
 /**
  * How many of the project's tasks run at once, and who clears tasks to share one folder.
  */
-parallel: ProjectParallel, };
+parallel: ProjectParallel, 
+/**
+ * The project's own Thai words for Reflex (Thai → English, `-` for a word to skip), over the built-in glossary.
+ */
+thai_glossary: { [key in string]: string }, };

@@ -209,9 +209,52 @@ async fn ask_fallback(hub: &Hub, project: &Project, text: &str) -> Result<Reply>
     }
 }
 
-/// Reflex tokenises English only: Thai text (U+0E00–U+0E7F) never reaches it and goes to the fallback.
+/// Thai text (U+0E00–U+0E7F). Reflex tokenises English only, so Thai is glossed first (`for_reflex`).
 pub fn has_thai(text: &str) -> bool {
-    text.chars().any(|c| ('\u{0E00}'..='\u{0E7F}').contains(&c))
+    crate::thai::has_thai(text)
+}
+
+/// What Reflex is sent for a state and its questions: any Thai glossed into English words with the project's
+/// glossary (`thai.rs`); the questions' prompts, criteria and options too, so a Thai question still routes.
+pub struct ForReflex {
+    pub state: String,
+    pub questions: Vec<Question>,
+    /// The state's gloss when it has Thai.
+    pub thai: Option<crate::thai::Gloss>,
+}
+
+impl ForReflex {
+    /// Thai the glossary knows too little of: Reflex is not asked (the coverage, 0..1).
+    pub fn unreadable(&self) -> Option<f64> {
+        self.thai.as_ref().filter(|g| !g.readable()).map(|g| g.coverage())
+    }
+
+    /// "Thai read through the glossary (82% known): " for a readable Thai state, else "".
+    pub fn note(&self) -> String {
+        match &self.thai {
+            Some(g) if g.readable() => format!("Thai read through the glossary ({:.0}% known): ", g.coverage() * 100.0),
+            _ => String::new(),
+        }
+    }
+}
+
+pub fn for_reflex(project: &Project, state: &str, questions: &[Question]) -> ForReflex {
+    if !has_thai(state) && !questions.iter().any(|q| has_thai(&q.prompt) || q.criteria.as_deref().is_some_and(has_thai) || q.options.iter().flatten().any(|o| has_thai(o))) {
+        return ForReflex { state: state.to_string(), questions: questions.to_vec(), thai: None };
+    }
+    let g = crate::thai::Glossary::new(&project.settings.thai_glossary);
+    let english = |t: &str| if has_thai(t) { Some(crate::thai::gloss(t, &g).text).filter(|e| !e.trim().is_empty()).unwrap_or_else(|| t.to_string()) } else { t.to_string() };
+    let questions = questions
+        .iter()
+        .map(|q| Question {
+            prompt: english(&q.prompt),
+            criteria: q.criteria.as_deref().map(english),
+            options: q.options.as_ref().map(|o| o.iter().map(|x| english(x)).collect()),
+            ..q.clone()
+        })
+        .collect();
+    let thai = has_thai(state).then(|| crate::thai::gloss(state, &g));
+    ForReflex { state: thai.as_ref().map_or_else(|| state.to_string(), |t| t.text.clone()), questions, thai }
 }
 
 /// Confidence as the dashboard writes it: `2.1e-4`.
@@ -224,8 +267,8 @@ pub fn fmt_conf(c: f64) -> String {
 pub enum Gate {
     /// The caller asked for the fallback only.
     LlmOnly,
-    /// Thai input: Reflex was not asked.
-    Thai,
+    /// Thai the glossary knows too little of (the share it knew): Reflex was not asked.
+    Thai(f64),
     /// Reflex could not be asked.
     Unreachable,
     /// Reflex answered nothing (`outcome: null`).
@@ -251,7 +294,11 @@ impl Gate {
         };
         match self {
             Gate::LlmOnly => to("Fallback only was requested".into()),
-            Gate::Thai => to("Thai input: Reflex reads English only and was not asked".into()),
+            Gate::Thai(c) => to(format!(
+                "Thai input, only {:.0}% of it in the glossary (Reflex needs {:.0}%): Reflex was not asked",
+                c * 100.0,
+                crate::thai::MIN_COVERAGE * 100.0
+            )),
             Gate::Unreachable => to("Reflex is not reachable".into()),
             Gate::Abstained => to("Reflex abstained".into()),
             Gate::Shadow(c) => to(format!("Not calibrated: Reflex scored {} in shadow, but there is no threshold yet", fmt_conf(*c))),
@@ -263,12 +310,12 @@ impl Gate {
 }
 
 /// Reflex's verdict on one question, from its answer (`None` when Reflex was not asked or not reachable).
-pub fn gate(route: Route, thai: bool, threshold: Option<f64>, reflex_answer: &Value, confidence: Option<f64>, asked: bool) -> Gate {
+pub fn gate(route: Route, thai: Option<f64>, threshold: Option<f64>, reflex_answer: &Value, confidence: Option<f64>, asked: bool) -> Gate {
     if route == Route::Llm {
         return Gate::LlmOnly;
     }
-    if thai {
-        return Gate::Thai;
+    if let Some(coverage) = thai {
+        return Gate::Thai(coverage);
     }
     if !asked {
         return Gate::Unreachable;
@@ -287,14 +334,27 @@ pub fn gate(route: Route, thai: bool, threshold: Option<f64>, reflex_answer: &Va
     }
 }
 
+/// Which Reflex answers and from which confidence: the project's own, or the orchestrator gates' (`gates.rs`).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Target {
+    pub port: u16,
+    pub threshold: Option<f64>,
+}
+
 pub async fn decide(hub: &Hub, project: &Project, state: &str, questions: &[Question], route: Route) -> Result<DecideResponse> {
+    decide_at(hub, project, Target { port: project.port, threshold: project.threshold }, state, questions, route).await
+}
+
+/// `decide` against `target`; the decision is logged as the project's either way.
+pub async fn decide_at(hub: &Hub, project: &Project, target: Target, state: &str, questions: &[Question], route: Route) -> Result<DecideResponse> {
     validate_questions(questions)?;
     let started = Instant::now();
-    let thai = has_thai(state);
-    let (reflex, reflex_error) = if route == Route::Llm || thai {
+    let read = for_reflex(project, state, questions);
+    let thai = read.unreadable();
+    let (reflex, reflex_error) = if route == Route::Llm || thai.is_some() {
         (None, None)
     } else {
-        match hub.reflex.post(project.port, "/decide", &json!({ "state": state, "questions": questions })).await {
+        match hub.reflex.post(target.port, "/decide", &json!({ "state": read.state, "questions": read.questions })).await {
             Ok(v) => (Some(v), None),
             Err(err) => (None, Some(format!("{err:#}"))),
         }
@@ -310,20 +370,20 @@ pub async fn decide(hub: &Hub, project: &Project, state: &str, questions: &[Ques
         let confidence = r.as_ref().and_then(|a| a["confidence"].as_f64());
         let probabilities = r.as_ref().and_then(|a| serde_json::from_value::<Vec<f64>>(a["probabilities"].clone()).ok());
         let reflex_answer = r.as_ref().map_or(Value::Null, |a| decode(q, &a["outcome"]));
-        let g = gate(route, thai, project.threshold, &reflex_answer, confidence, r.is_some());
+        let g = gate(route, thai, target.threshold, &reflex_answer, confidence, r.is_some());
         let use_fallback = match route {
             Route::Llm => true,
             Route::Reflex | Route::ReflexGated => false,
             Route::Auto => !g.passes() && project.fallback != "none",
         };
-        let mut reason = g.reason(use_fallback.then_some(project.fallback.as_str()));
+        let mut reason = format!("{}{}", if route == Route::Llm { String::new() } else { read.note() }, g.reason(use_fallback.then_some(project.fallback.as_str())));
         // What the fallback is (or would have been) sent, recorded for every decision: the savings report prices a
         // reflex-lane answer by it.
         let text = prompt(state, q);
         let mut cost = DecisionCost {
             prompt_chars: Some(text.chars().count() as i64),
             fallback: Some(project.fallback.clone()),
-            skipped_thai: g == Gate::Thai,
+            skipped_thai: matches!(g, Gate::Thai(_)),
             ..DecisionCost::default()
         };
 
@@ -374,7 +434,7 @@ pub async fn decide(hub: &Hub, project: &Project, state: &str, questions: &[Ques
     hub.announce_project(&project.slug).await;
     Ok(DecideResponse {
         answers,
-        threshold: project.threshold,
+        threshold: target.threshold,
         reflex_reason: reflex.as_ref().and_then(|v| v["routing"]["reason"].as_str().map(String::from)),
         reflex_error,
         ms: started.elapsed().as_millis() as u64,
@@ -407,7 +467,8 @@ pub async fn fit(hub: &Hub, project: &Project, cases: &[(String, Question, Value
     let mut rows = vec![];
     for (state, q, expected) in cases {
         validate_questions(std::slice::from_ref(q))?;
-        let v = hub.reflex.post(project.port, "/decide", &json!({ "state": state, "questions": [q] })).await?;
+        let read = for_reflex(project, state, std::slice::from_ref(q));
+        let v = hub.reflex.post(project.port, "/decide", &json!({ "state": read.state, "questions": read.questions })).await?;
         let a = &v["answers"][0];
         let answer = decode(q, &a["outcome"]);
         let correct = !answer.is_null() && same(&answer, expected);
@@ -488,31 +549,31 @@ mod tests {
         assert!(!has_thai("Replica lag 45s on db-2, primary CPU at 95%"));
         assert!(!has_thai("café ünïcode 日本語"));
         let answer = json!("billing");
-        let g = gate(Route::Auto, true, Some(1e-4), &answer, Some(5e-4), true);
-        assert_eq!(g, Gate::Thai);
+        let g = gate(Route::Auto, Some(0.3), Some(1e-4), &answer, Some(5e-4), true);
+        assert_eq!(g, Gate::Thai(0.3));
         assert!(!g.passes());
-        assert_eq!(g.reason(Some("claude")), "Thai input: Reflex reads English only and was not asked, so it went to claude.");
-        assert_eq!(gate(Route::Reflex, true, None, &Value::Null, None, false), Gate::Thai);
+        assert_eq!(g.reason(Some("claude")), "Thai input, only 30% of it in the glossary (Reflex needs 60%): Reflex was not asked, so it went to claude.");
+        assert_eq!(gate(Route::Reflex, Some(0.0), None, &Value::Null, None, false), Gate::Thai(0.0));
     }
 
     #[test]
     fn gate_follows_threshold_and_route() {
         let a = json!("billing");
-        assert_eq!(gate(Route::Auto, false, Some(1e-4), &a, Some(2.1e-4), true), Gate::Above(2.1e-4, 1e-4));
-        assert!(gate(Route::Auto, false, Some(1e-4), &a, Some(2.1e-4), true).passes());
-        assert_eq!(gate(Route::Auto, false, Some(1e-4), &a, Some(3e-5), true), Gate::Below(3e-5, 1e-4));
+        assert_eq!(gate(Route::Auto, None, Some(1e-4), &a, Some(2.1e-4), true), Gate::Above(2.1e-4, 1e-4));
+        assert!(gate(Route::Auto, None, Some(1e-4), &a, Some(2.1e-4), true).passes());
+        assert_eq!(gate(Route::Auto, None, Some(1e-4), &a, Some(3e-5), true), Gate::Below(3e-5, 1e-4));
         // Not calibrated: shadow mode, never passes.
-        let shadow = gate(Route::Auto, false, None, &a, Some(2e-4), true);
+        let shadow = gate(Route::Auto, None, None, &a, Some(2e-4), true);
         assert_eq!(shadow, Gate::Shadow(2e-4));
         assert!(!shadow.passes());
-        assert_eq!(gate(Route::Auto, false, Some(1e-4), &Value::Null, Some(9e-4), true), Gate::Abstained);
-        assert_eq!(gate(Route::Auto, false, Some(1e-4), &Value::Null, None, false), Gate::Unreachable);
-        assert!(gate(Route::Reflex, false, None, &a, Some(1e-5), true).passes());
-        assert_eq!(gate(Route::Llm, false, Some(1e-4), &a, Some(1e-3), true), Gate::LlmOnly);
+        assert_eq!(gate(Route::Auto, None, Some(1e-4), &Value::Null, Some(9e-4), true), Gate::Abstained);
+        assert_eq!(gate(Route::Auto, None, Some(1e-4), &Value::Null, None, false), Gate::Unreachable);
+        assert!(gate(Route::Reflex, None, None, &a, Some(1e-5), true).passes());
+        assert_eq!(gate(Route::Llm, None, Some(1e-4), &a, Some(1e-3), true), Gate::LlmOnly);
         // The orchestrator's gates: the threshold applies, and without one Reflex only scores in shadow.
-        assert!(gate(Route::ReflexGated, false, Some(1e-4), &a, Some(2e-4), true).passes());
-        assert!(!gate(Route::ReflexGated, false, Some(1e-4), &a, Some(3e-5), true).passes());
-        assert!(!gate(Route::ReflexGated, false, None, &a, Some(0.9), true).passes());
+        assert!(gate(Route::ReflexGated, None, Some(1e-4), &a, Some(2e-4), true).passes());
+        assert!(!gate(Route::ReflexGated, None, Some(1e-4), &a, Some(3e-5), true).passes());
+        assert!(!gate(Route::ReflexGated, None, None, &a, Some(0.9), true).passes());
         assert_eq!(Gate::Above(2.13e-4, 1e-4).reason(None), "Confidence 2.1e-4 is at or above the threshold 1.0e-4: answered locally, no LLM call.");
         assert_eq!(Gate::Below(3e-5, 1e-4).reason(None), "Confidence 3.0e-5 is below the threshold 1.0e-4, and no fallback was asked.");
     }

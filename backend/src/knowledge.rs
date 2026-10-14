@@ -22,7 +22,7 @@ use sqlx::Row;
 use crate::hub::Hub;
 use crate::model::{
     KindCount, KnowledgeCheck, KnowledgeDoc, KnowledgeDocBody, KnowledgeHit, KnowledgeIssue, KnowledgeKind, KnowledgeOverview, KnowledgeQuery,
-    KnowledgeSearch, KnowledgeSettings, Level, PlanStatus, Project, RulebookSize, ScratchInfo, TaskStatus,
+    KnowledgeSearch, KnowledgeSettings, Level, PlanStatus, Project, KnowledgeStats, KnowledgeSuggestion, RulebookSize, ScratchInfo, SuggestVerdict, TaskStatus,
 };
 
 /// An index younger than this is used as it is.
@@ -379,6 +379,7 @@ pub async fn overview(hub: &Hub, project: &Project, force: bool) -> Result<Knowl
         tokio::task::spawn_blocking(move || health(&root, &s, &docs, &commit_times)).await?
     };
     let index_path = root.join(&s.index).is_file().then(|| s.index.clone());
+    let suggestion = suggest(hub, project, &root, &s).await;
     Ok(KnowledgeOverview {
         slug: project.slug.clone(),
         root: root.display().to_string(),
@@ -391,7 +392,183 @@ pub async fn overview(hub: &Hub, project: &Project, force: bool) -> Result<Knowl
         rulebooks,
         scratch,
         recent_queries: recent_queries(hub, &project.slug, 50).await,
+        suggestion,
     })
+}
+
+// ---- should the project have knowledge yet?
+
+/// A project this big or this busy gets the suggestion to set up its knowledge.
+pub const SUGGEST_FILES: u32 = 30;
+pub const SUGGEST_LINES: u64 = 3000;
+pub const SUGGEST_DONE: u32 = 3;
+pub const SUGGEST_DOCS: u32 = 10;
+const CODE: &[&str] = &[
+    "rs", "ts", "tsx", "js", "jsx", "mjs", "py", "go", "java", "kt", "swift", "rb", "php", "cs", "c", "h", "cpp", "hpp", "vue", "svelte", "dart", "scala", "ex",
+    "exs", "sql", "sh", "css", "scss", "html", "prisma", "proto",
+];
+const SCAN_FILES: u32 = 20_000;
+
+/// Counts source files and lines under `root` (build, dependency and scratch folders skipped).
+fn source_stats(root: &Path, s: &KnowledgeSettings) -> (u32, u64) {
+    let scratch: HashSet<PathBuf> = s.scratch.iter().filter(|p| relative_ok(p)).map(|p| root.join(p)).collect();
+    let (mut files, mut lines) = (0u32, 0u64);
+    let mut stack = vec![root.to_path_buf()];
+    while let Some(dir) = stack.pop() {
+        let Ok(entries) = std::fs::read_dir(&dir) else { continue };
+        for e in entries.flatten() {
+            let Ok(t) = e.file_type() else { continue };
+            let path = e.path();
+            let name = e.file_name().to_string_lossy().to_string();
+            if t.is_dir() {
+                if !SKIP_DIRS.contains(&name.as_str()) && !name.starts_with('.') && !scratch.contains(&path) {
+                    stack.push(path);
+                }
+            } else if t.is_file() && path.extension().is_some_and(|x| CODE.contains(&x.to_string_lossy().to_lowercase().as_str())) {
+                files += 1;
+                if e.metadata().is_ok_and(|m| m.len() < 2_000_000)
+                    && let Ok(text) = std::fs::read(&path)
+                {
+                    lines += text.iter().filter(|b| **b == b'\n').count() as u64;
+                }
+                if files >= SCAN_FILES {
+                    return (files, lines);
+                }
+            }
+        }
+    }
+    (files, lines)
+}
+
+fn runtime_key(slug: &str, what: &str) -> String {
+    format!("knowledge.{slug}.{what}")
+}
+
+/// What accepting the suggestion does, in order (the steps of `bootstrap_prompt`).
+pub fn plan(s: &KnowledgeSettings) -> Vec<String> {
+    let dir = Path::new(&s.index).parent().map(|p| p.display().to_string()).unwrap_or_default();
+    vec![
+        "MAP queues one task for an agent in this project (you see it on the board; nothing is written before it runs).".into(),
+        "The agent surveys the code, the docs, the requirements and the past tasks in MAP's memory.".into(),
+        format!("It writes one card per area in {dir}/domain/ (business rules) and {dir}/ops/ (running, deploying, debugging): 40–120 lines, at most {}, each with `sources:` listing the files it summarises.", s.card_line_cap),
+        format!("It writes {} with the conventions and one row per card.", s.index),
+        format!("It points CLAUDE.md / AGENTS.md at the index (read it first) and moves long sections out of them into cards, keeping each under {} KB.", s.rulebook_byte_warn / 1000),
+        "One commit, verified like any task. From then on every agent searches the knowledge before it starts, and this screen checks it for stale cards.".into(),
+    ]
+}
+
+/// The setup task's prompt: MAP's knowledge practice (the team-process conventions).
+pub fn bootstrap_prompt(s: &KnowledgeSettings) -> String {
+    let dir = Path::new(&s.index).parent().map(|p| p.display().to_string()).unwrap_or_default();
+    format!(
+        "Set up this project's knowledge, following MAP's knowledge practice.\n\n\
+         1. Survey: read the README, `docs/`, `.docs/`, `tasks/`, the rulebooks ({rulebooks}) and the code's top-level layout. Search MAP's memory of past tasks \
+         and their outcomes: `curl -s -G -H \"Authorization: Bearer $MAP_PROJECT_TOKEN\" \"$MAP_KNOWLEDGE_URL/search\" --data-urlencode \"q=<area>\" --data-urlencode kind=memory`.\n\
+         2. Cards: write one card per area an agent would need to understand before changing it. Business rules and domain concepts go in `{dir}/domain/`, \
+         running, deploying, configuring and debugging in `{dir}/ops/`. A card is a curated map, 40–120 lines and never more than {cap}: what the area does, \
+         where it lives, the rules and the traps (from past tasks' failures too). It points at code and docs; it never restates a schema or copies code. \
+         Every card starts with\n---\nsources:\n  - <files or folders it summarises>\n---\n# <Title>\n\
+         3. Index: write `{index}` with a short Conventions section (the rules above, plus: a commit that changes a card's sources updates the card in the same \
+         commit; a card that outgrows the cap is split, never silently cut) and a `## Cards` table with one row per card: `| [Title](domain/file.md) | one-line scope |`.\n\
+         4. Rulebooks: add near the top of each rulebook that exists a line telling agents to read `{index}` first and to search `$MAP_KNOWLEDGE_URL` before \
+         grepping. If a rulebook is over {warn} bytes, move its long reference sections into cards and leave a one-line pointer; keep the rules themselves.\n\
+         5. Do not touch code, do not copy secrets or credentials into any card, and commit everything in one commit.",
+        rulebooks = s.rulebooks.join(", "),
+        index = s.index,
+        cap = s.card_line_cap,
+        warn = s.rulebook_byte_warn,
+    )
+}
+
+pub const BOOTSTRAP_TITLE: &str = "Set up the project's knowledge";
+
+async fn suggest(hub: &Hub, project: &Project, root: &Path, s: &KnowledgeSettings) -> KnowledgeSuggestion {
+    let docs = docs(hub, &project.slug).await.unwrap_or_default();
+    let cards = docs.iter().filter(|d| d.kind == KnowledgeKind::Card && d.path != s.index).count() as u32;
+    let doc_count = docs.iter().filter(|d| matches!(d.kind, KnowledgeKind::Doc | KnowledgeKind::Requirement | KnowledgeKind::Task)).count() as u32;
+    let rulebook_bytes = s.rulebooks.iter().filter(|r| relative_ok(r)).filter_map(|r| std::fs::metadata(root.join(r)).ok()).map(|m| m.len()).max().unwrap_or(0);
+    let tasks = hub.store.tasks().await.unwrap_or_default();
+    let done_tasks = tasks.iter().filter(|t| t.project.as_deref() == Some(project.slug.as_str()) && t.status == TaskStatus::Done).count() as u32;
+    let (source_files, source_lines) = {
+        let (root, s) = (root.to_path_buf(), s.clone());
+        tokio::task::spawn_blocking(move || source_stats(&root, &s)).await.unwrap_or((0, 0))
+    };
+    let stats = KnowledgeStats { source_files, source_lines, done_tasks, docs: doc_count, cards, rulebook_bytes };
+    let task_id = hub.store.runtime_setting(&runtime_key(&project.slug, "bootstrap_task")).await.ok().flatten().and_then(|v| v.parse::<i64>().ok());
+    let task = match task_id {
+        Some(id) => tasks.iter().find(|t| t.id == id),
+        None => None,
+    };
+    let dismissed = hub.store.runtime_setting(&runtime_key(&project.slug, "dismissed")).await.ok().flatten().is_some();
+    let plan = plan(s);
+    let has_index = root.join(&s.index).is_file();
+    let mk = |verdict, reasons: Vec<String>| KnowledgeSuggestion { verdict, reasons, stats: stats.clone(), plan: plan.clone(), task: task.map(|t| t.id) };
+
+    if has_index {
+        return mk(SuggestVerdict::InUse, vec![format!("{} card(s) in {}; agents search them before they start.", cards, s.index)]);
+    }
+    if let Some(t) = task.filter(|t| !t.status.is_terminal() || t.status == TaskStatus::Done) {
+        return mk(SuggestVerdict::InProgress, vec![format!("Task #{} is setting it up ({}).", t.id, t.status.as_str())]);
+    }
+    let mut why = vec![];
+    if source_files >= SUGGEST_FILES {
+        why.push(format!("{source_files} source files ({source_lines} lines): more than an agent can read before each task."));
+    } else if source_lines >= SUGGEST_LINES {
+        why.push(format!("{source_lines} lines of source: more than an agent can read before each task."));
+    }
+    if done_tasks >= SUGGEST_DONE {
+        why.push(format!("{done_tasks} tasks done: what they learned is only in MAP's memory, not in the repo where agents look first."));
+    }
+    if doc_count >= SUGGEST_DOCS {
+        why.push(format!("{doc_count} docs with no index: agents grep them instead of reading a map."));
+    }
+    if rulebook_bytes > s.rulebook_byte_warn {
+        why.push(format!("The largest rulebook is {} KB (budget {} KB) and is sent with every request: cards can hold its reference parts.", rulebook_bytes / 1000, s.rulebook_byte_cap / 1000));
+    }
+    if why.is_empty() {
+        return mk(
+            SuggestVerdict::NotYet,
+            vec![format!(
+                "Still small: {source_files} source files, {source_lines} lines, {done_tasks} tasks done. Cards would cost more than they save; MAP suggests it again from {SUGGEST_FILES} files, {SUGGEST_LINES} lines or {SUGGEST_DONE} tasks done."
+            )],
+        );
+    }
+    if dismissed {
+        return mk(SuggestVerdict::Dismissed, why);
+    }
+    mk(SuggestVerdict::Recommended, why)
+}
+
+/// Accepting the suggestion: queues the setup task (once) and returns it.
+pub async fn accept(hub: &Hub, project: &Project) -> Result<crate::model::Task> {
+    let key = runtime_key(&project.slug, "bootstrap_task");
+    if let Some(id) = hub.store.runtime_setting(&key).await?.and_then(|v| v.parse::<i64>().ok())
+        && let Some(t) = hub.store.task(id).await?
+        && !matches!(t.status, TaskStatus::Failed | TaskStatus::Cancelled)
+    {
+        return Ok(t);
+    }
+    let task = hub
+        .store
+        .create_task(crate::store::NewTask {
+            title: BOOTSTRAP_TITLE.into(),
+            prompt: bootstrap_prompt(&project.settings.knowledge),
+            depends_on: vec![],
+            provider: None,
+            model: None,
+            project: Some(project.slug.clone()),
+        })
+        .await?;
+    hub.store.set_runtime_setting(&key, Some(&task.id.to_string())).await?;
+    hub.store.set_runtime_setting(&runtime_key(&project.slug, "dismissed"), None).await?;
+    hub.announce_task(&task);
+    hub.event(Level::Info, "task.created", None, Some(task.id), format!("Task #{} created: {} (knowledge suggestion accepted)", task.id, task.title)).await;
+    Ok(task)
+}
+
+/// "Not now" (or undo it).
+pub async fn dismiss(hub: &Hub, slug: &str, dismissed: bool) -> Result<()> {
+    hub.store.set_runtime_setting(&runtime_key(slug, "dismissed"), dismissed.then_some("1")).await
 }
 
 /// Each path's latest commit time, from one `git log` over the recent history (newest first, so the first time a
@@ -438,18 +615,7 @@ fn health(root: &Path, s: &KnowledgeSettings, docs: &[KnowledgeDoc], times: &Has
     let conventions = format!("Follow the card conventions in `{}` (frontmatter `sources:` lists the files a card summarises; at most {} lines).", s.index, s.card_line_cap);
 
     if !root.join(&s.index).is_file() {
-        let fix = (
-            "Set up the knowledge index".to_string(),
-            format!(
-                "This project has no knowledge index at `{index}`. Create it: survey the repo's docs, requirements and code areas, then write one card per \
-                 area under `{dir}/` (40–120 lines each, at most {cap}), each starting with a frontmatter block\n---\nsources:\n  - <files the card summarises>\n---\n\
-                 and a `# Title`. Write `{index}` as a table with one row per card (link + one-line scope) and a short note on the conventions. Never restate a \
-                 schema or code; point to it. Add a line to CLAUDE.md / AGENTS.md telling agents to read `{index}` first. Commit it all in one commit.",
-                index = s.index,
-                dir = Path::new(&s.index).parent().map(|p| p.display().to_string()).unwrap_or_default(),
-                cap = s.card_line_cap
-            ),
-        );
+        let fix = ("Set up the knowledge index".to_string(), bootstrap_prompt(s));
         out.push(issue(Level::Info, KnowledgeCheck::NoIndex, &s.index, format!("No knowledge index at {}: agents have no map of the project's knowledge.", s.index), Some(fix)));
     }
 
@@ -837,5 +1003,57 @@ mod tests {
         let body = doc(&hub, &project, &format!("map://tasks/{}", t.id)).await.unwrap().unwrap().body;
         assert!(body.contains("## Outcome") && body.contains("uniqueness"), "{body}");
         assert!(doc(&hub, &project, "../../etc/passwd").await.unwrap().is_none(), "only indexed paths are readable");
+    }
+
+    #[tokio::test]
+    async fn suggests_knowledge_once_the_project_is_big_enough() {
+        let dir = tempfile::tempdir().unwrap();
+        let text = format!(
+            "[projects]\npath = \"{0}\"\n[workspace]\ndir = \"{0}\"\n[server]\ndata_dir = \"{0}/data\"\n[reflex]\nbinary = \"/nonexistent/reflex\"\n",
+            dir.path().display()
+        );
+        let config = crate::config::Config::parse(&text, Path::new("/")).unwrap();
+        let hub = Hub::new(config, crate::store::Store::memory().await.unwrap(), Arc::new(crate::terminal::fake::FakeTerminal::default()));
+        let root = dir.path().join("shop");
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::write(root.join("src/main.rs"), "fn main() {}\n").unwrap();
+        let settings = crate::model::ProjectSettings {
+            source: crate::model::ProjectSource { kind: crate::model::SourceKind::Local, location: Some(root.display().to_string()), ..Default::default() },
+            ..Default::default()
+        };
+        let new = crate::projects::NewProject { name: "Shop".into(), slug: None, description: String::new(), fallback: Some("none".into()), model: None };
+        let (project, _) = crate::projects::create_with(&hub, new, settings).await.unwrap();
+
+        let s = overview(&hub, &project, true).await.unwrap().suggestion;
+        assert_eq!(s.verdict, SuggestVerdict::NotYet, "{:?}", s.reasons);
+        assert_eq!((s.stats.source_files, s.stats.source_lines), (1, 1));
+        assert!(s.reasons[0].starts_with("Still small"));
+
+        // Big enough (build output and node_modules do not count).
+        for i in 0..SUGGEST_FILES {
+            std::fs::write(root.join(format!("src/m{i}.rs")), "fn f() {}\n".repeat(5)).unwrap();
+        }
+        std::fs::create_dir_all(root.join("node_modules/x")).unwrap();
+        std::fs::write(root.join("node_modules/x/i.js"), "x").unwrap();
+        let s = overview(&hub, &project, true).await.unwrap().suggestion;
+        assert_eq!(s.verdict, SuggestVerdict::Recommended);
+        assert_eq!(s.stats.source_files, SUGGEST_FILES + 1);
+        assert!(s.reasons[0].contains("source files") && s.plan.len() == 6, "{:?}", s.reasons);
+
+        dismiss(&hub, &project.slug, true).await.unwrap();
+        assert_eq!(overview(&hub, &project, false).await.unwrap().suggestion.verdict, SuggestVerdict::Dismissed);
+
+        // Accept: one task with MAP's practice, once.
+        let t = accept(&hub, &project).await.unwrap();
+        assert_eq!((t.title.as_str(), t.project.as_deref()), (BOOTSTRAP_TITLE, Some(project.slug.as_str())));
+        assert!(t.prompt.contains("sources:") && t.prompt.contains(".docs/knowledge/index.md") && t.prompt.contains("$MAP_KNOWLEDGE_URL"));
+        assert_eq!(accept(&hub, &project).await.unwrap().id, t.id);
+        let s = overview(&hub, &project, false).await.unwrap().suggestion;
+        assert_eq!((s.verdict, s.task), (SuggestVerdict::InProgress, Some(t.id)));
+
+        // The index is there: in use.
+        std::fs::create_dir_all(root.join(".docs/knowledge")).unwrap();
+        std::fs::write(root.join(".docs/knowledge/index.md"), "# Knowledge index\n").unwrap();
+        assert_eq!(overview(&hub, &project, true).await.unwrap().suggestion.verdict, SuggestVerdict::InUse);
     }
 }

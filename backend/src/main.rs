@@ -7,6 +7,7 @@ mod detect;
 mod gates;
 mod git_access;
 mod hub;
+mod intake;
 mod knowledge;
 mod login;
 mod model;
@@ -26,6 +27,7 @@ mod skills;
 mod store;
 mod templates;
 mod terminal;
+mod thai;
 mod trust;
 mod updates;
 mod usage;
@@ -124,6 +126,14 @@ async fn serve(config: Config) -> Result<()> {
     tokio::spawn(orchestrator::run(hub.clone()));
     tokio::spawn(usage::run(hub.clone()));
     tokio::spawn(updates::run(hub.clone()));
+    {
+        let hub = hub.clone();
+        tokio::spawn(async move {
+            if let Err(err) = hub.restart_gates().await {
+                tracing::warn!("gates reflex: {err:#}");
+            }
+        });
+    }
     for project in hub.store.projects().await? {
         let hub = hub.clone();
         tokio::spawn(async move {

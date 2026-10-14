@@ -245,6 +245,13 @@ pub struct ReflexConfig {
     /// Tokens added to every call of a fallback (`api`, or a provider name) in the savings report, both saved and
     /// spent: a headless CLI's own system prompt, which its output does not report. Missing: 0.
     pub fallback_overhead_tokens: BTreeMap<String, u64>,
+    /// The orchestrator gates' own Reflex (one for every project, `<data_dir>/gates/corpus.git`); unset: the port
+    /// just below `port_base`.
+    pub gates_port: Option<u16>,
+    /// The confidence from which the gates Reflex's answer is used; below it a gate does what it did before. Unset
+    /// (the default): shadow, every gate answer is logged on the projects' Reflex screens but none is acted on, until
+    /// a threshold is set from the confidences of answers that were right. Set live in Settings → Reflex gates.
+    pub gates_threshold: Option<f64>,
 }
 
 impl Default for ReflexConfig {
@@ -257,6 +264,8 @@ impl Default for ReflexConfig {
             api_format: ApiFormat::Anthropic,
             api_url: None,
             fallback_overhead_tokens: BTreeMap::new(),
+            gates_port: None,
+            gates_threshold: None,
         }
     }
 }

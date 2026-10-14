@@ -8,7 +8,7 @@ use anyhow::{Context, Result, bail};
 use chrono::Utc;
 use serde_json::{Value, json};
 
-use crate::decide::{self, has_thai, same};
+use crate::decide::{self, same};
 use crate::hub::Hub;
 use crate::model::{ArchiveResult, CaseScore, DecisionFeedback, FitResult, Project, Question, QuestionKind, ReflexCase, RepoFile};
 use crate::{reflex, repo};
@@ -54,7 +54,8 @@ fn question<'a>(project: &'a Project, id: &str) -> Result<&'a Question> {
 
 /// Runs one case through Reflex alone, never the fallback.
 async fn score(hub: &Hub, project: &Project, q: &Question, text: &str, expected: &Value) -> Result<CaseScore> {
-    let v = hub.reflex.post(project.port, "/decide", &json!({ "state": text, "questions": [q] })).await?;
+    let read = decide::for_reflex(project, text, std::slice::from_ref(q));
+    let v = hub.reflex.post(project.port, "/decide", &json!({ "state": read.state, "questions": read.questions })).await?;
     let a = &v["answers"][0];
     let answer = decide::decode(q, &a["outcome"]);
     let correct = !answer.is_null() && same(&answer, expected);
@@ -74,8 +75,13 @@ pub async fn add_cases(hub: &Hub, project: &Project, cases: Vec<NewCase>) -> Res
         if text.is_empty() {
             bail!("a case needs a message");
         }
-        if has_thai(&text) {
-            bail!("Thai input always goes to the LLM, so it cannot calibrate Reflex: `{}`", text.chars().take(40).collect::<String>());
+        if let Some(g) = decide::for_reflex(project, &text, std::slice::from_ref(q)).thai.filter(|g| !g.readable()) {
+            bail!(
+                "only {:.0}% of this Thai is in the glossary, so Reflex cannot read it (add its words under Thai words: {}): `{}`",
+                g.coverage() * 100.0,
+                g.unknown.iter().take(5).cloned().collect::<Vec<_>>().join(", "),
+                text.chars().take(40).collect::<String>()
+            );
         }
         rows.push((q.id.clone(), text, parse_expected(q, &c.expected)?));
     }
@@ -147,7 +153,8 @@ pub async fn feedback(hub: &Hub, project: &Project, id: i64, correct: bool, expe
     decision.feedback = Some(correct);
 
     let saved = project.questions.iter().any(|x| x.id == q.id);
-    let case = if add_case && saved && !has_thai(&decision.state) {
+    let readable = decide::for_reflex(project, &decision.state, std::slice::from_ref(&q)).unreadable().is_none();
+    let case = if add_case && saved && readable {
         add_cases(hub, project, vec![NewCase { question_id: q.id.clone(), text: decision.state.clone(), expected: expected.clone() }]).await?.pop()
     } else {
         None
@@ -157,7 +164,9 @@ pub async fn feedback(hub: &Hub, project: &Project, id: i64, correct: bool, expe
     if let (false, Some(p)) = (decision.reflex_answer.is_null(), decision.confidence) {
         let outcome = same(&decision.reflex_answer, &expected);
         reflex_outcome = Some(outcome);
-        match hub.reflex.post(project.port, "/feedback", &json!({ "p": p, "outcome": outcome })).await {
+        // A gate question was answered by the gates Reflex: its calibrator learns.
+        let port = if crate::gates::is_gate(&q.id) { hub.gates_target().port } else { project.port };
+        match hub.reflex.post(port, "/feedback", &json!({ "p": p, "outcome": outcome })).await {
             Ok(v) => refit = v["refit"].as_bool().unwrap_or(false),
             Err(err) => reflex_error = Some(format!("{err:#}")),
         }

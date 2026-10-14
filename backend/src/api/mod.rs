@@ -17,7 +17,7 @@ use axum::http::{HeaderMap, StatusCode};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
 use axum::extract::DefaultBodyLimit;
-use axum::routing::{any, get, post};
+use axum::routing::{any, get, post, put};
 use axum::{Json, Router};
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -64,6 +64,9 @@ pub fn router(hub: Arc<Hub>) -> Router {
         .route("/tasks", get(tasks).post(create_task))
         .route("/tasks/{id}", axum::routing::patch(update_task).delete(delete_task))
         .route("/orchestrator", get(orchestrator).post(set_orchestrator))
+        .route("/gates", get(gates_info).post(set_gates))
+        .route("/gates/restart", post(restart_gates))
+        .route("/gates/file", get(gates_file).put(put_gates_file))
         // ---- command centre
         .route("/pipeline", get(pipeline))
         .route("/projects", get(projects::list).post(projects::create))
@@ -73,6 +76,9 @@ pub fn router(hub: Arc<Hub>) -> Router {
         .route("/projects/{slug}/reflex/restart", post(projects::restart))
         .route("/projects/{slug}/reflex/log", get(projects::reflex_log))
         .route("/projects/{slug}/decide", post(projects::decide))
+        .route("/projects/{slug}/thai", get(projects::thai))
+        .route("/projects/{slug}/thai/preview", post(projects::thai_preview))
+        .route("/projects/{slug}/thai/words", put(projects::thai_words))
         .route("/projects/{slug}/feedback", post(projects::feedback))
         .route("/projects/{slug}/fit", post(projects::fit))
         .route("/projects/{slug}/decisions", get(projects::decisions))
@@ -102,6 +108,8 @@ pub fn router(hub: Arc<Hub>) -> Router {
         .route("/projects/{slug}/scopes", post(projects::scopes))
         .route("/projects/{slug}/knowledge", get(projects::knowledge))
         .route("/projects/{slug}/knowledge/reindex", post(projects::knowledge_reindex))
+        .route("/projects/{slug}/knowledge/accept", post(projects::knowledge_accept))
+        .route("/projects/{slug}/knowledge/dismiss", post(projects::knowledge_dismiss))
         .route("/projects/{slug}/knowledge/search", get(projects::knowledge_search))
         .route("/projects/{slug}/knowledge/doc", get(projects::knowledge_doc))
         .route("/providers/{name}/login", get(projects::login_state).post(projects::login_start))
@@ -425,6 +433,10 @@ enum TaskAction {
     SendBack,
     /// Removes the task's worktree and branch; a task in review or failed becomes cancelled.
     Discard,
+    /// A task the intake gate holds (unclear, plan first, duplicate): start it as it is.
+    StartAnyway,
+    /// A pending task: the note is added to its prompt and the intake gate looks again.
+    Clarify,
 }
 
 #[derive(Deserialize)]
@@ -442,6 +454,8 @@ async fn update_task(State(hub): State<Arc<Hub>>, UrlPath(id): UrlPath<i64>, Jso
         TaskAction::PullRequest => Orchestrator::land_now(&hub, id, crate::model::LandMode::PullRequest).await.map_err(conflict)?,
         TaskAction::SendBack => Orchestrator::send_back(&hub, id, body.note.as_deref()).await.map_err(conflict)?,
         TaskAction::Discard => Orchestrator::discard(&hub, id).await.map_err(conflict)?,
+        TaskAction::StartAnyway => crate::intake::start_anyway(&hub, id).await.map_err(conflict)?,
+        TaskAction::Clarify => crate::intake::clarify(&hub, id, body.note.as_deref().unwrap_or_default()).await.map_err(conflict)?,
     };
     Ok(Json(task))
 }
@@ -456,6 +470,77 @@ async fn delete_task(State(hub): State<Arc<Hub>>, UrlPath(id): UrlPath<i64>) -> 
     hub.store.delete_task(id).await?;
     hub.announce_task_removed(id);
     Ok(Json(json!({ "ok": true })))
+}
+
+async fn gates_info_of(hub: &Hub) -> Result<crate::model::GatesInfo, ApiError> {
+    let t = hub.gates_target();
+    let files = match hub.gates_corpus().await {
+        Ok(repo) => crate::repo::files(&repo).await.unwrap_or_default(),
+        Err(_) => vec![],
+    };
+    let projects = hub.store.projects().await?.into_iter().filter(|p| p.settings.reflex_gates.any()).map(|p| p.slug).collect();
+    Ok(crate::model::GatesInfo {
+        status: hub.reflex.status(crate::gates::KEY),
+        port: t.port,
+        threshold: t.threshold,
+        config_threshold: hub.config.reflex.gates_threshold,
+        files,
+        projects,
+    })
+}
+
+async fn gates_info(State(hub): State<Arc<Hub>>) -> ApiResult<crate::model::GatesInfo> {
+    Ok(Json(gates_info_of(&hub).await?))
+}
+
+#[derive(Deserialize)]
+struct SetGates {
+    /// The gates' threshold; `null` goes back to map.toml's (unset there: shadow).
+    threshold: Option<f64>,
+}
+
+async fn set_gates(State(hub): State<Arc<Hub>>, Json(b): Json<SetGates>) -> ApiResult<crate::model::GatesInfo> {
+    hub.set_gates_threshold(b.threshold).await.map_err(|e| ApiError(StatusCode::BAD_REQUEST, format!("{e:#}")))?;
+    hub.event(Level::Info, "reflex.gates", None, None, format!("gates threshold {}", hub.gates_target().threshold.map_or("none (shadow)".into(), crate::decide::fmt_conf))).await;
+    Ok(Json(gates_info_of(&hub).await?))
+}
+
+async fn restart_gates(State(hub): State<Arc<Hub>>) -> ApiResult<crate::model::GatesInfo> {
+    hub.restart_gates().await?;
+    Ok(Json(gates_info_of(&hub).await?))
+}
+
+#[derive(Deserialize)]
+struct GatesPath {
+    path: String,
+}
+
+async fn gates_file(State(hub): State<Arc<Hub>>, Query(q): Query<GatesPath>) -> ApiResult<Value> {
+    crate::projects::validate_corpus_path(&q.path).map_err(|e| ApiError(StatusCode::BAD_REQUEST, format!("{e:#}")))?;
+    let text = crate::repo::read(&hub.gates_corpus().await?, &q.path).await.ok_or_else(|| not_found("file"))?;
+    Ok(Json(json!({ "path": q.path, "content": text })))
+}
+
+#[derive(Deserialize)]
+struct GatesFileBody {
+    path: String,
+    content: String,
+}
+
+/// Saves one file of the gates corpus (a domain's prose) and restarts the gates Reflex. The domains stay the answers'.
+async fn put_gates_file(State(hub): State<Arc<Hub>>, Json(b): Json<GatesFileBody>) -> ApiResult<crate::model::GatesInfo> {
+    crate::projects::validate_corpus_path(&b.path).map_err(|e| ApiError(StatusCode::BAD_REQUEST, format!("{e:#}")))?;
+    let domain = b.path.split('/').next().unwrap_or_default();
+    if !crate::gates::SEED.iter().any(|(p, _)| p.split('/').next() == Some(domain)) {
+        return Err(ApiError(StatusCode::BAD_REQUEST, format!("`{domain}` is not one of the gates' answers")));
+    }
+    if b.content.trim().is_empty() {
+        return Err(ApiError(StatusCode::BAD_REQUEST, "a domain needs its prose".into()));
+    }
+    let repo = hub.gates_corpus().await?;
+    crate::repo::commit(&repo, &[(b.path.clone(), Some(b.content))], &format!("Update {}", b.path)).await?;
+    hub.restart_gates().await?;
+    Ok(Json(gates_info_of(&hub).await?))
 }
 
 fn conflict(err: anyhow::Error) -> ApiError {

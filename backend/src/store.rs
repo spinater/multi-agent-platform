@@ -176,7 +176,7 @@ impl Store {
 
     pub async fn save_task(&self, t: &Task) -> Result<()> {
         sqlx::query(
-            "UPDATE tasks SET title = ?, prompt = ?, depends_on = ?, provider = ?, model = ?, status = ?, session = ?, attempts = ?, result = ?, git = ?, scope = ?, updated_at = ? WHERE id = ?",
+            "UPDATE tasks SET title = ?, prompt = ?, depends_on = ?, provider = ?, model = ?, status = ?, session = ?, attempts = ?, result = ?, git = ?, scope = ?, intake = ?, updated_at = ? WHERE id = ?",
         )
         .bind(&t.title)
         .bind(&t.prompt)
@@ -189,6 +189,7 @@ impl Store {
         .bind(&t.result)
         .bind(t.git.as_ref().map(serde_json::to_string).transpose()?)
         .bind(t.scope.as_ref().map(serde_json::to_string).transpose()?)
+        .bind(t.intake.as_ref().map(serde_json::to_string).transpose()?)
         .bind(t.updated_at)
         .bind(t.id)
         .execute(&self.pool)
@@ -211,6 +212,7 @@ impl Store {
             result: row.get("result"),
             git: row.get::<Option<String>, _>("git").map(|g| serde_json::from_str(&g)).transpose()?,
             scope: row.get::<Option<String>, _>("scope").map(|g| serde_json::from_str(&g)).transpose()?,
+            intake: row.get::<Option<String>, _>("intake").map(|g| serde_json::from_str(&g)).transpose()?,
             created_at: row.get("created_at"),
             updated_at: row.get("updated_at"),
         })

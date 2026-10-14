@@ -190,7 +190,7 @@ pub async fn create_with(hub: &Hub, req: NewProject, settings: ProjectSettings) 
         threshold: None,
         fallback,
         model: req.model.filter(|m| !m.is_empty()),
-        questions: crate::gates::questions(&settings.reflex_gates),
+        questions: vec![],
         created_at: Utc::now(),
         settings: ProjectSettings::default(),
     };
@@ -231,13 +231,8 @@ pub async fn create_with(hub: &Hub, req: NewProject, settings: ProjectSettings) 
         }
         std::fs::create_dir_all(hub.project_dir(&slug))?;
         repo::init_bare(&corpus).await?;
-        let mut seed = corpus_seed();
-        if settings.reflex_gates.any() {
-            seed.push((crate::gates::SEED_PATH.into(), Some(crate::gates::SEED.into())));
-        }
-        repo::commit(&corpus, &seed, "Initial corpus").await?;
-        let domains = if seed.len() > 1 { format!("example domain + {} for the Reflex gates", crate::gates::SEED_PATH) } else { "1 example domain".into() };
-        check(&mut checks, Level::Success, format!("corpus repo created · /git/{slug}/corpus.git · {domains}"));
+        repo::commit(&corpus, &corpus_seed(), "Initial corpus").await?;
+        check(&mut checks, Level::Success, format!("corpus repo created · /git/{slug}/corpus.git · 1 example domain"));
         hub.put_project(&Project { settings: settings.clone(), ..project.clone() }).await
     };
     if let Err(err) = setup.await {
@@ -290,6 +285,9 @@ pub async fn create_with(hub: &Hub, req: NewProject, settings: ProjectSettings) 
     let audit = project.settings.audit.as_ref().map_or(hub.config.orchestrator.audit.enabled, |a| a.enabled);
     let gates = crate::gates::names(&project.settings.reflex_gates);
     let gates = if gates.is_empty() { String::new() } else { format!(" · Reflex gates: {}", gates.join(", ")) };
+    if project.settings.reflex_gates.any() {
+        checks.push(crate::gates::gates_line(hub));
+    }
     check(&mut checks, Level::Info, format!("verify: {} command(s) · audit {}{gates}{}", verify.len(), if audit { "on" } else { "off" }, if project.settings.paused { " · paused" } else { "" }));
     Ok((project, checks))
 }

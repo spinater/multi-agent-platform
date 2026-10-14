@@ -1,6 +1,8 @@
 //! Types shared by the store, the API and the frontend. `cargo test` exports them to
 //! `frontend/lib/generated/` through ts-rs, so the dashboard never drifts from the server.
 
+use std::collections::BTreeMap;
+
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
@@ -178,8 +180,57 @@ pub struct Task {
     pub git: Option<TaskGit>,
     /// The parallel analyst's verdict, for a task of a shared-folder project; `None` until it has looked.
     pub scope: Option<TaskScope>,
+    /// The intake gate's verdict, asked before any LLM runs the task; `None` until it has looked (or the gate is off).
+    pub intake: Option<TaskIntake>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+}
+
+/// What the intake gate made of a task before an LLM sees it: the project's Reflex (Thai through the glossary) and
+/// a local look for a done task it repeats. A held task waits for the owner: start it anyway, edit it or cancel it.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, TS)]
+#[serde(default)]
+#[ts(export)]
+pub struct TaskIntake {
+    pub verdict: IntakeVerdict,
+    /// Why, in one line: Reflex's confidence and decision, or the similar task.
+    pub reason: String,
+    /// Reflex's `tier` from the same call, used by the tier gate without asking again.
+    pub tier: Option<String>,
+    /// The call asked `tier` (the tier gate was on): the tier gate uses `tier` (`None`: unsure) instead of asking.
+    pub tier_asked: bool,
+    /// Reflex is sure the task changes files other tasks share: it runs alone, without asking the parallel analyst.
+    pub shared_files: bool,
+    /// The done task this one looks like (`duplicate`).
+    #[ts(type = "number | null")]
+    pub similar: Option<i64>,
+    /// The owner started it anyway.
+    pub released: bool,
+    pub at: Option<DateTime<Utc>>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum IntakeVerdict {
+    /// Clear enough: on to the worker.
+    #[default]
+    Ready,
+    /// Reflex is sure the prompt is too unclear to start: the owner says more first.
+    Unclear,
+    /// Reflex is sure it is big enough to plan first (the planner splits it into tasks).
+    PlanFirst,
+    /// Nearly the same as a task already done.
+    Duplicate,
+    /// Reflex unsure or not running: on to the worker as before.
+    Unsure,
+}
+
+impl TaskIntake {
+    /// Waiting for the owner.
+    pub fn holds(&self) -> bool {
+        !self.released && matches!(self.verdict, IntakeVerdict::Unclear | IntakeVerdict::PlanFirst | IntakeVerdict::Duplicate)
+    }
 }
 
 /// A task's branch (`map/task-<id>`), made from `base` in a worktree of its own so tasks of one project run side
@@ -556,6 +607,7 @@ pub struct FitResult {
 #[serde(rename_all = "snake_case")]
 #[ts(export)]
 pub enum DecisionNode {
+    Intake,
     Ready,
     Pick,
     Launch,
@@ -1104,6 +1156,8 @@ pub struct ProjectSettings {
     pub knowledge: KnowledgeSettings,
     /// How many of the project's tasks run at once, and who clears tasks to share one folder.
     pub parallel: ProjectParallel,
+    /// The project's own Thai words for Reflex (Thai → English, `-` for a word to skip), over the built-in glossary.
+    pub thai_glossary: BTreeMap<String, String>,
 }
 
 /// A project's parallel tasks. Changes apply at the next orchestrator tick, without a restart.
@@ -1150,6 +1204,9 @@ pub struct TaskScope {
 #[serde(default)]
 #[ts(export)]
 pub struct ReflexGates {
+    /// Ask `intake` (ready, unclear, plan_first) before a task reaches any LLM, and hold a near-duplicate of a done
+    /// task; with the parallel analyst on, also `shared_files`, whose confident "yes" runs the task alone.
+    pub intake: bool,
     /// Ask `needs_audit` before the LLM audit; a confident "no" accepts the task on verification.
     pub audit: bool,
     /// Ask `tier` (light, standard, heavy) for a task without a pinned model and use `[orchestrator.tiers]`.
@@ -1158,7 +1215,7 @@ pub struct ReflexGates {
 
 impl ReflexGates {
     pub fn any(&self) -> bool {
-        self.audit || self.tier
+        self.intake || self.audit || self.tier
     }
 }
 
@@ -2517,6 +2574,55 @@ pub struct KnowledgeOverview {
     pub scratch: Vec<ScratchInfo>,
     /// Newest first.
     pub recent_queries: Vec<KnowledgeQuery>,
+    /// Whether the project should set up its knowledge now, and what accepting does.
+    pub suggestion: KnowledgeSuggestion,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum SuggestVerdict {
+    /// No knowledge yet and the project is big or busy enough to need it: accept to queue the setup task.
+    Recommended,
+    /// No knowledge yet, but the project is still small: cards would cost more than they save.
+    NotYet,
+    /// The setup task is queued or running.
+    InProgress,
+    /// The index exists: knowledge is set up and in use.
+    InUse,
+    /// The owner said not now.
+    Dismissed,
+}
+
+/// The facts the suggestion weighs.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct KnowledgeStats {
+    /// Source files outside build, dependency and scratch folders (up to the scan limit).
+    pub source_files: u32,
+    #[ts(type = "number")]
+    pub source_lines: u64,
+    pub done_tasks: u32,
+    /// Markdown and text documents already indexed (requirements, docs, task sheets).
+    pub docs: u32,
+    pub cards: u32,
+    /// The largest rulebook (CLAUDE.md, AGENTS.md), in bytes.
+    #[ts(type = "number")]
+    pub rulebook_bytes: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct KnowledgeSuggestion {
+    pub verdict: SuggestVerdict,
+    /// Why, one line each.
+    pub reasons: Vec<String>,
+    pub stats: KnowledgeStats,
+    /// What accepting does, step by step (MAP's knowledge practice).
+    pub plan: Vec<String>,
+    /// The setup task, once queued.
+    #[ts(type = "number | null")]
+    pub task: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
@@ -2548,3 +2654,58 @@ pub struct KnowledgeDocBody {
     pub doc: KnowledgeDoc,
     pub body: String,
 }
+
+/// How Reflex reads one text: Thai glossed into English words (`thai.rs`).
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct ThaiPreview {
+    /// What Reflex is sent.
+    pub text: String,
+    /// Share of the Thai characters the glossary knew, 0..1 (1 without Thai).
+    pub coverage: f64,
+    /// At or above `min_coverage`: Reflex is asked; below, the decision goes to the fallback as before.
+    pub readable: bool,
+    pub has_thai: bool,
+    /// Thai runs no word matched: the words to add.
+    pub unknown: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct ThaiUnknown {
+    pub fragment: String,
+    /// In how many of the recent Thai decisions.
+    pub count: u32,
+}
+
+/// The Thai side of a project's Reflex: its words, and what recent Thai decisions did not cover.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct ThaiReport {
+    pub builtin_words: u32,
+    pub min_coverage: f64,
+    pub words: BTreeMap<String, String>,
+    /// Recent decisions with Thai in their state, and how many of them Reflex could read.
+    pub thai_decisions: u32,
+    pub readable: u32,
+    /// The unknown Thai of those decisions, most frequent first.
+    pub unknown: Vec<ThaiUnknown>,
+}
+
+/// The orchestrator gates' own Reflex, shared by every project (`gates.rs`).
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct GatesInfo {
+    pub status: ReflexStatus,
+    pub port: u16,
+    /// The confidence from which its answers are used.
+    pub threshold: Option<f64>,
+    /// map.toml's `[reflex] gates_threshold`, which a reset goes back to (`None`: shadow).
+    pub config_threshold: Option<f64>,
+    /// The corpus: one domain per answer (`unclear/`, `plan_first/`, `light/`, `heavy/`, `shared/`, `own/`, `audit/`,
+    /// `no_audit/`).
+    pub files: Vec<RepoFile>,
+    /// Projects with at least one gate on.
+    pub projects: Vec<String>,
+}
+
