@@ -26,8 +26,9 @@ nothing is tied to one repository, session name or provider.
 - **Projects.** A project is a folder on the machine MAP is installed on, a corpus repo and its own
   [Reflex](https://reflex.gist.rs) decision engine.
   - **Folder.** Tasks and sessions of a project run in its folder, in place: an existing folder (a git repo or not),
-    or a new empty one MAP creates. MAP never copies, clones, hosts or pushes a project's code, and adds no files to
-    it unless you init it with a template (see [Init a project](#init-a-project)); deleting a project leaves the
+    a new empty one MAP creates, or a new folder MAP clones a repo into (see [Git access](#git-access)). MAP never
+    copies or hosts a project's code, runs git there only when you ask (clone, fetch, pull, push), and adds no files
+    to it unless you init it with a template (see [Init a project](#init-a-project)); deleting a project leaves the
     folder alone. Two projects cannot share a folder or nest.
   - **Corpus.** A bare git repo of the platform's own, served at `/git/<slug>/corpus.git`: clone, push, or edit
     files from the dashboard.
@@ -109,6 +110,8 @@ nothing is tied to one repository, session name or provider.
 | `backend/src/project_settings.rs` | Per-project providers, verify, audit and pause, as the orchestrator asks for them |
 | `backend/src/login.rs` | Provider sign-in state from credential files, the helper login session, URL and code parsing |
 | `backend/src/repo.rs` | The corpus repo written with git plumbing, corpus export, a read-only look at a project's folder |
+| `backend/src/git_access.rs` | MAP's SSH key, pinned known_hosts, git identity, the gitconfig agents get as `GIT_CONFIG_GLOBAL`, URL and host checks |
+| `backend/src/project_git.rs` | Git in a project's folder: status, fetch, ff-only pull, push, connect a remote, clone, ls-remote |
 | `backend/src/reflex.rs` | One Reflex process per project: export the corpus, start, health-check, restart |
 | `backend/src/usage.rs` | Plan-usage readers (Claude endpoint, Codex logs), token scans, pace, the skip line |
 | `backend/src/updates.rs` | CLI update checks (version command vs. latest source), update helper sessions |
@@ -196,8 +199,10 @@ docker compose logs -f map                  # open http://127.0.0.1:4400 and pas
   `"hasCompletedOnboarding": true` in that file once, or the first interactive session stops at the setup screens.
   Each new folder still asks "trust this folder?" once; answer it in the session console.
 - Projects are folders under `MAP_PROJECTS_DIR`, mounted at the same path, so a project's path is the same in the
-  container and on the host. State lives in `MAP_DIR/data` (database, run files, corpus repos); config in
-  `MAP_DIR/map.toml`.
+  container and on the host; set `[projects] root` to it so "Clone from git" puts new projects there. State lives in
+  `MAP_DIR/data` (database, run files, corpus repos, and MAP's git key and gitconfig under `data/map/git`); config in
+  `MAP_DIR/map.toml`. Git needs no `~/.ssh` mount: create MAP's key under Projects → Git access and add it to
+  GitHub or GitLab (see [Git access](#git-access)).
 - On macOS, use `deploy/install.sh` instead: a Linux container cannot run the Mac's agent CLIs.
 - Agent sessions are tmux sessions inside the container, so `docker compose restart` ends them (the watcher marks
   them exited and the orchestrator retries their tasks).
@@ -284,6 +289,44 @@ works with the last 24 h per lane, a set-up checklist that ticks itself (install
 playground), a playground with feedback, calibration on a log-scale scatter with a draggable threshold, and the
 decision log. Confidence is always shown on a log axis (1e-5 … 1e-3, widened by whole decades when a corpus scores
 outside it), never as a percentage.
+
+## Git access
+
+One git setup for every project, so agents can clone, pull and push GitHub, GitLab or any ssh git host
+(`backend/src/git_access.rs`, `project_git.rs`; **Git access** on the Projects screen).
+
+- **MAP's SSH key.** "Create key" runs `ssh-keygen -t ed25519 -N "" -C map@<hostname>` into
+  `<data_dir>/git/id_ed25519` (folder 0700, key 0600). Only the public key and its `SHA256:` fingerprint are ever
+  shown or returned; the private key is never read, logged or sent. "Replace key" moves the old pair aside to
+  `id_ed25519.old-<time>` instead of deleting it. Add the public key on GitHub (Settings → SSH and GPG keys, or a
+  repo's Deploy keys with "Allow write access") or GitLab (Preferences → SSH Keys, or Deploy keys with write
+  permission), then **Test** a host: `ssh -T git@<host>` with MAP's key alone (GitHub's "successfully
+  authenticated", exit 1, and GitLab's "Welcome to GitLab" count as success). The dashboard never takes a private
+  key, token or password; https URLs with a password in them are refused.
+- **Host keys.** `<data_dir>/git/known_hosts` pins GitHub's and GitLab's published host keys (a constant in
+  `git_access.rs`, with the source pages and date). Other hosts are trusted on first use
+  (`StrictHostKeyChecking=accept-new`), and the dialog shows the fingerprint a test recorded, to compare with the
+  host's own.
+- **Identity.** A name and email for agents' commits (`<data_dir>/git/identity.json`), optional.
+- **`GIT_CONFIG_GLOBAL`.** MAP writes `<data_dir>/git/gitconfig`, regenerated on every change: its defaults first
+  (`[user]` when set, `[core] sshCommand = ssh -i <key> -o IdentitiesOnly=yes -o UserKnownHostsFile=<known_hosts>
+  -o StrictHostKeyChecking=accept-new …` when the key exists), then `[include]` of your `~/.gitconfig` and
+  `~/.config/git/config` when they exist, so your own settings win; a repo's own config wins over both. Every agent's
+  launch script exports `GIT_CONFIG_GLOBAL` (a value in `[workspace.env]` wins), verify and `post_done` commands
+  get it too, and MAP's own git commands in project folders use it, with `GIT_TERMINAL_PROMPT=0`, ssh `BatchMode`,
+  no controlling terminal, only https/http/ssh/git/file transports, and a timeout (`[projects] git_timeout_secs`).
+- **Docker.** The key lives in `MAP_DIR/data`, so it works in the container without mounting `~/.ssh`.
+- **Clone from git.** The wizard's third source: a repo URL (`git@host:owner/repo.git`, `ssh://`, `https://`,
+  `git://`, `file://`; never an option or an `ext::`/`fd::` transport), an optional branch, and the folder, by default
+  `<[projects] root>/<repo name>` (missing or empty). It shows `git ls-remote` first (default branch, branches, or why
+  the host refused, with a hint to add MAP's key), then runs `git clone` (a normal working clone, not bare). The
+  project is then an ordinary folder project (`kind = "local"`), with the URL kept as `source.remote`.
+- **Sync.** A project's page has a Git panel (and its card a one-line status): branch, upstream, origin, ahead/behind,
+  changed files, last commit and fetch, and **Fetch**, **Pull** (fast-forward only; refused while the folder has
+  changes or the branch diverged), **Push** (the current branch, never forced; the first push sets the upstream with
+  `-u origin <branch>`) and **Connect a remote** (sets or replaces `origin`, after `git init -b main` when the folder
+  is not a repo yet). Each shows its commands and output and logs a `project.git.*` event. Pull, push and remote
+  changes are refused while a task of the project is running; fetch and status are not.
 
 ## Init a project
 
@@ -374,7 +417,14 @@ All routes are under `/api`. When `server.api_token` is set, send `Authorization
 | GET | `/templates` | Templates with their files and placeholders (built in, then `[templates] dirs`) |
 | POST | `/projects/{slug}/init/plan` | `{"template"}`: per file `create`, `skip` (exists) or `append` (missing lines); writes nothing |
 | POST | `/projects/{slug}/init` | `{"template", "description", "provider", "model"?, "set_verify"}`: writes the plan, optionally sets the project's verify to the template's, queues the "Init project" task; returns `plan`, `checks` and `task` |
-| POST | `/projects/inspect` | `{"kind": "local"\|"empty", "location"}`: the folder's git branch, branches, commits and top-level entries, or whether a new folder can go there |
+| POST | `/projects/inspect` | `{"kind": "local"\|"empty", "location"}`: the folder's git branch, branches, commits and top-level entries, or whether a new folder can go there; `{"kind": "clone", "location": <url>, "branch"?}`: `git ls-remote` (default branch, branches, `hint` on an auth failure, suggested `folder`) |
+| GET | `/git/access` | MAP's public key and fingerprint (or `null`), git identity, known hosts, gitconfig path and includes, projects root |
+| POST | `/git/key` | `{"replace"?: bool}`: create MAP's ed25519 key (409 when one exists without `replace`; the old one is moved aside) |
+| POST | `/git/test` | `{"host"}` (`github.com`, `git@host:2222`): `ssh -T` with MAP's key; `ok`, output, the host's recorded keys |
+| PUT | `/git/identity` | `{"name", "email"}` (both empty: none) |
+| GET | `/projects/{slug}/git` | The folder's `is_repo`, branch, upstream, origin, ahead/behind, dirty count, last fetch and commit, `busy` |
+| POST | `/projects/{slug}/git/fetch`, `…/pull`, `…/push` | `{}`: run it; returns `ok`, commands, output, new status (409 with the reason when refused) |
+| POST | `/projects/{slug}/git/remote` | `{"url"}`: set or replace `origin` (`git init -b main` first when not a repo) |
 | GET/POST | `/providers/{name}/login` | Sign-in state (parsed URL, one-time code, credential check), or start the helper login session |
 | GET | `/projects/{slug}/repos/corpus` | Files and recent commits |
 | GET/PUT | `/projects/{slug}/repos/{repo}/file` | `?path=` read; `{"path", "content", "message"}` commit (`content: null` deletes) |
@@ -432,7 +482,8 @@ cd frontend && bun run lint && bunx next typegen && bunx tsc --noEmit && bun run
 
 Backend tests cover reset-time parsing, pending-input detection (faint suggestions and the cursor are not typing), the
 wake-up cycle, the orchestrator's dependency order, retries and human protection, and the store, all against an
-in-memory terminal.
+in-memory terminal. Git access tests make a key in a temporary data dir (skipped without `ssh-keygen`) and clone,
+fetch, pull and push only against local bare repos over `file://`; nothing contacts GitHub or GitLab.
 
 ## Roadmap
 

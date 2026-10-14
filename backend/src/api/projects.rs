@@ -238,13 +238,24 @@ pub async fn defaults(State(hub): State<Arc<Hub>>) -> ApiResult<ProjectDefaults>
 #[derive(Deserialize)]
 pub struct InspectBody {
     kind: SourceKind,
+    /// A folder; for `clone`, the repo's URL.
     location: String,
+    /// For `clone`: the branch that must exist.
+    branch: Option<String>,
 }
 
-/// Looks at a project's folder before the project is made. Problems come back as `ok: false` with `error`, so the
-/// wizard can show them next to the field.
-pub async fn inspect(Json(b): Json<InspectBody>) -> ApiResult<SourceInspection> {
+/// Looks at a project's folder before the project is made, or for `clone` at the repo (`git ls-remote` with MAP's
+/// gitconfig: default branch, branches, and a hint when the host refuses MAP's key). Problems come back as
+/// `ok: false` with `error`, so the wizard can show them next to the field.
+pub async fn inspect(State(hub): State<Arc<Hub>>, Json(b): Json<InspectBody>) -> ApiResult<SourceInspection> {
     let failed = |err: anyhow::Error| SourceInspection { error: Some(format!("{err:#}")), ..Default::default() };
+    if b.kind == SourceKind::Clone {
+        let timeout = std::time::Duration::from_secs(hub.config.projects.git_timeout_secs.min(60));
+        let branch = b.branch.as_deref().map(str::trim).filter(|x| !x.is_empty());
+        let mut seen = crate::project_git::inspect_remote(&hub.gitconfig(), &b.location, branch, timeout, hub.git_files().key().is_file()).await;
+        seen.folder = Some(hub.config.projects.root.join(crate::project_git::repo_name(&b.location)).display().to_string());
+        return Ok(Json(seen));
+    }
     if let Err(err) = project_settings::validate_location(b.kind, Some(&b.location)) {
         return Ok(Json(failed(err)));
     }
@@ -255,7 +266,7 @@ pub async fn inspect(Json(b): Json<InspectBody>) -> ApiResult<SourceInspection> 
         SourceKind::Empty if !path.exists() => SourceInspection { ok: true, ..Default::default() },
         SourceKind::Empty if path.is_dir() && std::fs::read_dir(&path).is_ok_and(|mut d| d.next().is_none()) => SourceInspection { ok: true, ..Default::default() },
         SourceKind::Empty => failed(anyhow::anyhow!("{} already exists and is not an empty folder", path.display())),
-        SourceKind::Git => failed(anyhow::anyhow!("the platform never clones code: clone the repo yourself, then add its folder")),
+        SourceKind::Git | SourceKind::Clone => failed(anyhow::anyhow!("use \"clone\" with the repo's URL to clone it into a folder on this machine")),
     }))
 }
 

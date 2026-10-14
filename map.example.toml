@@ -155,6 +155,15 @@ timeout_secs = 600
 # The init agent's instructions (Markdown); unset: the ones built into MAP (backend/templates/init-agent.md).
 # init_agent = "~/.config/map/init-agent.md"
 
+# Projects are folders on this machine. "Clone from git" in the new-project wizard runs `git clone` into
+# <root>/<repo name> by default (any other new or empty folder can be typed instead). MAP's own git commands in
+# project folders (clone, ls-remote, fetch, pull, push) use MAP's gitconfig and SSH key (Projects → Git access, kept
+# in <data_dir>/git/), never prompt, and stop after git_timeout_secs. Agents get the same gitconfig as
+# GIT_CONFIG_GLOBAL; it includes your own ~/.gitconfig after MAP's defaults, so your settings win.
+[projects]
+# root = "~/project"
+# git_timeout_secs = 300
+
 # The Agents screen: custom sub-agents for Claude Code (Markdown), Codex (TOML) and agy (Markdown), per project and
 # user-wide. Saving an agent writes <name>.md / <name>.toml into the first folder of each list (or rewrites the file
 # it was found in), and removes the files of CLIs dropped from its targets. MAP never writes outside these folders.

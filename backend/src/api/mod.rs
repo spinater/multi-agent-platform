@@ -2,6 +2,7 @@
 
 mod agents;
 mod git;
+mod git_access;
 mod projects;
 mod skills;
 mod templates;
@@ -106,6 +107,16 @@ pub fn router(hub: Arc<Hub>) -> Router {
         .route("/projects/{slug}/decisions/{id}/feedback", post(projects::decision_feedback))
         .route("/projects/{slug}/corpus/archive", post(projects::archive))
         // ---- templates: lay a development process into a project's folder, then queue the init agent
+        // ---- git access: MAP's SSH key, identity and host tests; a project folder's git status and sync
+        .route("/git/access", get(git_access::access))
+        .route("/git/key", post(git_access::create_key))
+        .route("/git/test", post(git_access::test))
+        .route("/git/identity", axum::routing::put(git_access::set_identity))
+        .route("/projects/{slug}/git", get(git_access::status))
+        .route("/projects/{slug}/git/fetch", post(git_access::fetch))
+        .route("/projects/{slug}/git/pull", post(git_access::pull))
+        .route("/projects/{slug}/git/push", post(git_access::push))
+        .route("/projects/{slug}/git/remote", post(git_access::remote))
         .route("/templates", get(templates::list))
         .route("/projects/{slug}/init/plan", post(templates::plan))
         .route("/projects/{slug}/init", post(templates::init))

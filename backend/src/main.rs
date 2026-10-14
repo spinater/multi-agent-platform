@@ -4,10 +4,12 @@ mod config;
 mod decide;
 mod decisions;
 mod detect;
+mod git_access;
 mod hub;
 mod login;
 mod model;
 mod orchestrator;
+mod project_git;
 mod project_settings;
 mod projects;
 mod reflex;
@@ -91,6 +93,8 @@ async fn serve(config: Config) -> Result<()> {
         tracing::warn!("listening on {addr} without an api_token: anyone who can reach it can run agents in your workspace");
     }
     let hub = open(config).await?;
+    // MAP's gitconfig and known_hosts, before any agent starts (regenerated on every change after this).
+    tracing::info!("git config for agents: {}", hub.gitconfig().display());
     tokio::spawn(watcher::run(hub.clone()));
     tokio::spawn(orchestrator::run(hub.clone()));
     tokio::spawn(usage::run(hub.clone()));

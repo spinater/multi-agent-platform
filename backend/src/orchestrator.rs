@@ -55,10 +55,10 @@ fn tail(text: &str, max: usize) -> String {
     chars[chars.len().saturating_sub(max)..].iter().collect()
 }
 
-/// Runs `sh -c command` in `dir` with the workspace env; returns (success, combined output tail).
+/// Runs `sh -c command` in `dir` with the workspace env and MAP's gitconfig; returns (success, combined output tail).
 pub async fn shell(hub: &Hub, dir: &std::path::Path, command: &str, timeout: Duration) -> Result<(bool, String)> {
     let mut cmd = Command::new("sh");
-    cmd.arg("-c").arg(command).current_dir(dir).envs(&hub.config.workspace.env);
+    cmd.arg("-c").arg(command).current_dir(dir).envs(hub.command_env());
     run_captured(cmd, timeout).await
 }
 
@@ -426,7 +426,7 @@ impl Orchestrator {
                 .map(|a| a.replace("{binary}", &spec.binary).replace("{model}", &spec.default_model).replace("{session}", "audit").replace("{prompt}", &prompt))
                 .collect();
             let mut cmd = Command::new(&argv[0]);
-            cmd.args(&argv[1..]).current_dir(hub.work_dir(task.project.as_deref()).await).envs(&hub.config.workspace.env);
+            cmd.args(&argv[1..]).current_dir(hub.work_dir(task.project.as_deref()).await).envs(hub.command_env());
             hub.event(Level::Info, "task.audit", None, Some(task.id), format!("Auditing with {provider}")).await;
             record(hub, Kind::AUDIT_ASK, task, format!("{provider} · reviewing git status, git diff, git log -5")).await;
             let (ok, output) = run_captured(cmd, Duration::from_secs(hub.config.orchestrator.audit.timeout_secs)).await?;

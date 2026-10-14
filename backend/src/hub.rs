@@ -143,9 +143,32 @@ impl Hub {
     /// checkout the platform made of it.
     pub fn workspace_of(&self, project: &Project) -> PathBuf {
         match (project.settings.source.kind, project.settings.source.location.as_deref()) {
-            (SourceKind::Empty | SourceKind::Local, Some(path)) => crate::login::expand_home(path),
+            (SourceKind::Empty | SourceKind::Local | SourceKind::Clone, Some(path)) => crate::login::expand_home(path),
             _ => self.project_dir(&project.slug).join("workspace"),
         }
+    }
+
+    /// MAP's SSH key, known_hosts, identity and gitconfig under `<data_dir>/git/` (`git_access.rs`).
+    pub fn git_files(&self) -> crate::git_access::GitFiles {
+        crate::git_access::GitFiles::new(&self.config.server.data_dir)
+    }
+
+    /// MAP's gitconfig, brought up to date; exported as `GIT_CONFIG_GLOBAL` to agents and used by MAP's own git
+    /// commands in project folders.
+    pub fn gitconfig(&self) -> PathBuf {
+        let files = self.git_files();
+        crate::git_access::ensure(&files).unwrap_or_else(|err| {
+            tracing::warn!("MAP gitconfig: {err:#}");
+            files.gitconfig()
+        })
+    }
+
+    /// The workspace env plus `GIT_CONFIG_GLOBAL`, for commands run in a project's folder (verify, post_done, audit).
+    /// A `GIT_CONFIG_GLOBAL` set in `workspace.env` wins.
+    pub fn command_env(&self) -> Vec<(String, String)> {
+        let mut env = vec![("GIT_CONFIG_GLOBAL".to_string(), self.gitconfig().display().to_string())];
+        env.extend(self.config.workspace.env.iter().map(|(k, v)| (k.clone(), v.clone())));
+        env
     }
 
     pub fn reflex_log(&self, slug: &str) -> PathBuf {
@@ -189,7 +212,7 @@ impl Hub {
     pub async fn announce_project(&self, slug: &str) {
         match self.store.project(slug).await {
             Ok(Some(p)) => match self.project_info(p).await {
-                Ok(project) => self.send(ServerMessage::Project { project }),
+                Ok(project) => self.send(ServerMessage::Project { project: Box::new(project) }),
                 Err(err) => tracing::warn!("project {slug}: {err:#}"),
             },
             Ok(None) => {}
@@ -386,6 +409,9 @@ impl Hub {
         }
 
         let mut script = String::from("#!/bin/sh\n");
+        // MAP's git defaults (key, known hosts, identity; the user's own ~/.gitconfig included after them). Before
+        // workspace.env, so a GIT_CONFIG_GLOBAL set there wins.
+        script.push_str(&format!("export GIT_CONFIG_GLOBAL={}\n", quote(self.gitconfig().to_str().context("non-UTF-8 path")?)?));
         for (k, v) in &self.config.workspace.env {
             script.push_str(&format!("export {k}={}\n", quote(v)?));
         }

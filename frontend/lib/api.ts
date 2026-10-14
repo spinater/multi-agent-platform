@@ -9,6 +9,12 @@ import type { DecisionCounts } from "./generated/DecisionCounts";
 import type { DecisionModel } from "./generated/DecisionModel";
 import type { Event } from "./generated/Event";
 import type { FitResult } from "./generated/FitResult";
+import type { GitAccess } from "./generated/GitAccess";
+import type { GitIdentity } from "./generated/GitIdentity";
+import type { GitKey } from "./generated/GitKey";
+import type { GitOpResult } from "./generated/GitOpResult";
+import type { GitStatus } from "./generated/GitStatus";
+import type { GitTestResult } from "./generated/GitTestResult";
 import type { InitPlan } from "./generated/InitPlan";
 import type { InitStarted } from "./generated/InitStarted";
 import type { LoginState } from "./generated/LoginState";
@@ -187,6 +193,25 @@ export type ProjectUpdate = {
 export function cloneUrl(slug: string, repo: RepoName): string {
   return `${location.origin}/git/${slug}/${repo}.git`;
 }
+
+// ---- git access (backend git_access.rs) and a project folder's git (project_git.rs). Only public keys come back;
+// nothing here ever sends a private key, token or password.
+
+export type GitOp = "fetch" | "pull" | "push";
+
+export const gitApi = {
+  access: () => request<GitAccess>("GET", "/git/access"),
+  /** Creates MAP's ed25519 key; `replace` moves the old one aside (409 without it when one exists). */
+  createKey: (replace = false) => request<GitKey>("POST", "/git/key", { replace }),
+  /** `ssh -T git@<host>` with MAP's key: `github.com`, `gitlab.com`, `git@host:2222`. */
+  test: (host: string) => request<GitTestResult>("POST", "/git/test", { host }),
+  setIdentity: (identity: GitIdentity) => request<GitIdentity>("PUT", "/git/identity", identity),
+  status: (slug: string) => request<GitStatus>("GET", `/projects/${slug}/git`),
+  /** Fetch; pull (fast-forward only); push (never forced; sets the upstream on a first push). */
+  run: (slug: string, op: GitOp) => request<GitOpResult>("POST", `/projects/${slug}/git/${op}`, {}),
+  /** Sets or replaces `origin`, running `git init -b main` first when the folder is not a repo. */
+  setRemote: (slug: string, url: string) => request<GitOpResult>("POST", `/projects/${slug}/git/remote`, { url }),
+};
 
 // ---- orchestrator decisions (backend decisions.rs; not Reflex decisions)
 

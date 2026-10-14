@@ -87,19 +87,11 @@ pub async fn audit_chain(hub: &Hub, task: &Task) -> Vec<String> {
 }
 
 /// A folder on this machine as an absolute path; for a legacy `git` project, a git URL that is never an option or a
-/// transport that runs commands.
+/// transport that runs commands (`git_access::validate_url`).
 pub fn validate_location(kind: SourceKind, location: Option<&str>) -> Result<()> {
     match kind {
-        SourceKind::Git => {
-            let url = location.map(str::trim).filter(|l| !l.is_empty()).context("a git source needs a URL")?;
-            let scp = regex::Regex::new(r"^[A-Za-z0-9._-]+@[A-Za-z0-9.-]+:[^\s]+$").unwrap();
-            let ok = ["https://", "http://", "ssh://", "git://", "file://"].iter().any(|p| url.starts_with(p)) || scp.is_match(url);
-            if !ok || url.chars().any(char::is_whitespace) {
-                bail!("use an https://, ssh://, git:// or file:// URL, or user@host:path");
-            }
-            Ok(())
-        }
-        SourceKind::Empty | SourceKind::Local => {
+        SourceKind::Git => crate::git_access::validate_url(location.unwrap_or_default()),
+        SourceKind::Empty | SourceKind::Local | SourceKind::Clone => {
             let path = location.map(str::trim).filter(|l| !l.is_empty()).context("a project needs its folder on this machine")?;
             if !(path.starts_with('/') || path.starts_with("~/")) {
                 bail!("give the folder as an absolute path (or ~/…)");
@@ -125,6 +117,11 @@ pub fn validate_branch(branch: Option<&str>) -> Result<()> {
 pub fn validate(hub: &Hub, s: &ProjectSettings) -> Result<()> {
     validate_location(s.source.kind, s.source.location.as_deref())?;
     validate_branch(s.source.branch.as_deref())?;
+    match s.source.remote.as_deref() {
+        Some(url) => crate::git_access::validate_url(url)?,
+        None if s.source.kind == SourceKind::Clone => bail!("a clone needs the repo's URL"),
+        None => {}
+    }
     let mut seen = BTreeSet::new();
     for p in &s.providers {
         let spec = hub.spec(&p.name)?;
@@ -159,6 +156,7 @@ pub fn normalize(mut s: ProjectSettings) -> ProjectSettings {
     let blank = |v: Option<String>| v.map(|x| x.trim().to_string()).filter(|x| !x.is_empty());
     s.source.location = blank(s.source.location);
     s.source.branch = blank(s.source.branch);
+    s.source.remote = blank(s.source.remote);
     for p in &mut s.providers {
         p.model = blank(p.model.take());
     }
@@ -246,7 +244,7 @@ mod tests {
         let folder = dir.path().join("my-app");
         std::fs::create_dir_all(&folder).unwrap();
         std::fs::write(folder.join("Cargo.toml"), "[package]").unwrap();
-        let local = |path: &Path| ProjectSettings { source: ProjectSource { kind: SourceKind::Local, location: Some(path.display().to_string()), branch: None }, ..Default::default() };
+        let local = |path: &Path| ProjectSettings { source: ProjectSource { kind: SourceKind::Local, location: Some(path.display().to_string()), ..Default::default() }, ..Default::default() };
         let new = |name: &str| NewProject { name: name.into(), slug: None, description: String::new(), fallback: Some("none".into()), model: None };
         let (p, checks) = create_with(&hub, new("Mine"), local(&folder)).await.unwrap();
         assert_eq!(hub.workspace_of(&p), folder.canonicalize().unwrap());
@@ -262,12 +260,12 @@ mod tests {
         assert!(create_with(&hub, new("Inside"), local(&folder.join("sub"))).await.is_err());
         assert!(create_with(&hub, new("Broken"), local(Path::new("/nonexistent/repo"))).await.is_err());
         assert!(!hub.project_dir("broken").exists(), "a failed create leaves nothing behind");
-        let git = ProjectSettings { source: ProjectSource { kind: SourceKind::Git, location: Some("https://github.com/a/b.git".into()), branch: None }, ..Default::default() };
+        let git = ProjectSettings { source: ProjectSource { kind: SourceKind::Git, location: Some("https://github.com/a/b.git".into()), ..Default::default() }, ..Default::default() };
         assert!(create_with(&hub, new("Cloned"), git).await.is_err());
 
         // A new folder is created, and deleting the project leaves the folder and its files alone.
         let fresh = dir.path().join("fresh");
-        let empty = ProjectSettings { source: ProjectSource { kind: SourceKind::Empty, location: Some(fresh.display().to_string()), branch: None }, ..Default::default() };
+        let empty = ProjectSettings { source: ProjectSource { kind: SourceKind::Empty, location: Some(fresh.display().to_string()), ..Default::default() }, ..Default::default() };
         let (q, _) = create_with(&hub, new("Fresh"), empty).await.unwrap();
         assert!(fresh.is_dir());
         std::fs::write(fresh.join("work.txt"), "x").unwrap();
@@ -275,6 +273,62 @@ mod tests {
         assert!(fresh.join("work.txt").exists());
         crate::projects::delete(&hub, &p.slug).await.unwrap();
         assert!(folder.join("Cargo.toml").exists());
+    }
+
+    #[tokio::test]
+    async fn clones_a_repo_into_a_folder_and_agents_get_maps_gitconfig() {
+        let (hub, dir) = hub("").await;
+        let git = |cwd: &Path, args: &[&str]| {
+            let ok = std::process::Command::new("git").current_dir(cwd).args(args).env("GIT_CONFIG_GLOBAL", "/dev/null").env("GIT_AUTHOR_NAME", "t").env("GIT_AUTHOR_EMAIL", "t@t").env("GIT_COMMITTER_NAME", "t").env("GIT_COMMITTER_EMAIL", "t@t").status().unwrap().success();
+            assert!(ok, "git {args:?}");
+        };
+        let seed = dir.path().join("seed");
+        std::fs::create_dir_all(&seed).unwrap();
+        std::fs::write(seed.join("README.md"), "hi").unwrap();
+        git(&seed, &["init", "-q", "-b", "main"]);
+        git(&seed, &["add", "."]);
+        git(&seed, &["commit", "-q", "-m", "one"]);
+        git(dir.path(), &["clone", "-q", "--bare", "seed", "remote.git"]);
+        let url = format!("file://{}", dir.path().join("remote.git").display());
+
+        let new = |name: &str| NewProject { name: name.into(), slug: None, description: String::new(), fallback: Some("none".into()), model: None };
+        let clone = |folder: &Path, remote: Option<&str>| ProjectSettings {
+            source: ProjectSource { kind: SourceKind::Clone, location: Some(folder.display().to_string()), remote: remote.map(String::from), branch: None },
+            ..Default::default()
+        };
+        let folder = dir.path().join("code/app");
+        let (p, checks) = create_with(&hub, new("App"), clone(&folder, Some(&url))).await.unwrap();
+        assert_eq!((p.settings.source.kind, p.settings.source.remote.as_deref()), (SourceKind::Local, Some(url.as_str())), "stored as a folder project");
+        assert!(folder.join("README.md").is_file() && folder.join(".git").is_dir());
+        assert!(checks[0].text.starts_with(&format!("cloned {url} into")) && checks[0].text.contains("branch main · 1 commit"), "{:?}", checks[0]);
+
+        // The folder must be missing or empty; the URL must be safe; a failed clone leaves nothing behind.
+        assert!(create_with(&hub, new("Again"), clone(&dir.path().join("seed"), Some(&url))).await.is_err());
+        assert!(create_with(&hub, new("Opt"), clone(&dir.path().join("x"), Some("--upload-pack=touch /tmp/x"))).await.is_err());
+        assert!(create_with(&hub, new("None"), clone(&dir.path().join("y"), None)).await.is_err());
+        let gone = dir.path().join("gone");
+        assert!(create_with(&hub, new("Gone"), clone(&gone, Some("file:///nonexistent/r.git"))).await.is_err());
+        assert!(!gone.exists() && !hub.project_dir("gone").exists());
+
+        // Agents in the project get MAP's gitconfig; so do MAP's own git commands.
+        let session = hub
+            .launch(crate::hub::LaunchRequest { name: None, provider: "claude".into(), model: None, role: Role::Manual, task_id: None, project: Some(p.slug.clone()), prompt: None })
+            .await
+            .unwrap();
+        let script = std::fs::read_to_string(hub.run_dir(&session.name).join("launch.sh")).unwrap();
+        let config = hub.config.server.data_dir.join("git/gitconfig");
+        assert!(script.contains(&format!("export GIT_CONFIG_GLOBAL={}\n", config.display())), "{script}");
+        assert!(config.is_file());
+        let status = crate::project_git::status(&hub, &p.slug).await.unwrap();
+        assert_eq!((status.is_repo, status.upstream.as_deref(), status.busy), (true, Some("origin/main"), None));
+
+        // While one of its tasks runs, only fetch is allowed.
+        let mut t = hub.store.create_task(task("work", Some(&p.slug))).await.unwrap();
+        t.status = TaskStatus::Running;
+        hub.put_task(&mut t).await.unwrap();
+        assert!(crate::project_git::status(&hub, &p.slug).await.unwrap().busy.is_some_and(|b| b.contains(&format!("#{}", t.id))));
+        assert!(matches!(crate::project_git::run_op(&hub, &p.slug, crate::project_git::Op::Pull, None).await, Err(crate::project_git::OpError::Refused(_))));
+        assert!(crate::project_git::run_op(&hub, &p.slug, crate::project_git::Op::Fetch, None).await.unwrap().ok);
     }
 
     #[tokio::test]
