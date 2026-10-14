@@ -79,15 +79,22 @@ nothing is tied to one repository, session name or provider.
     Reflex as they are added; marking a logged decision right or wrong adds it as a case and tells Reflex's calibrator
     whether Reflex's own answer was right.
   - **Not calibrated** (no threshold): shadow mode. Reflex scores every question, but the fallback answers.
-  - **Thai input** (any character in U+0E00–U+0E7F) is never sent to Reflex, which tokenises English only: it goes
-    straight to the fallback, with the reason in the answer.
+  - **Thai input** (any character in U+0E00–U+0E7F). Reflex tokenises English words only, so MAP glosses Thai first
+    (`backend/src/thai.rs`): the text is split by longest match against a glossary (Thai has no spaces) and each word
+    replaced by its English; English words, code and numbers stay. The glossary is built in
+    (`backend/templates/thai-glossary.tsv`, ~800 words: software, business, people, time, particles) plus the
+    project's own words (Reflex screen → **Thai words**: the Thai fragments recent decisions did not cover, a live
+    preview of what Reflex reads, `PUT /api/projects/{slug}/thai/words`). The questions' prompts and options are
+    glossed too. When at least 60% of the Thai is known, Reflex reads the English (the reason says "Thai read through
+    the glossary (82% known)"); below that it goes straight to the fallback as before. Calibration cases in Thai are
+    glossed the same way. Local and deterministic: no LLM translates.
   - **More than 8 domains** pauses Reflex. Archiving moves domains to `_archive/` in the corpus repo (one commit),
     which Reflex never loads; the dashboard's Reflex screen offers to archive the smallest.
   - **Savings** (`#reflex/savings`): LLM tokens Reflex saved against what the fallbacks spent, per day and per
     project. Every decision records its fallback prompt's length; spent tokens are the API's reported `usage`, else
     ~4 chars per token (headless CLIs report nothing; `[reflex] fallback_overhead_tokens` adds their own system
     prompt). A reflex answer is priced at the project's measured tokens per call when 3 or more API calls in 30 days
-    reported usage, else `ceil(prompt chars / 4) + 16`. Thai decisions are counted apart: they never reach Reflex.
+    reported usage, else `ceil(prompt chars / 4) + 16`. Thai decisions the glossary could not read are counted apart.
 - **Updates.** A bell in the top bar counts the agent CLIs with a newer release (`[updates]` in `map.toml`, checked
   every `interval_secs`, 6 hours by default). Each provider's `version` command (`claude --version`…, run with the
   workspace env, no stdin and a timeout) is compared with the version its `latest` source publishes (Claude's release
@@ -754,6 +761,10 @@ one of the task's last two is not logged again, so a task parked at a branch doe
 
 | Kind | Edge | Emitted in |
 | --- | --- | --- |
+| `decision.intake.ready` / `.unsure` | intake → ready | `intake::run`: Reflex sure it is light or heavy, or unsure / not running (as before) |
+| `decision.intake.unclear` / `.plan_first` / `.duplicate` | intake (held) | Reflex sure it is unclear or a project to plan first, or a near-copy of a done task: waits for the owner |
+| `decision.intake.shared_files` | intake | Reflex sure it changes shared files: runs alone, no analyst call |
+| `decision.intake.released` | intake → ready | the owner's Start anyway |
 | `decision.ready.go` | ready → pick | `tick`: dependencies done, slot free |
 | `decision.ready.blocked` | ready → blocked | `tick`: a dependency failed or was cancelled |
 | `decision.pick.chosen` / `.none` | pick → launch / stays | `start` (`pick_provider`); `none` while no provider is available |
@@ -841,6 +852,20 @@ outcome, what went wrong on the way: verify and audit failures, conflicts, send-
 substrings in Thai as well as English (terms of three characters or more; shorter ones fall back to a plain scan); it
 is rebuilt when older than two minutes, or with Reindex.
 
+**Should this project have knowledge yet?** The overview carries a suggestion (`KnowledgeOverview.suggestion`). A
+project with no index is **recommended** to set one up once it has 30 or more source files (or 3000 lines; build,
+dependency and scratch folders and dot-folders not counted), 3 tasks done (their lessons are only in MAP's memory),
+10 docs with no index, or a rulebook over its warn budget; smaller projects get **not yet** with the numbers, since
+cards would cost more than they save. The screen shows the reasons and what accepting does. **Set up knowledge**
+(`POST /api/projects/{slug}/knowledge/accept`) queues one task, once, whose prompt is MAP's knowledge practice: survey
+the docs, rulebooks, code layout and past tasks (MAP's memory, through `$MAP_KNOWLEDGE_URL`); write one card per area
+under `.docs/knowledge/domain/` (business rules) and `ops/` (running, deploying, debugging), 40–120 lines, at most the
+cap, each with `sources:`; write the index with the conventions and one row per card; point the rulebooks at the
+index and move their long reference sections into cards; no code changes, no secrets, one commit. **Not now**
+(`…/knowledge/dismiss`) hides it until asked again. While the task runs the suggestion says so; once the index exists
+the knowledge is **in use**: every agent's prompt already tells it to search first, and the health checks below
+watch it. The "no index" health finding's fix task uses the same prompt.
+
 Health checks follow the team-process conventions (cards in `.docs/knowledge/` with an `index.md`, each card's
 `sources:` frontmatter listing the files it summarises): a card is **stale** when one of its sources was committed
 after it (git commit times), **missing source**, **over / near the line cap** (200 / 170), **not in the index**,
@@ -856,21 +881,32 @@ with the conventions, and the init agent writes the first cards and their index 
 
 ## Reflex gates
 
-Two decisions the orchestrator makes for every task of a project can be asked of the project's own Reflex first:
-local, model-free, a few milliseconds. Neither ever calls an LLM to decide: whenever Reflex is not running, abstains,
-reads Thai text, or answers below the project's threshold (or the project has no threshold yet), the orchestrator does
-exactly what it does with the gate off. Both are off by default; turn them on per project under **Settings → Checks →
-Reflex gates** (or in the wizard's Checks step), stored as `settings.reflex_gates = { audit, tier }`.
+Decisions the orchestrator makes for every task can be asked of Reflex first: local, model-free, a few milliseconds.
+None of them ever calls an LLM to decide: whenever Reflex is not running, abstains, cannot read the Thai, or answers
+below the gates' threshold (or there is no threshold yet), the orchestrator does exactly what it does with the gate
+off. All are off by default; turn them on per project under **Settings → Checks → Reflex gates** (or in the wizard's
+Checks step), stored as `settings.reflex_gates = { intake, audit, tier }`. Thai tasks are read through the project's
+Thai glossary.
 
-- **Audit gate** (saves whole audit runs). When a task would be audited (audit on), the orchestrator asks the yes/no
-  question `needs_audit`, "Does this change need a careful LLM audit before it is accepted?", with the task's title
-  and prompt, the worker's summary and `git diff --stat HEAD` from the project's folder (`git status --short` when it
-  is not a git repo or has no commit yet), each shortened. A confident **no** accepts the task on verification and
-  goes on to `post_done` (`decision.audit.skipped_reflex`, with the confidence and the decision log row). **Yes**,
-  unsure or not running: the audit runs as before (`decision.audit.reflex_said_audit` / `.reflex_abstained`).
-- **Model tier** (cheaper models for light work). For a task without a pinned model, the orchestrator asks the choice
-  question `tier` (`light`, `standard`, `heavy`) with the task's title and prompt. A confident answer starts the
-  worker on that tier's model for the chosen provider (`decision.pick.tier_<tier>`); unsure, the usual model (the
+- **Intake gate** (before any LLM sees the task; `backend/src/intake.rs`). Once per pending task, whatever the free
+  slots:
+  1. A done task of the same project with 70% or more of the same text (character trigrams, so Thai and English
+     alike) holds it as a **duplicate** of that task. A task it depends on does not count.
+  2. One Reflex call asks `intake` (`unclear`, `plan_first`, `light`, `heavy`) and, in a shared-folder project with
+     the parallel analyst on, `shared` (`shared`, `own`).
+     - A confident **unclear** or **plan_first** holds the task for the owner: it stays `pending` with a "waiting for
+       you" badge. **Start anyway** (`PATCH /tasks/{id}` `{"action": "start_anyway"}`), **Clarify**
+       (`{"action": "clarify", "note"}` adds the note to the prompt and the gate looks again), open the planner, or
+       cancel.
+     - **light** and **heavy** are ready tasks, and the answer is the tier too (below).
+     - A confident **shared** sets the task's scope to the whole repo, not independent (`by: reflex`): it runs alone
+       in the folder, and the parallel analyst (an LLM) is never asked about it.
+     - Unsure, below the threshold or not running: the task goes on as before.
+  Events `decision.intake.ready | unsure | unclear | plan_first | duplicate | shared_files | released`, on the new
+  first node **Intake** of the Decisions graph.
+- **Model tier** (cheaper models for light work). For a task without a pinned model: a confident `light` or `heavy`
+  (from the intake call when that gate is on, otherwise asked here with the same question) starts the worker on that
+  tier's model for the chosen provider (`decision.pick.tier_<tier>`); anything else keeps the usual model (the
   project's model for the provider, else its default; `decision.pick.tier_abstained`). A pinned model is never
   changed, and providers without tier models are not asked. Tier models come from `map.toml`:
 
@@ -885,20 +921,29 @@ Reflex gates** (or in the wizard's Checks step), stored as `settings.reflex_gate
   ```
 
   Each model must be in the provider's `models` list when that list is not empty.
+- **Audit gate** (saves whole audit runs). When a task would be audited (audit on), the orchestrator asks
+  `needs_audit` (`audit`, `no_audit`) with the task's title and prompt, the worker's summary and `git diff --stat`
+  (against the task's base on its own branch, else `HEAD`; `git status --short` when there is no commit yet), each
+  shortened. A confident **no_audit** accepts the task on verification and goes on to landing
+  (`decision.audit.skipped_reflex`). Anything else: the audit runs as before (`decision.audit.reflex_said_audit` /
+  `.reflex_abstained`).
 
-Each gate question is logged in the project's decision log (with its state text) like any `/decide` call, so it shows
-on the Reflex screen and in its stats, and can be marked right or wrong to become a calibration case. The gates ask
-with route `reflex_gated`: Reflex's answer counts only at or above the threshold, and the fallback is never asked.
+**The gates' own Reflex.** The gates do not use the project's corpus: they have one Reflex of their own, shared by
+every project, on `[reflex] gates_port` (default: the port just below `port_base`), with its corpus repo at
+`<data_dir>/gates/corpus.git`, seeded on first start from `backend/templates/gates/`. Measured against the shipped
+`reflex 0.2.4`: a choice question routes only between corpus domains named like its options, and a yes/no question
+scored the same for every input. So the corpus is one domain per answer: `unclear`, `plan_first`, `light`, `heavy`,
+`shared`, `own`, `audit`, `no_audit` (8, the most Reflex takes), each runbook prose of what such a task looks like.
+Edit them in **Settings → Reflex gates** (`PUT /api/gates/file`; the domains stay the answers'); Reflex restarts on
+save.
 
-**The `orchestration` domain.** The answers come from an `orchestration/` domain in the project's corpus. Turning a
-gate on (when creating the project or in its settings) adds a seed `orchestration/gates.md` if the corpus has no
-such domain, through the normal corpus write (one commit, Reflex restarts), and saves `needs_audit` and `tier` as the
-project's questions; the check lines say so. The seed is runbook prose to edit to the project's own rules: changes
-that need an audit (money, auth and permissions, schema and migrations, deploy, data deletion, security) and changes
-that do not (docs, comments, copy, tests only, formatting, renames), and what light, standard and heavy tasks look
-like. It is never added twice, and not at all when the corpus already has 8 domains (the most Reflex takes): the
-check line asks you to archive one and add the domain yourself. Calibrate both questions on the Reflex screen before
-relying on them; until the project has a threshold, the gates only score in shadow and change nothing.
+**Shadow first.** On a labelled set of 25 tasks, the seed corpus mostly abstained, and some of its confident answers
+were wrong. So the gates start in shadow (`[reflex] gates_threshold` unset): every answer is logged on the project's
+Reflex screen with its confidence, and none is acted on. Set a threshold (Settings → Reflex gates,
+`POST /api/gates {"threshold": 0.02}`, kept across restarts; `null` goes back to map.toml's) once the logged answers
+above it are right. Marking a gate decision right or wrong tells the gates Reflex's calibrator. Each gate question
+is logged in the project's decision log like any `/decide` call, with route `reflex_gated`: the fallback is never
+asked.
 
 ## API
 
@@ -919,7 +964,7 @@ All routes are under `/api`. When `server.api_token` is set, send `Authorization
 | GET/POST | `/orchestrator` | Status, or `{"running": true}` |
 | GET | `/pipeline` | `provider_order`, `verify`, audit, `post_done` and retry settings from `[orchestrator]` |
 | GET/POST | `/projects` | List, or create (`name`, `slug`, `description`, `fallback`, `model`, `settings`); returns the project and `checks` |
-| GET/PATCH/DELETE | `/projects/{slug}` | Info (settings, Reflex status, decision counts), change (`threshold`, `fallback`, `model`, `questions`, `settings`, `paused`…; returns the `project` and `checks`, e.g. a seeded `orchestration/gates.md`), delete |
+| GET/PATCH/DELETE | `/projects/{slug}` | Info (settings, Reflex status, decision counts), change (`threshold`, `fallback`, `model`, `questions`, `settings`, `paused`…; returns the `project` and `checks`, e.g. the gates Reflex's state when a gate is turned on), delete |
 | GET | `/projects/defaults` | The `map.toml` values projects inherit (provider order, verify, audit, max_parallel, post_done, tier models, `trust_folders` and the CLIs it applies to) |
 | GET/POST | `/projects/{slug}/trust` | Whether each installed CLI trusts the project's folder (read from its config); `{}` marks it trusted as creating the project does, returning `checks` and the new state |
 | GET | `/templates` | Templates with their files and placeholders (built in, then `[templates] dirs`) |
@@ -941,15 +986,23 @@ All routes are under `/api`. When `server.api_token` is set, send `Authorization
 | POST | `/projects/{slug}/scopes` | `{"tasks": [{"id", "paths", "independent", "reason"}]}`: declare tasks' scopes (project token allowed) |
 | GET | `/projects/{slug}/knowledge` | `KnowledgeOverview`: docs, counts by kind, health issues (with fix task prompts), rulebook budgets, scratch folders, recent searches; reindexes when older than 2 minutes |
 | POST | `/projects/{slug}/knowledge/reindex` | Reindex now; returns the overview |
+| POST | `/projects/{slug}/knowledge/accept` | Accept the knowledge suggestion: queues the setup task once (returns the `Task`) |
+| POST | `/projects/{slug}/knowledge/dismiss` | `{"dismissed": bool}`: not now (or undo); returns the overview |
 | GET | `/projects/{slug}/knowledge/search?q=&kind=&limit=` | Full-text search (trigram: Thai and English substrings); logged as by agent (project token) or owner. Project token allowed |
 | GET | `/projects/{slug}/knowledge/doc?path=` | One indexed document's text (only paths in the index; `map://` memory). Project token allowed |
 | POST | `/projects/{slug}/worktree-estimate` | `{"parallel"?, "copy"?, "setup"?}`: what N tasks in worktrees would cost this machine (`WorktreeEstimate`) |
-| PATCH | `/tasks/{id}` | `{"action": "retry" \| "cancel" \| "merge" \| "pull_request" \| "send_back" \| "discard", "note"?}`; merge / pull_request / send_back from `review` only (409 otherwise) |
+| PATCH | `/tasks/{id}` | `{"action": "retry" \| "cancel" \| "merge" \| "pull_request" \| "send_back" \| "discard" \| "start_anyway" \| "clarify", "note"?}`; merge / pull_request / send_back from `review` only, start_anyway for a task the intake gate holds, clarify (with the note) for a pending task (409 otherwise) |
 | POST | `/projects/{slug}/git/remote` | `{"url"}`: set or replace `origin` (`git init -b main` first when not a repo) |
 | GET/POST | `/providers/{name}/login` | Sign-in state (parsed URL, one-time code, credential check), or start the helper login session |
 | GET | `/projects/{slug}/repos/corpus` | Files and recent commits |
 | GET/PUT | `/projects/{slug}/repos/{repo}/file` | `?path=` read; `{"path", "content", "message"}` commit (`content: null` deletes) |
-| POST | `/projects/{slug}/decide` | `{"state", "questions", "route": "auto"\|"reflex"\|"llm"}`; each answer has `lane` |
+| POST | `/projects/{slug}/decide` | `{"state", "questions", "route": "auto"\|"reflex"\|"llm"}`; each answer has `lane`; Thai is glossed for Reflex |
+| GET | `/projects/{slug}/thai` | `ThaiReport`: the project's Thai words, the built-in count, recent Thai decisions read and the unknown fragments |
+| POST | `/projects/{slug}/thai/preview` | `{"text", "words"?}`: what Reflex reads for it (`ThaiPreview`: English, coverage, unknown) |
+| PUT | `/projects/{slug}/thai/words` | `{"words": {thai: english \| "-"}}`: replace the project's Thai words |
+| GET/POST | `/gates` | The gates' own Reflex (`GatesInfo`); POST `{"threshold": number \| null}` sets the threshold (null: map.toml's; unset: shadow) |
+| POST | `/gates/restart` | Restart the gates Reflex |
+| GET/PUT | `/gates/file` | `?path=` read one domain file of the gates corpus; PUT `{"path", "content"}` saves it and restarts |
 | POST | `/projects/{slug}/feedback` | `{"p": <Reflex's confidence>, "outcome": bool}` for Reflex's calibrator |
 | POST | `/projects/{slug}/fit` | Labeled `cases`, `rho`, `apply`: fit the threshold |
 | GET | `/projects/{slug}/decisions?limit=` | Decision log, newest first, with each decision's `feedback` |

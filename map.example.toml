@@ -279,6 +279,12 @@ timeout_secs = 600
 # ~4 chars per token. A headless CLI's own system prompt is not in that count: add a headless CLI call's own
 # system-prompt cost if you want it counted (tokens per call, added to both saved and spent; default 0).
 # fallback_overhead_tokens = { claude = 0, codex = 0, gemini = 0, api = 0 }
+# The orchestrator gates (intake, tier, audit) have a Reflex of their own, shared by every project, with one corpus
+# domain per answer (<data_dir>/gates/corpus.git, seeded on first start). Default port: just below port_base.
+# gates_port = 7399
+# Unset: shadow, the gates' answers are logged but none is acted on. Set it (or in Settings → Reflex gates) once the
+# logged answers above it are right; Reflex's raw confidences are small, around 1e-3..5e-2.
+# gates_threshold = 0.02
 
 # The Skills screen: what each agent can load in a workspace, where it comes from, and which tasks used it.
 # MAP only reads these locations. The one file it writes is <workspace>/.claude/settings.local.json, when you

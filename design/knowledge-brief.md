@@ -26,6 +26,15 @@ Design for question 1 first. Most visits are "glance at health, click fix, leave
 - **Fix task**: a ready-written task that MAP queues for an agent to fix one problem.
 
 ## Screen structure (top to bottom, by priority)
+0. **Suggestion** (only when the project has no knowledge yet). MAP decides whether the project needs knowledge now:
+   - **Recommended**: a prominent card above everything: "This project is ready for knowledge cards", the reasons
+     ("142 source files, 18 000 lines: more than an agent can read before each task"; "5 tasks done: their lessons are
+     only in MAP's memory"), the key numbers, then "What happens if you accept" as a numbered list (one agent task
+     surveys the code, writes cards and the index by our conventions, points CLAUDE.md at it, one commit). Two
+     buttons: **Set up knowledge** (primary) and **Not now**.
+   - **Not yet**: one muted line ("Still small: 12 files, 600 lines. MAP suggests it from 30 files or 3 tasks done").
+   - **In progress**: one line with a link to the setup task.
+   - **In use / dismissed**: nothing, or a tiny "suggested earlier · show" link.
 1. **Header**: project picker, "indexed 1 min ago", Reindex button. Small.
 2. **Health summary** (most prominent): one status line, such as "3 problems · 1 error, 2 warnings", or a clear
    "All healthy" state.
@@ -46,6 +55,7 @@ There is a back button to the screen.
 
 ## States to design
 - No project yet: "Knowledge lives in a project folder. Create a project first."
+- Suggestion recommended (no index, big project), not yet (small project), in progress (setup task running).
 - Project with no index: explain the convention in 3 lines and offer "Create index task".
 - All healthy.
 - Many problems (65 near-cap cards, a 57 KB rulebook, a 6 GB scratch folder). This is the real case for the groove
@@ -61,5 +71,7 @@ There is a back button to the screen.
 ## Data available (API `GET /api/projects/{slug}/knowledge`)
 `docs[]` (path, kind, title, lines, bytes, modified, in_index, sources), `counts` by kind, `issues[]` (check,
 level, path, detail, fix_title, fix_prompt), `rulebooks[]` (path, bytes, warn, cap),
-`scratch[]` (path, bytes, copies[]), `recent_queries[]` (query, by, hits, at), `indexed_at`.
+`scratch[]` (path, bytes, copies[]), `recent_queries[]` (query, by, hits, at), `indexed_at`, `suggestion` (verdict
+recommended|not_yet|in_progress|in_use|dismissed, reasons[], stats {source_files, source_lines, done_tasks, docs,
+cards, rulebook_bytes}, plan[], task). Accept: `POST …/knowledge/accept`; not now: `POST …/knowledge/dismiss`.
 Search: `GET …/knowledge/search?q=&kind=` returns hits with snippet and score.
