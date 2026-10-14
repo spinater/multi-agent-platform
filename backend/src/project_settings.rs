@@ -199,7 +199,7 @@ mod tests {
     async fn hub(extra: &str) -> (Arc<Hub>, tempfile::TempDir) {
         let dir = tempfile::tempdir().unwrap();
         let text = format!(
-            "[workspace]\ndir = \"{0}\"\n[server]\ndata_dir = \"{0}/data\"\n[orchestrator]\nprovider_order = [\"claude\", \"codex\"]\nmax_parallel = 4\nverify = [\"global-check\"]\n{extra}\n[reflex]\nbinary = \"/nonexistent/reflex\"\n[providers.claude]\nbinary = \"/bin/sh\"\ncredentials = []\n[providers.codex]\nbinary = \"/bin/sh\"\ncredentials = []\n",
+            "[projects]\npath = \"{0}\"\n[workspace]\ndir = \"{0}\"\n[server]\ndata_dir = \"{0}/data\"\n[orchestrator]\nprovider_order = [\"claude\", \"codex\"]\nmax_parallel = 4\nverify = [\"global-check\"]\n{extra}\n[reflex]\nbinary = \"/nonexistent/reflex\"\n[providers.claude]\nbinary = \"/bin/sh\"\ncredentials = []\n[providers.codex]\nbinary = \"/bin/sh\"\ncredentials = []\n",
             dir.path().display()
         );
         let config = Config::parse(&text, Path::new("/")).unwrap();
@@ -342,6 +342,53 @@ mod tests {
         assert!(crate::project_git::status(&hub, &p.slug).await.unwrap().busy.is_some_and(|b| b.contains(&format!("#{}", t.id))));
         assert!(matches!(crate::project_git::run_op(&hub, &p.slug, crate::project_git::Op::Pull, None).await, Err(crate::project_git::OpError::Refused(_))));
         assert!(crate::project_git::run_op(&hub, &p.slug, crate::project_git::Op::Fetch, None).await.unwrap().ok);
+    }
+
+    #[tokio::test]
+    async fn every_source_must_be_inside_the_project_folder() {
+        let (hub, dir) = hub("").await;
+        let outside = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(outside.path().join("app")).unwrap();
+        let new = |name: &str| NewProject { name: name.into(), slug: None, description: String::new(), fallback: Some("none".into()), model: None };
+        let src = |kind, path: &Path, remote: Option<&str>| ProjectSettings {
+            source: ProjectSource { kind, location: Some(path.display().to_string()), remote: remote.map(String::from), branch: None },
+            ..Default::default()
+        };
+        let url = "file:///nonexistent/r.git";
+        for (kind, path, remote) in [
+            (SourceKind::Local, outside.path().join("app"), None),
+            (SourceKind::Empty, outside.path().join("fresh"), None),
+            (SourceKind::Clone, outside.path().join("clone"), Some(url)),
+            // The project folder itself, `..`, and a symlink out of it.
+            (SourceKind::Local, dir.path().to_path_buf(), None),
+            (SourceKind::Empty, dir.path().join("a/../../x"), None),
+        ] {
+            let err = create_with(&hub, new("Out"), src(kind, &path, remote)).await.unwrap_err().to_string();
+            assert!(err.contains("outside the project folder") || err.contains("project folder itself") || err.contains("`..`"), "{kind:?} {}: {err}", path.display());
+        }
+        std::os::unix::fs::symlink(outside.path(), dir.path().join("escape")).unwrap();
+        for (kind, path) in [(SourceKind::Local, dir.path().join("escape/app")), (SourceKind::Empty, dir.path().join("escape/new")), (SourceKind::Clone, dir.path().join("escape/c"))] {
+            let err = create_with(&hub, new("Esc"), src(kind, &path, Some(url))).await.unwrap_err().to_string();
+            assert!(err.contains("outside the project folder"), "{err}");
+        }
+        assert!(!outside.path().join("fresh").exists() && !outside.path().join("escape").exists());
+        assert!(hub.store.projects().await.unwrap().is_empty());
+
+        // A new folder under sub-folders that do not exist yet is fine, and stored as its real path.
+        let (p, _) = create_with(&hub, new("Deep"), src(SourceKind::Empty, &dir.path().join("group/team/deep"), None)).await.unwrap();
+        assert!(dir.path().join("group/team/deep").is_dir());
+        let info = hub.project_info(p).await.unwrap();
+        assert!(!info.outside_roots && info.root.is_some());
+
+        // A project made before the project folder was set keeps loading, with the warning.
+        let mut old = hub.store.project(&info.project.slug).await.unwrap().unwrap();
+        old.slug = "legacy".into();
+        old.port += 1;
+        old.settings.source.location = Some(outside.path().join("app").display().to_string());
+        hub.put_project(&old).await.unwrap();
+        let legacy = hub.projects().await.unwrap().into_iter().find(|i| i.project.slug == "legacy").unwrap();
+        assert!(legacy.outside_roots && legacy.root.is_none());
+        assert_eq!(legacy.workspace, outside.path().join("app").display().to_string());
     }
 
     #[tokio::test]

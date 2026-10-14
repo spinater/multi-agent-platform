@@ -10,6 +10,7 @@ import type { SourceInspection } from "@/lib/generated/SourceInspection";
 import type { SourceKind } from "@/lib/generated/SourceKind";
 
 import { useApp } from "./app-context";
+import { FolderPicker } from "./folder-picker";
 import { GitAccessDialog } from "./git-access";
 import { useGitAccess } from "./settings/git-ssh";
 import {
@@ -54,7 +55,7 @@ const base = (p: string) => p.trim().replace(/\/+$/, "").split("/").pop() ?? "";
 
 type Source = { kind: SourceKind; location: string; url: string; branch: string };
 
-const failedInspection: SourceInspection = { ok: false, error: null, default_branch: null, branches: [], files: [], commits: null, hint: null, folder: null };
+const failedInspection: SourceInspection = { ok: false, error: null, default_branch: null, branches: [], files: [], commits: null, hint: null, folder: null, root: null };
 
 /** The 5-step "New project" wizard (Projects.dc.html). A project is a folder on this machine that agents work in
  * directly, an existing one or a new empty one; the platform never copies or hosts the code. The settings are stored
@@ -116,7 +117,7 @@ export function ProjectWizard({ onClose, onCreated, initialStep = 0 }: { onClose
   const remoteSeen = cloning && url ? remoteInspection : null;
 
   // Look at the folder as it is typed (git branch, commits, top-level files; or that a new one is free). A clone
-  // goes into `<projects root>/<repo name>` unless another folder is typed.
+  // goes into `<project folder>/<repo name>` unless another folder is typed.
   const location = (cloning && !folderTouched ? (remoteSeen?.folder ?? "") : source.location).trim();
   const ready = /^(\/|~\/)./.test(location);
   const folderKind: SourceKind = cloning ? "empty" : source.kind;
@@ -271,20 +272,27 @@ export function ProjectWizard({ onClose, onCreated, initialStep = 0 }: { onClose
                     </div>
                   </>
                 )}
-                <Field
-                  label={source.kind === "local" ? "Folder" : cloning ? "Clone into" : "New folder"}
-                  hint={cloning ? "A new or empty folder; by default the repo's name under [projects] root." : "An absolute path, or ~/…, on the machine the platform runs on."}
-                >
-                  <TextInput
+                <div className="flex flex-col gap-1.5">
+                  <span className="font-mono text-[10.5px] font-medium tracking-[0.1em] text-muted uppercase">
+                    {source.kind === "local" ? "Folder" : cloning ? "Clone into" : "New folder"}
+                  </span>
+                  <span className="text-[11px] text-muted">
+                    {source.kind === "local"
+                      ? "A sub-folder of the project folder set in map.toml ([projects] path)."
+                      : cloning
+                        ? "A new or empty sub-folder of the project folder; by default the repo's name."
+                        : "Name a new sub-folder of the project folder; it is created empty."}
+                  </span>
+                  <FolderPicker
+                    mode={source.kind === "local" ? "existing" : "new"}
                     value={cloning && !folderTouched ? location : source.location}
-                    onChange={(e) => {
-                      setSource({ ...source, location: e.target.value });
+                    suggestedName={cloning ? base(remoteSeen?.folder ?? "") : ""}
+                    onChange={(path) => {
+                      setSource({ ...source, location: path });
                       setFolderTouched(true);
                     }}
-                    placeholder={cloning ? "~/project/app" : "~/project/my-app"}
-                    autoFocus={!cloning}
                   />
-                </Field>
+                </div>
                 {ready && (
                   <Inset>
                     <span className="text-muted">{inspecting ? `looking at ${location}…` : location}</span>

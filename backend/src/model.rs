@@ -384,6 +384,11 @@ pub struct ProjectInfo {
     pub stats: DecisionStats,
     /// The folder the project's agents work in.
     pub workspace: String,
+    /// The project folder (`[projects] path`, or the root of `roots`) its folder is inside; `None` when outside.
+    pub root: Option<String>,
+    /// Its folder is outside the configured project folder (made before it was set, or since moved): it keeps
+    /// working, but a project could not be created there now.
+    pub outside_roots: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
@@ -1078,9 +1083,12 @@ pub struct SourceInspection {
     /// For a git URL: what to do about an error (e.g. add MAP's public key to the host).
     #[serde(default)]
     pub hint: Option<String>,
-    /// For a git URL: the suggested folder, `<projects.root>/<repo name>`.
+    /// For a git URL: the suggested folder, `<project folder>/<repo name>`.
     #[serde(default)]
     pub folder: Option<String>,
+    /// For a folder: the project folder (root) it is inside, by name.
+    #[serde(default)]
+    pub root: Option<String>,
 }
 
 /// How a provider signs in, from its spec in `map.toml`. Never carries a secret.
@@ -1615,7 +1623,7 @@ pub struct GitAccess {
     pub gitconfig_path: String,
     /// The user's own global git config files it includes (they win over MAP's defaults).
     pub includes: Vec<String>,
-    /// `[projects] root`: where "Clone from git" puts new folders by default.
+    /// `[projects] path`, the project folder: where "Clone from git" puts new folders by default.
     pub projects_root: String,
     /// `ssh-keygen` and `ssh` were found on PATH.
     pub ssh_available: bool,
@@ -1753,7 +1761,12 @@ pub struct ServerSettings {
     pub allowed_hosts: Vec<String>,
     /// `server.api_token` is set. Its value is never returned.
     pub api_token_set: bool,
+    /// The folder holding `map.toml` (with an installer's layout, also the data dir's parent).
+    pub config_dir: Option<String>,
+    /// The project folder (`[projects] path`; with `roots`, the default one): projects are its sub-folders.
     pub projects_root: String,
+    /// Every folder projects may be created in: the project folder, or each of `[projects] roots`.
+    pub project_roots: Vec<FsRoot>,
     /// `workspace.dir`, the default workspace.
     pub workspace_dir: String,
     pub session_prefix: String,
@@ -1967,4 +1980,80 @@ pub struct PlannerInstructions {
     /// `built-in` or the path of `templates.planner_agent`.
     pub source: String,
     pub content: String,
+}
+
+// ---- project folder: where project folders may be (`[projects] path`, or `roots`), and the folder picker (roots.rs)
+
+/// A folder projects may be created in (`[projects] path`, or one of `roots`). `GET /api/fs/roots`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct FsRoot {
+    pub name: String,
+    /// As MAP sees it (inside the container, in Docker), `~` expanded.
+    pub path: String,
+    /// Display only: the same folder on the host, when the container mounts it at another path.
+    pub host_path: Option<String>,
+    /// The folder exists on this machine (a missing one is a warning at start, not an error).
+    pub exists: bool,
+    /// The folder itself may be a project's folder; otherwise only its sub-folders may.
+    pub allow_root_itself: bool,
+    /// "Clone from git" suggests `<path>/<repo name>` here.
+    pub is_default: bool,
+}
+
+/// What a listed entry is. Only folders are listed; a symlink only when it points to a folder inside the same root.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum FsEntryKind {
+    Dir,
+    /// A symlink to a folder inside the same root.
+    Symlink,
+}
+
+/// A sub-folder in a `GET /api/fs/browse` listing.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct FsEntry {
+    pub name: String,
+    pub kind: FsEntryKind,
+    /// It has a `.git` (a repo or a worktree).
+    pub is_git: bool,
+    /// The slug of the MAP project whose folder this is.
+    pub is_project: Option<String>,
+    /// The slug of a MAP project whose folder is inside this one (projects cannot nest, so it cannot be picked).
+    pub contains_project: Option<String>,
+    /// It has sub-folders (or too many entries to look through).
+    pub has_children: bool,
+    /// Its name starts with `.`.
+    pub hidden: bool,
+}
+
+/// `GET /api/fs/browse?root=&path=&hidden=`: the sub-folders of one folder inside a root. Never file contents.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct FsListing {
+    pub root: String,
+    /// The listed folder relative to the root (`""` is the root), with symlinks resolved.
+    pub path: String,
+    /// The parent's relative path; `None` at the root.
+    pub parent: Option<String>,
+    /// The listed folder as an absolute path on this machine (what a project stores).
+    pub abs_path: String,
+    /// The same folder on the host, when the root has a `host_path`.
+    pub host_path: Option<String>,
+    /// The listed folder is the root itself.
+    pub is_root: bool,
+    /// The slug of a MAP project whose folder is the listed folder or contains it.
+    pub in_project: Option<String>,
+    /// Sorted by name, case-insensitively; dot-folders only with `hidden=true`.
+    pub entries: Vec<FsEntry>,
+    /// More folders than the cap were found; only the first are listed.
+    pub truncated: bool,
+    /// Files (and other non-folders) in the listed folder: a count only.
+    #[ts(type = "number")]
+    pub files: u64,
+    /// Dot-folders left out because `hidden` was not set.
+    #[ts(type = "number")]
+    pub hidden_dirs: u64,
 }

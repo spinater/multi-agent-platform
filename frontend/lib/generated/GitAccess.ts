@@ -15,7 +15,7 @@ gitconfig_path: string,
  */
 includes: Array<string>, 
 /**
- * `[projects] root`: where "Clone from git" puts new folders by default.
+ * `[projects] path`, the project folder: where "Clone from git" puts new folders by default.
  */
 projects_root: string, 
 /**

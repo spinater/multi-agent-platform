@@ -279,21 +279,27 @@ pub async fn inspect(State(hub): State<Arc<Hub>>, Json(b): Json<InspectBody>) ->
         let timeout = std::time::Duration::from_secs(hub.config.projects.git_timeout_secs.min(60));
         let branch = b.branch.as_deref().map(str::trim).filter(|x| !x.is_empty());
         let mut seen = crate::project_git::inspect_remote(&hub.gitconfig(), &b.location, branch, timeout, hub.git_files().key().is_file()).await;
-        seen.folder = Some(hub.config.projects.root.join(crate::project_git::repo_name(&b.location)).display().to_string());
+        seen.folder = Some(hub.config.projects.default_root().path.join(crate::project_git::repo_name(&b.location)).display().to_string());
         return Ok(Json(seen));
     }
     if let Err(err) = project_settings::validate_location(b.kind, Some(&b.location)) {
         return Ok(Json(failed(err)));
     }
-    let path = crate::login::expand_home(b.location.trim());
-    Ok(Json(match b.kind {
+    // The same checks creating the project makes: inside the project folder, free, not overlapping another project.
+    let path = match projects::project_folder(&hub, b.kind, Some(&b.location), "").await {
+        Ok(path) => path,
+        Err(err) => return Ok(Json(failed(err))),
+    };
+    let root = crate::roots::root_name(hub.config.projects.roots(), &path);
+    let seen = match b.kind {
         SourceKind::Local if path.is_dir() => repo::inspect_folder(&path).await,
         SourceKind::Local => failed(anyhow::anyhow!("{} is not a folder on this machine", path.display())),
         SourceKind::Empty if !path.exists() => SourceInspection { ok: true, ..Default::default() },
         SourceKind::Empty if path.is_dir() && std::fs::read_dir(&path).is_ok_and(|mut d| d.next().is_none()) => SourceInspection { ok: true, ..Default::default() },
         SourceKind::Empty => failed(anyhow::anyhow!("{} already exists and is not an empty folder", path.display())),
         SourceKind::Git | SourceKind::Clone => failed(anyhow::anyhow!("use \"clone\" with the repo's URL to clone it into a folder on this machine")),
-    }))
+    };
+    Ok(Json(SourceInspection { root, ..seen }))
 }
 
 pub async fn login_start(State(hub): State<Arc<Hub>>, UrlPath(name): UrlPath<String>) -> ApiResult<crate::model::LoginState> {

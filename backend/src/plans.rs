@@ -514,7 +514,7 @@ pub(crate) mod tests {
     pub(crate) async fn hub(extra: &str) -> (Arc<Hub>, Arc<FakeTerminal>, tempfile::TempDir) {
         let dir = tempfile::tempdir().unwrap();
         let text = format!(
-            "[workspace]\ndir = \"{0}\"\n[server]\ndata_dir = \"{0}/data\"\napi_token = \"secret\"\n[orchestrator]\nprovider_order = [\"codex\", \"claude\"]\n[reflex]\nbinary = \"/nonexistent/reflex\"\n[providers.claude]\nbinary = \"/bin/sh\"\ncredentials = []\nmodels = [\"opus\", \"sonnet\"]\ndefault_model = \"sonnet\"\n[providers.codex]\nbinary = \"/nonexistent/codex\"\n[providers.gemini]\nbinary = \"/nonexistent/agy\"\n[templates]\ndirs = []\n{extra}\n",
+            "[projects]\npath = \"{0}\"\n[workspace]\ndir = \"{0}\"\n[server]\ndata_dir = \"{0}/data\"\napi_token = \"secret\"\n[orchestrator]\nprovider_order = [\"codex\", \"claude\"]\n[reflex]\nbinary = \"/nonexistent/reflex\"\n[providers.claude]\nbinary = \"/bin/sh\"\ncredentials = []\nmodels = [\"opus\", \"sonnet\"]\ndefault_model = \"sonnet\"\n[providers.codex]\nbinary = \"/nonexistent/codex\"\n[providers.gemini]\nbinary = \"/nonexistent/agy\"\n[templates]\ndirs = []\n{extra}\n",
             dir.path().display()
         );
         let config = Config::parse(&text, Path::new("/")).unwrap();

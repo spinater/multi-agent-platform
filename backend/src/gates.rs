@@ -280,7 +280,7 @@ mod tests {
 
     async fn hub() -> (Arc<Hub>, tempfile::TempDir) {
         let dir = tempfile::tempdir().unwrap();
-        let text = format!("[workspace]\ndir = \"{0}\"\n[server]\ndata_dir = \"{0}/data\"\n[reflex]\nbinary = \"/nonexistent/reflex\"\n", dir.path().display());
+        let text = format!("[projects]\npath = \"{0}\"\n[workspace]\ndir = \"{0}\"\n[server]\ndata_dir = \"{0}/data\"\n[reflex]\nbinary = \"/nonexistent/reflex\"\n", dir.path().display());
         let config = Config::parse(&text, Path::new("/")).unwrap();
         (Hub::new(config, Store::memory().await.unwrap(), Arc::new(FakeTerminal::default())), dir)
     }

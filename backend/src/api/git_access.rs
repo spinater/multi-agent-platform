@@ -28,7 +28,7 @@ pub async fn access(State(hub): State<Arc<Hub>>) -> ApiResult<GitAccess> {
         known_hosts: git_access::known_hosts(&files).await,
         gitconfig_path: gitconfig.display().to_string(),
         includes: git_access::user_includes().iter().map(|p| p.display().to_string()).collect(),
-        projects_root: hub.config.projects.root.display().to_string(),
+        projects_root: hub.config.projects.default_root().path.display().to_string(),
         ssh_available: on_path("ssh") && on_path("ssh-keygen"),
         settings: git_access::read_settings(&files),
         system_ssh: git_access::system_ssh(&git_access::home_ssh_dir(), crate::settings::in_container()).await,

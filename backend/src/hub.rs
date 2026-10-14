@@ -222,8 +222,17 @@ impl Hub {
 
     pub async fn project_info(&self, project: Project) -> Result<ProjectInfo> {
         let stats = self.store.decision_stats(&project.slug).await?;
-        let workspace = self.workspace_of(&project).display().to_string();
-        Ok(ProjectInfo { reflex: self.reflex.status(&project.slug), stats, project, workspace })
+        let folder = self.workspace_of(&project);
+        // Only folder projects are judged: a legacy `git` project's workspace is MAP's own.
+        let (root, outside_roots) = match project.settings.source.kind {
+            SourceKind::Git => (None, false),
+            _ => {
+                let root = crate::roots::root_name(self.config.projects.roots(), &folder);
+                let outside = root.is_none();
+                (root, outside)
+            }
+        };
+        Ok(ProjectInfo { reflex: self.reflex.status(&project.slug), stats, project, workspace: folder.display().to_string(), root, outside_roots })
     }
 
     pub async fn projects(&self) -> Result<Vec<ProjectInfo>> {

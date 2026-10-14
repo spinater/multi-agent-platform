@@ -195,13 +195,24 @@ timeout_secs = 600
 # ask for into a draft plan of tasks that waits for your approval. Unset: backend/templates/planner-agent.md.
 # planner_agent = "~/.config/map/planner-agent.md"
 
-# Projects are folders on this machine. "Clone from git" in the new-project wizard runs `git clone` into
-# <root>/<repo name> by default (any other new or empty folder can be typed instead). MAP's own git commands in
+# Projects are folders on this machine, and only sub-folders of the project folder `path` (checked on the server for
+# an existing folder, a new one and a clone target; no `..`, no symlink out of it; the folder itself is not allowed).
+# The new-project wizard's folder picker browses nothing else, and "Clone from git" suggests <path>/<repo name>. This
+# limits only where projects are made, not what an agent can read or run once started (that is the CLI's own
+# permissions or sandbox, or in Docker the container's mounts). `root` is the older name of `path`. A project made
+# outside it earlier keeps working, with a warning on its page. MAP's own git commands in
 # project folders (clone, ls-remote, fetch, pull, push) use MAP's gitconfig and SSH key (Settings → Git & SSH, kept
 # in <data_dir>/git/), never prompt, and stop after git_timeout_secs. Agents get the same gitconfig as
 # GIT_CONFIG_GLOBAL; it includes your own ~/.gitconfig after MAP's defaults, so your settings win.
 [projects]
-# root = "~/project"
+# path = "~/project"
+# Advanced, instead of `path`: several named project folders. `host_path` is display only (the same folder on the
+# host when a container mounts it elsewhere); `allow_root_itself` lets the folder itself be a project's folder.
+# roots = [
+#   { name = "Projects", path = "~/project" },
+#   { name = "Clients", path = "/srv/clients", host_path = "/home/me/clients", allow_root_itself = false },
+# ]
+# default_root = "Projects"   # with roots: where "Clone from git" suggests a folder (default: the first)
 # git_timeout_secs = 300
 
 # The Agents screen: custom sub-agents for Claude Code (Markdown), Codex (TOML) and agy (Markdown), per project and

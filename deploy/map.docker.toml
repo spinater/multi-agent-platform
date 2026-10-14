@@ -1,6 +1,7 @@
-# map.toml for docker-compose.yml: copy to ${MAP_DIR}/map.toml and edit. Paths are inside the container:
-# /data is ${MAP_DIR}/data on the host; the agent CLIs and ${MAP_PROJECTS_DIR} are the host's, at the same paths.
-# Every other setting is documented in map.example.toml.
+# map.toml for docker-compose.yml: copy to ${MAP_CONFIG_DIR}/map.toml and edit. The config folder
+# (${MAP_CONFIG_DIR}), the project folder (${MAP_PROJECTS_DIR}) and the agent CLIs are mounted at the same paths as
+# on the host, so every path here is also the host's. Replace /home/you/MAP/config and /home/you/MAP/workspace with
+# the two folders from .env. Every other setting is documented in map.example.toml.
 
 [server]
 # All interfaces inside the container; compose publishes it on the host's 127.0.0.1 only.
@@ -9,13 +10,14 @@ bind = "0.0.0.0:4400"
 # Generate one with `openssl rand -hex 32`; the dashboard asks for it once per browser.
 api_token = "change-me"
 static_dir = "/app/frontend/out"
-data_dir = "/data/map"
+data_dir = "/home/you/MAP/config/data"
 # The tunnel's public host name, so requests that arrive with it in the Host header are accepted.
 # allowed_hosts = ["agents.example.com"]
 
 [workspace]
-# Where tasks and sessions without a project run (create it as a git repo: `git init ${MAP_DIR}/data/workspace`).
-dir = "/data/workspace"
+# Where tasks and sessions without a project run (create it as a git repo: `git init ${MAP_CONFIG_DIR}/data/workspace`).
+# It is inside the data folder, so it never shows up as a project.
+dir = "/home/you/MAP/config/data/workspace"
 session_prefix = "map-"
 # MAP marks the default workspace and each project's folder as trusted for Claude Code and Codex before it starts an
 # agent there; set false to answer the CLIs' own trust prompts yourself. (Here Claude Code's file is
@@ -42,8 +44,11 @@ binary = "agy"
 binary = "/usr/local/bin/reflex"
 
 [projects]
-# "Clone from git" puts new projects here: set it to MAP_PROJECTS_DIR from .env (mounted at the same path).
-root = "/home/you/project"
-# MAP's SSH key, known_hosts and gitconfig live in /data/map/git (MAP_DIR/data on the host), so cloning, pulling and
+# The project folder: MAP_PROJECTS_DIR from .env (mounted at the same path). Projects can only be its sub-folders,
+# and the dashboard's folder picker browses nothing else; "Clone from git" suggests <path>/<repo name>.
+path = "/home/you/MAP/workspace"
+# Mounted at another path in the container instead? Use roots, with the host's path for display:
+# roots = [{ name = "Projects", path = "/projects", host_path = "/home/you/MAP/workspace" }]
+# MAP's SSH key, known_hosts and gitconfig live in <data_dir>/git (on the host too), so cloning, pulling and
 # pushing work without mounting ~/.ssh. Create the key under Settings → Git & SSH and add its public half to
 # GitHub or GitLab.

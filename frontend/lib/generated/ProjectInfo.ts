@@ -7,4 +7,13 @@ export type ProjectInfo = { project: Project, reflex: ReflexStatus, stats: Decis
 /**
  * The folder the project's agents work in.
  */
-workspace: string, };
+workspace: string, 
+/**
+ * The project folder (`[projects] path`, or the root of `roots`) its folder is inside; `None` when outside.
+ */
+root: string | null, 
+/**
+ * Its folder is outside the configured project folder (made before it was set, or since moved): it keeps
+ * working, but a project could not be created there now.
+ */
+outside_roots: boolean, };

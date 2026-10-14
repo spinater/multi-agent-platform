@@ -9,6 +9,8 @@ import type { DecisionCounts } from "./generated/DecisionCounts";
 import type { DecisionModel } from "./generated/DecisionModel";
 import type { Event } from "./generated/Event";
 import type { FolderTrust } from "./generated/FolderTrust";
+import type { FsListing } from "./generated/FsListing";
+import type { FsRoot } from "./generated/FsRoot";
 import type { FolderTrusted } from "./generated/FolderTrusted";
 import type { FitResult } from "./generated/FitResult";
 import type { GitAccess } from "./generated/GitAccess";
@@ -162,6 +164,11 @@ export const api = {
   projectTrust: (slug: string) => request<FolderTrust>("GET", `/projects/${slug}/trust`),
   trustProject: (slug: string) => request<FolderTrusted>("POST", `/projects/${slug}/trust`, {}),
   inspectSource: (body: { kind: SourceKind; location: string; branch?: string }) => request<SourceInspection>("POST", "/projects/inspect", body),
+  /** The project folder (or each of `[projects] roots`) the folder picker may browse. */
+  fsRoots: () => request<FsRoot[]>("GET", "/fs/roots"),
+  /** Sub-folders of `path` (relative to the root); never file contents. */
+  fsBrowse: (root: string, path: string, hidden = false) =>
+    request<FsListing>("GET", `/fs/browse?root=${encodeURIComponent(root)}&path=${encodeURIComponent(path)}${hidden ? "&hidden=true" : ""}`),
   /** Starts (or returns the running) helper session that runs the provider's login command. */
   loginStart: (provider: string) => request<LoginState>("POST", `/providers/${encodeURIComponent(provider)}/login`),
   loginState: (provider: string) => request<LoginState>("GET", `/providers/${encodeURIComponent(provider)}/login`),

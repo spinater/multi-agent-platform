@@ -1,6 +1,7 @@
 //! HTTP API under `/api` and the dashboard's static files.
 
 mod agents;
+mod fs;
 mod git;
 mod git_access;
 mod plans;
@@ -92,6 +93,9 @@ pub fn router(hub: Arc<Hub>) -> Router {
         // ---- project settings and provider sign-in
         .route("/projects/defaults", get(projects::defaults))
         .route("/projects/inspect", post(projects::inspect))
+        // ---- the folder picker: the project folder and its sub-folders (roots.rs); owner token only
+        .route("/fs/roots", get(fs::list_roots))
+        .route("/fs/browse", get(fs::browse))
         .route("/projects/{slug}/trust", get(projects::trust_state).post(projects::trust))
         .route("/providers/{name}/login", get(projects::login_state).post(projects::login_start))
         // ---- usage: plan limits per provider (usage.rs)
@@ -593,6 +597,8 @@ mod tests {
             (Method::GET, "/tasks"),
             (Method::POST, "/sessions"),
             (Method::POST, "/projects//decide"),
+            (Method::GET, "/api/fs/roots"),
+            (Method::GET, "/api/fs/browse"),
         ] {
             assert_eq!(project_scope(&method, path), None, "{method} {path}");
         }
