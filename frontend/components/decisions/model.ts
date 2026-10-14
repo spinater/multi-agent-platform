@@ -104,6 +104,7 @@ export function attention(task: Task, node: DecisionNode | null, sessions: Sessi
   if (s.state === "waiting_input") return "agent is asking a question";
   if (s.state === "rate_limited") return "rate limited";
   if (s.state === "needs_auth") return "needs sign-in";
+  if (s.state === "needs_trust") return "asks to trust its folder";
   if (s.state === "stalled") return "stalled";
   if (s.state === "error") return "session error";
   if (last?.kind === "decision.retry.kept") return "a person is in the session";
@@ -212,6 +213,7 @@ export function nowChecks(args: {
       if (s?.state === "waiting_input") rows.push({ mark: "!", color: "var(--accent)", text: "agent is asking a question · a person must answer in the session" });
       if (s?.state === "stalled") rows.push({ mark: "!", color: WARN, text: `${s.detail ?? "no pane change"} · still under the timeout, so no decision yet` });
       if (s?.state === "needs_auth") rows.push({ mark: "!", color: BAD, text: "needs a new sign-in · the next check moves the task to another provider" });
+      if (s?.state === "needs_trust") rows.push({ mark: "!", color: WARN, text: `${s.detail ?? "asks to trust its folder"} · waits for you (no timeout): Trust this folder on the session card` });
       if (trace[0]?.kind === "decision.retry.kept") rows.push({ mark: "!", color: WARN, text: trace[0].message });
       return rows;
     }

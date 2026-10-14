@@ -24,6 +24,8 @@ pub fn defaults(hub: &Hub) -> ProjectDefaults {
             .filter(|(_, t)| !t.is_empty())
             .map(|(p, t)| ProviderTiers { provider: p.clone(), light: t.light.clone(), standard: t.standard.clone(), heavy: t.heavy.clone() })
             .collect(),
+        trust_folders: hub.config.workspace.trust_folders,
+        trust_providers: crate::trust::pretrust_providers(hub),
     }
 }
 

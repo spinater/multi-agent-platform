@@ -56,6 +56,24 @@ pub async fn get(State(hub): State<Arc<Hub>>, UrlPath(slug): UrlPath<String>) ->
     Ok(Json(hub.project_info(p).await?))
 }
 
+/// Whether each installed CLI trusts the project's folder (read from the CLIs' own config files).
+pub async fn trust_state(State(hub): State<Arc<Hub>>, UrlPath(slug): UrlPath<String>) -> ApiResult<crate::model::FolderTrust> {
+    let p = load(&hub, &slug).await?;
+    Ok(Json(crate::trust::status(&hub, &hub.workspace_of(&p))))
+}
+
+/// "Trust folder": marks the project's folder trusted for every CLI MAP can (as at creation), returning check lines
+/// and the state after. With `workspace.trust_folders = false` it writes nothing and says so. Takes `{}`.
+pub async fn trust(State(hub): State<Arc<Hub>>, UrlPath(slug): UrlPath<String>, Json(_): Json<Value>) -> ApiResult<crate::model::FolderTrusted> {
+    let p = load(&hub, &slug).await?;
+    let folder = hub.workspace_of(&p);
+    if !folder.is_dir() {
+        return Err(ApiError(StatusCode::CONFLICT, format!("{} is not a folder on this machine", folder.display())));
+    }
+    let checks = crate::trust::trust_folder(&hub, &folder).await;
+    Ok(Json(crate::model::FolderTrusted { checks, trust: crate::trust::status(&hub, &folder) }))
+}
+
 /// Tells a missing field (keep) from an explicit `null` (clear).
 fn present<'de, D: Deserializer<'de>, T: Deserialize<'de>>(d: D) -> Result<Option<Option<T>>, D::Error> {
     Option::<T>::deserialize(d).map(Some)

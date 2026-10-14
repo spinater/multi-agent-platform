@@ -452,6 +452,10 @@ impl Hub {
         if !cwd.is_dir() {
             bail!("workspace {} does not exist", cwd.display());
         }
+        if command.is_none() {
+            // So the CLI does not stop at its "trust this folder?" question (sign-in and update helpers need not).
+            crate::trust::ensure(self, &req.provider, &cwd, req.task_id).await;
+        }
         self.term.spawn(&name, &cwd, &script_path).await?;
         let now = Utc::now();
         let session = Session {

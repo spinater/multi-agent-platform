@@ -3,4 +3,4 @@
 /**
  * Session state as the watcher sees it on its last tick.
  */
-export type SessionState = "starting" | "working" | "idle" | "waiting_input" | "rate_limited" | "needs_auth" | "error" | "stalled" | "exited";
+export type SessionState = "starting" | "working" | "idle" | "waiting_input" | "rate_limited" | "needs_auth" | "needs_trust" | "error" | "stalled" | "exited";

@@ -81,10 +81,19 @@ pub struct WorkspaceConfig {
     /// Exported in every agent's launch script and verify command (e.g. a PATH that finds the agent CLIs).
     #[serde(default)]
     pub env: BTreeMap<String, String>,
+    /// Before it starts an agent in a folder (`dir`, a project's folder), MAP marks the folder trusted in the CLI's
+    /// own config (each provider's `trust`), so the CLI does not stop at its "trust this folder?" question. `false`:
+    /// MAP leaves those files alone and you answer the question yourself.
+    #[serde(default = "default_true")]
+    pub trust_folders: bool,
 }
 
 fn default_prefix() -> String {
     "map-".into()
+}
+
+fn default_true() -> bool {
+    true
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -435,6 +444,14 @@ pub struct ProviderSpec {
     /// Pane text meaning the agent is busy even if the pane did not change.
     pub working_markers: Vec<String>,
     pub auth_markers: Vec<String>,
+    /// Pane text of the CLI's "trust this folder?" question (state `needs_trust`). Matched with runs of whitespace
+    /// squashed, so a phrase the pane wraps onto two lines still counts.
+    pub trust_markers: Vec<String>,
+    /// Labels of the option in that question that trusts the folder; `POST /api/sessions/{name}/trust` moves the
+    /// selection there and presses Enter.
+    pub trust_accept: Vec<String>,
+    /// Where the CLI records the folders it trusts; `None`: MAP cannot mark one and relies on `trust_markers`.
+    pub trust: Option<TrustSpec>,
     /// Sign-in command run in a helper tmux session (`{binary}` substituted); empty: no web sign-in.
     pub login: Vec<String>,
     /// Text typed into the helper session after `startup_secs` (for CLIs that sign in from their TUI).
@@ -452,6 +469,63 @@ pub struct ProviderSpec {
     pub latest: Option<LatestSource>,
     /// Updates the CLI, run in a helper tmux session `<session_prefix>update-<name>`; empty: not from the dashboard.
     pub update: Vec<String>,
+}
+
+/// Where a CLI records that its user trusts a folder (`backend/src/trust.rs` writes it).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TrustSpec {
+    pub format: TrustFormat,
+    /// The file, unless `dir_env` is set; `~/` is the home directory.
+    pub file: String,
+    /// A variable naming the CLI's config folder (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`). When it is set in
+    /// `[workspace.env]` (which wins) or in MAP's own environment, the file is `<that folder>/<dir_file>`.
+    pub dir_env: Option<String>,
+    pub dir_file: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TrustFormat {
+    /// Claude Code's global config (`.claude.json`): `projects["<folder>"].hasTrustDialogAccepted = true`.
+    ClaudeJson,
+    /// Codex's `config.toml`: `[projects."<folder>"] trust_level = "trusted"`.
+    CodexToml,
+}
+
+/// `[providers.<name>.trust]`: each field overrides the built-in one; `file = ""` turns marking off.
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct TrustOverride {
+    format: Option<TrustFormat>,
+    file: Option<String>,
+    dir_env: Option<String>,
+    dir_file: Option<String>,
+}
+
+impl TrustOverride {
+    fn apply(self, base: Option<TrustSpec>, name: &str) -> Result<Option<TrustSpec>> {
+        if self.file.as_deref() == Some("") {
+            return Ok(None);
+        }
+        let merged = match base {
+            Some(b) => TrustSpec {
+                format: self.format.unwrap_or(b.format),
+                file: self.file.unwrap_or(b.file),
+                dir_env: optional(self.dir_env, b.dir_env),
+                dir_file: optional(self.dir_file, b.dir_file),
+            },
+            None => {
+                let (Some(format), Some(file)) = (self.format, self.file) else {
+                    bail!("providers.{name}.trust needs `format` and `file`");
+                };
+                TrustSpec { format, file, dir_env: optional(self.dir_env, None), dir_file: optional(self.dir_file, None) }
+            }
+        };
+        if merged.dir_env.is_some() != merged.dir_file.is_some() {
+            bail!("providers.{name}.trust: set both `dir_env` and `dir_file`, or neither");
+        }
+        Ok(Some(merged))
+    }
 }
 
 /// A URL that answers with the newest version, as plain text or inside JSON. Fetched without credentials.
@@ -495,6 +569,9 @@ struct ProviderOverride {
     idle_markers: Option<Vec<String>>,
     working_markers: Option<Vec<String>>,
     auth_markers: Option<Vec<String>>,
+    trust_markers: Option<Vec<String>>,
+    trust_accept: Option<Vec<String>>,
+    trust: Option<TrustOverride>,
     login: Option<Vec<String>>,
     login_send: Option<String>,
     login_warning: Option<String>,
@@ -534,6 +611,16 @@ pub fn builtin_providers() -> BTreeMap<String, ProviderSpec> {
             idle_markers: strings(&["? for shortcuts"]),
             working_markers: strings(&["esc to interrupt"]),
             auth_markers: strings(&["Login expired", "Please run /login", "needs you to sign in again", "OAuth session expired", "Failed to authenticate"]),
+            // Claude Code 2.1: "Quick safety check: Is this a project you created or one you trust? …", options
+            // "No, exit" (selected first) and "Yes, I trust this folder".
+            trust_markers: strings(&["Is this a project you created or one you trust", "Yes, I trust this folder", "Do you trust the files in this folder"]),
+            trust_accept: strings(&["Yes, I trust this folder"]),
+            trust: Some(TrustSpec {
+                format: TrustFormat::ClaudeJson,
+                file: "~/.claude.json".into(),
+                dir_env: Some("CLAUDE_CONFIG_DIR".into()),
+                dir_file: Some(".claude.json".into()),
+            }),
             login: strings(&["{binary}", "auth", "login"]),
             login_send: None,
             login_warning: None,
@@ -563,6 +650,16 @@ pub fn builtin_providers() -> BTreeMap<String, ProviderSpec> {
             idle_markers: strings(&["? for shortcuts"]),
             working_markers: strings(&["esc to interrupt", "Working"]),
             auth_markers: strings(&["Not logged in", "sign in with ChatGPT"]),
+            // codex-cli 0.159: "Trust this folder? Codex can read, edit, and run files here, …" with "Trust and
+            // continue" / "Open restricted"; older releases asked "Do you trust the contents of this directory?".
+            trust_markers: strings(&["Trust this folder? Codex can", "Trust and continue", "Do you trust the contents of this directory", "allow Codex to work in this folder"]),
+            trust_accept: strings(&["Trust and continue", "Yes, continue", "Yes, allow Codex to work in this folder"]),
+            trust: Some(TrustSpec {
+                format: TrustFormat::CodexToml,
+                file: "~/.codex/config.toml".into(),
+                dir_env: Some("CODEX_HOME".into()),
+                dir_file: Some("config.toml".into()),
+            }),
             login: strings(&["{binary}", "login", "--device-auth"]),
             login_send: None,
             // Seen with codex-cli 0.159: the device flow deletes ~/.codex/auth.json as soon as it starts.
@@ -588,6 +685,12 @@ pub fn builtin_providers() -> BTreeMap<String, ProviderSpec> {
             idle_markers: strings(&["Type your message"]),
             working_markers: strings(&["esc to cancel"]),
             auth_markers: strings(&["Login required", "Please sign in"]),
+            // agy 1.3: "Do you trust the contents of this project?" / "Yes, I trust this folder". It keeps the answer
+            // in `trustedWorkspaces` of ~/.gemini/antigravity-cli/settings.json, in a format MAP has not confirmed,
+            // so MAP does not write it: the question shows as `needs_trust`.
+            trust_markers: strings(&["Do you trust the contents of this project", "Yes, I trust this folder"]),
+            trust_accept: strings(&["Yes, I trust this folder"]),
+            trust: None,
             // agy signs in from its TUI (`/login`); it may keep the token in the system keyring instead of this file.
             login: strings(&["{binary}"]),
             login_send: Some("/login".into()),
@@ -627,6 +730,9 @@ impl ProviderOverride {
                     idle_markers: vec![],
                     working_markers: vec![],
                     auth_markers: vec![],
+                    trust_markers: vec![],
+                    trust_accept: vec![],
+                    trust: None,
                     login: vec![],
                     login_send: None,
                     login_warning: None,
@@ -650,6 +756,12 @@ impl ProviderOverride {
             idle_markers: self.idle_markers.unwrap_or(base.idle_markers),
             working_markers: self.working_markers.unwrap_or(base.working_markers),
             auth_markers: self.auth_markers.unwrap_or(base.auth_markers),
+            trust_markers: self.trust_markers.unwrap_or(base.trust_markers),
+            trust_accept: self.trust_accept.unwrap_or(base.trust_accept),
+            trust: match self.trust {
+                Some(t) => t.apply(base.trust, name)?,
+                None => base.trust,
+            },
             login: self.login.unwrap_or(base.login),
             login_send: optional(self.login_send, base.login_send),
             login_warning: optional(self.login_warning, base.login_warning),

@@ -20,12 +20,21 @@ pub struct FakeSession {
     pub attached: usize,
     pub sent: Vec<String>,
     pub script: String,
+    /// Panes shown one after another as keys arrive (a TUI reacting to Down, Enter).
+    pub after_keys: std::collections::VecDeque<String>,
 }
 
 impl FakeTerminal {
     pub fn set_pane(&self, name: &str, pane: &str) {
         if let Some(s) = self.sessions.lock().unwrap().get_mut(name) {
             s.pane = pane.to_string();
+        }
+    }
+
+    /// Each later `send_key` shows the next of `panes`.
+    pub fn on_keys(&self, name: &str, panes: &[&str]) {
+        if let Some(s) = self.sessions.lock().unwrap().get_mut(name) {
+            s.after_keys = panes.iter().map(|p| p.to_string()).collect();
         }
     }
 
@@ -72,7 +81,13 @@ impl Terminal for FakeTerminal {
     }
 
     async fn send_key(&self, name: &str, key: &str) -> Result<()> {
-        self.send_text(name, &format!("<{key}>"), false).await
+        self.send_text(name, &format!("<{key}>"), false).await?;
+        if let Some(s) = self.sessions.lock().unwrap().get_mut(name)
+            && let Some(next) = s.after_keys.pop_front()
+        {
+            s.pane = next;
+        }
+        Ok(())
     }
 
     async fn capture(&self, name: &str, _lines: usize, _escapes: bool) -> Result<String> {

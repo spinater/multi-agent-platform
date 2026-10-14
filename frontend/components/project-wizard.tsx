@@ -27,6 +27,7 @@ import {
   settingsFromForm,
   suggestVerify,
   tomlLines,
+  trustLine,
   useDefaults,
   type SettingsForm,
 } from "./project-ui";
@@ -309,6 +310,7 @@ export function ProjectWizard({ onClose, onCreated, initialStep = 0 }: { onClose
                     )}
                   </Inset>
                 )}
+                {defaults && <p className="font-mono text-[11px] leading-[1.5] text-muted">{trustLine(defaults.trust_folders, defaults.trust_providers)}</p>}
               </>
             )}
 

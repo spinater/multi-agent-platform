@@ -8,6 +8,8 @@ import type { Decision } from "./generated/Decision";
 import type { DecisionCounts } from "./generated/DecisionCounts";
 import type { DecisionModel } from "./generated/DecisionModel";
 import type { Event } from "./generated/Event";
+import type { FolderTrust } from "./generated/FolderTrust";
+import type { FolderTrusted } from "./generated/FolderTrusted";
 import type { FitResult } from "./generated/FitResult";
 import type { GitAccess } from "./generated/GitAccess";
 import type { GitIdentity } from "./generated/GitIdentity";
@@ -38,6 +40,7 @@ import type { SkillFile } from "./generated/SkillFile";
 import type { SkillsOverview } from "./generated/SkillsOverview";
 import type { Task } from "./generated/Task";
 import type { TemplateInfo } from "./generated/TemplateInfo";
+import type { TrustAnswer } from "./generated/TrustAnswer";
 // Reflex screen.
 import type { ArchiveResult } from "./generated/ArchiveResult";
 import type { DecisionFeedback } from "./generated/DecisionFeedback";
@@ -107,6 +110,8 @@ export const api = {
     request<{ message: string }>("DELETE", `/sessions/${encodeURIComponent(name)}${force ? "?force=true" : ""}`),
   prompt: (name: string, text: string) => request("POST", `/sessions/${encodeURIComponent(name)}/prompt`, { text }),
   key: (name: string, key: string) => request("POST", `/sessions/${encodeURIComponent(name)}/key`, { key }),
+  /** Answers the CLI's "trust this folder?" question (409 unless it is on screen and nobody is in the session). */
+  trustSession: (name: string) => request<TrustAnswer>("POST", `/sessions/${encodeURIComponent(name)}/trust`, {}),
   createTask: (body: { title: string; prompt: string; depends_on: number[]; provider?: string; model?: string; project?: string }) =>
     request<Task>("POST", "/tasks", body),
   taskAction: (id: number, action: "retry" | "cancel") => request<Task>("PATCH", `/tasks/${id}`, { action }),
@@ -153,6 +158,9 @@ export const api = {
     request<{ removed: string[] }>("DELETE", `/agents/${encodeURIComponent(name)}?project=${encodeURIComponent(project ?? "")}&scope=${scope}`),
   // ---- project settings and provider sign-in
   projectDefaults: () => request<ProjectDefaults>("GET", "/projects/defaults"),
+  /** Whether each installed CLI trusts the project's folder; `trustProject` marks it (as creating the project does). */
+  projectTrust: (slug: string) => request<FolderTrust>("GET", `/projects/${slug}/trust`),
+  trustProject: (slug: string) => request<FolderTrusted>("POST", `/projects/${slug}/trust`, {}),
   inspectSource: (body: { kind: SourceKind; location: string; branch?: string }) => request<SourceInspection>("POST", "/projects/inspect", body),
   /** Starts (or returns the running) helper session that runs the provider's login command. */
   loginStart: (provider: string) => request<LoginState>("POST", `/providers/${encodeURIComponent(provider)}/login`),

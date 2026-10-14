@@ -5,6 +5,7 @@ import { ArrowLeft, Plus, RotateCw } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 
 import { api, cloneUrl, fmtConf, type RepoName } from "@/lib/api";
+import type { FolderTrust } from "@/lib/generated/FolderTrust";
 import type { ProjectInfo } from "@/lib/generated/ProjectInfo";
 import type { ProviderInfo } from "@/lib/generated/ProviderInfo";
 import type { RepoListing } from "@/lib/generated/RepoListing";
@@ -24,6 +25,7 @@ import {
   TextInput,
   TomlView,
   ago,
+  cliName,
   errText,
   figures,
   formFromSettings,
@@ -138,6 +140,63 @@ function BackLink() {
   );
 }
 
+/** Whether each installed CLI trusts the project's folder, read from the CLI's own config, with "Trust folder" when
+ * one does not (the setting was off, or the CLI rewrote its config). */
+function FolderTrustRows({ slug }: { slug: string }) {
+  const { toast } = useApp();
+  const [trust, setTrust] = useState<FolderTrust | null>(null);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    let stale = false;
+    api.projectTrust(slug).then(
+      (t) => !stale && setTrust(t),
+      () => {},
+    );
+    return () => {
+      stale = true;
+    };
+  }, [slug]);
+  if (!trust) return null;
+  const missing = trust.providers.filter((x) => x.file && x.trusted !== true);
+  const run = () => {
+    setBusy(true);
+    api
+      .trustProject(slug)
+      .then(
+        (r) => {
+          setTrust(r.trust);
+          const bad = r.checks.find((c) => c.level === "warning" || c.level === "error");
+          toast(bad ? bad.text : (r.checks[0]?.text ?? "trusted"), bad ? "warn" : "ok");
+        },
+        (e: Error) => toast(e.message, "bad"),
+      )
+      .finally(() => setBusy(false));
+  };
+  return (
+    <div className="flex flex-col gap-1.5">
+      <dl className="grid grid-cols-[7rem_minmax(0,1fr)] gap-x-3 gap-y-1 font-mono text-[11.5px]">
+        {trust.providers.map((x) => (
+          <div key={x.provider} className="contents">
+            <dt className="text-muted">trust · {cliName(x.provider)}</dt>
+            <dd className={clsx("break-words", x.trusted === true ? "text-ok" : x.file ? "text-warn" : "text-muted")} title={x.file ?? undefined}>
+              {x.trusted === true ? "✓ " : x.file ? "! " : ""}
+              {x.note}
+            </dd>
+          </div>
+        ))}
+      </dl>
+      {missing.length > 0 && (
+        <div className="flex items-center gap-2">
+          <Btn size="sm" tone="primary" disabled={busy || !trust.enabled} onClick={run}>
+            {busy ? "Trusting…" : "Trust folder"}
+          </Btn>
+          {!trust.enabled && <span className="font-mono text-[11px] text-muted">off: workspace.trust_folders = false in map.toml</span>}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function Overview({ info }: { info: ProjectInfo }) {
   const { tasks, sessions, orchestrator, providers, go, setProject, setScope, openAuth } = useApp();
   const defaults = useDefaults();
@@ -159,6 +218,7 @@ function Overview({ info }: { info: ProjectInfo }) {
           <dd className="break-all">{info.workspace}</dd>
         </dl>
         <p className="font-mono text-[11px] text-muted">The platform never copies the code or hosts it in a git repo of its own; agents change this folder directly.</p>
+        <FolderTrustRows slug={p.slug} />
         <Inset className="gap-1 overflow-x-auto">
           <span className="text-muted"># corpus: one folder per Reflex domain; a push to main reloads Reflex</span>
           <span className="whitespace-nowrap">git clone {cloneUrl(p.slug, "corpus")}</span>

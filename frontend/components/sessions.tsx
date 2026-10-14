@@ -12,7 +12,7 @@ import type { ProviderState } from "./command-data";
 import { Btn, Chip, Pill, SESSION_TONE, rel } from "./command-ui";
 import { Modal } from "./shell/page";
 
-const ORDER: Record<string, number> = { error: 0, needs_auth: 0, waiting_input: 0, stalled: 1, rate_limited: 1, working: 2, starting: 2, idle: 3, exited: 4 };
+const ORDER: Record<string, number> = { error: 0, needs_auth: 0, needs_trust: 0, waiting_input: 0, stalled: 1, rate_limited: 1, working: 2, starting: 2, idle: 3, exited: 4 };
 
 /** Sessions of the right column, the ones needing you first (design: `sessionRows`). */
 export function SessionRows({

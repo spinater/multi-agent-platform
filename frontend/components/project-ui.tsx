@@ -124,6 +124,16 @@ export function Inset({ children, className }: { children: ReactNode; className?
   return <div className={clsx("flex flex-col rounded-lg border border-line bg-inset px-3.5 py-3 font-mono text-[11.5px] leading-[1.6]", className)}>{children}</div>;
 }
 
+const CLI_NAME: Record<string, string> = { claude: "Claude Code", codex: "Codex", gemini: "agy" };
+export const cliName = (provider: string) => CLI_NAME[provider] ?? provider;
+
+/** What happens to a project's folder about the CLIs' "trust this folder?" question (`workspace.trust_folders`). */
+export function trustLine(enabled: boolean, providers: string[]): string {
+  if (!enabled) return "The folder is not marked as trusted (trust_folders = false): each CLI asks once when its first agent starts there.";
+  if (!providers.length) return "No installed CLI that MAP can mark folders trusted for: each CLI asks once when its first agent starts there.";
+  return `The folder will be marked as trusted for ${providers.map(cliName).join(" and ")}, so agents do not stop at their trust question.`;
+}
+
 /** A provider's sign-in state as words, with the tone it is shown in. */
 export function signInText(p: ProviderInfo | undefined): { text: string; tone: "ok" | "warn" | "bad" | "muted" } {
   if (!p) return { text: "not configured", tone: "bad" };
@@ -596,7 +606,7 @@ export function figures(slug: string | null, info: ProjectInfo | null, tasks: Ta
   const live = sessions.filter((s) => (s.project ?? null) === slug && s.state !== "exited");
   const counts: Partial<Record<TaskStatus, number>> = {};
   for (const t of own) counts[t.status] = (counts[t.status] ?? 0) + 1;
-  const attention = live.filter((s) => ["waiting_input", "needs_auth", "stalled", "error"].includes(s.state)).length + (counts.failed ?? 0);
+  const attention = live.filter((s) => ["waiting_input", "needs_auth", "needs_trust", "stalled", "error"].includes(s.state)).length + (counts.failed ?? 0);
   const times = [...own.map((t) => t.updated_at), ...sessions.filter((s) => (s.project ?? null) === slug).map((s) => s.last_activity_at)].map((x) => new Date(x).getTime());
   const busy = (counts.running ?? 0) + (counts.verifying ?? 0) + (counts.auditing ?? 0) > 0;
   const status: ProjectStatus = info?.project.settings.paused ? "paused" : orchestrator?.running && busy ? "running" : "idle";

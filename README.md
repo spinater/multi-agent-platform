@@ -12,7 +12,7 @@ nothing is tied to one repository, session name or provider.
 - **Sessions.** Start an agent from the dashboard or the API with a provider, a model and an optional first prompt.
   Watch its live terminal, type to it, send keys (Ctrl-C, Esc, y/n…), and close it.
 - **Watcher.** Every few seconds it reads each managed pane and sets a state: `working`, `idle`, `waiting_input`,
-  `rate_limited`, `needs_auth`, `stalled`, `error`, `exited`.
+  `rate_limited`, `needs_auth`, `needs_trust`, `stalled`, `error`, `exited`.
   - **Rate limits.** It parses the reset time from the provider's message ("try again in 1h 5m", "resets 3pm",
     Google `RetryInfo`, ISO timestamps). At that time it types the wake prompt, but never while a person is typing.
   - **Repeats.** Only new limit messages count, so an old error left in the scrollback does not trigger again.
@@ -23,6 +23,9 @@ nothing is tied to one repository, session name or provider.
     (`VERDICT: PASS`), then `post_done` hooks (e.g. commit).
   - **Retries.** A failed check retries the task with the failure output in the new prompt, up to `max_attempts`.
   - **Human safety.** It never kills a worker that someone is attached to, or one with typing on its input line.
+  - **Folder trust.** Claude Code and Codex ask once per folder whether to trust it, and an unattended worker would
+    wait there forever. MAP marks each folder trusted before agents run in it, and shows any question that still
+    appears as `needs_trust`, with a button to answer it. See [Folder trust](#folder-trust).
   - **Reflex gates.** A project can let its own Reflex answer two repeated decisions instead of an LLM: whether a
     finished change needs the LLM audit, and which model tier a task needs. See [Reflex gates](#reflex-gates).
 - **Projects.** A project is a folder on the machine MAP is installed on, a corpus repo and its own
@@ -118,6 +121,7 @@ nothing is tied to one repository, session name or provider.
 | `backend/src/projects.rs` | Creating projects on a folder (existing or new) and deleting them; folder and corpus path rules |
 | `backend/src/templates.rs` | Project templates (built-in and `[templates] dirs`), the create/skip/append plan, laying one down, the init agent's task |
 | `backend/src/project_settings.rs` | Per-project providers, verify, audit and pause, as the orchestrator asks for them |
+| `backend/src/trust.rs` | Folder trust: marking folders trusted in Claude Code's and Codex's config, answering the trust question |
 | `backend/src/login.rs` | Provider sign-in state from credential files, the helper login session, URL and code parsing |
 | `backend/src/repo.rs` | The corpus repo written with git plumbing, corpus export, a read-only look at a project's folder |
 | `backend/src/git_access.rs` | MAP's SSH key, pinned known_hosts, git identity, the gitconfig agents get as `GIT_CONFIG_GLOBAL`, URL and host checks |
@@ -210,7 +214,8 @@ docker compose logs -f map                  # open http://127.0.0.1:4400 and pas
 - Claude Code in the container uses `CLAUDE_CONFIG_DIR=~/.claude`, so its settings file is `~/.claude/.claude.json`
   (the host rewrites `~/.claude.json` by renaming over it, which a single-file mount cannot follow). Set
   `"hasCompletedOnboarding": true` in that file once, or the first interactive session stops at the setup screens.
-  Each new folder still asks "trust this folder?" once; answer it in the session console.
+  MAP marks `/data/workspace` and each project's folder trusted in that same file (see [Folder trust](#folder-trust)),
+  so the "trust this folder?" question does not stop the workers.
 - Projects are folders under `MAP_PROJECTS_DIR`, mounted at the same path, so a project's path is the same in the
   container and on the host; set `[projects] root` to it so "Clone from git" puts new projects there. State lives in
   `MAP_DIR/data` (database, run files, corpus repos, and MAP's git key and gitconfig under `data/map/git`); config in
@@ -236,8 +241,9 @@ all projects, read-only):
   Active links carry moving dots. Provider chips isolate a provider, and type toggles hide node kinds.
 - **Card:** clicking a node opens a card with its facts and real actions: retry, cancel or delete a task; type to a
   live session, send keys, open its full console, close it; sign in; start a session; pause the orchestrator.
-- **Right:** "Needs you" (sessions waiting for input, signed out, stalled or in error, and failed tasks), sessions
-  with "+ New", and the event log.
+- **Right:** "Needs you" (sessions waiting for input, signed out, asking to trust their folder, stalled or in error,
+  and failed tasks), sessions with "+ New", and the event log. A session at the trust question shows the folder, and
+  its card has **Trust this folder**.
 - **All projects:** the providers column becomes one hub per project, and IDs read `<project> #<id>`. The left
   column lists projects with "Open →", and cards offer only "Open in <project> →".
 
@@ -429,6 +435,44 @@ A task is a title and a prompt. The orchestrator appends a protocol footer that 
 Pin a task to a provider (and model) or leave it open for failover. Tasks with `depends_on` wait until those tasks
 are `done`. If a dependency fails or is cancelled, its dependents show as blocked.
 
+## Folder trust
+
+Claude Code, Codex and agy ask once per folder whether you trust it (Claude: "Quick safety check: Is this a project
+you created or one you trust?"). Nobody answers that in an unattended worker, so the task would sit there. Two layers
+handle it (`backend/src/trust.rs`):
+
+1. **MAP marks the folder trusted in the CLI's own config** (`[workspace] trust_folders = true`, the default), never
+   touching any other key:
+   - **Claude Code**: `projects["<folder>"].hasTrustDialogAccepted = true` in `$CLAUDE_CONFIG_DIR/.claude.json` when
+     `CLAUDE_CONFIG_DIR` is set (in `[workspace.env]` or MAP's own environment; the Docker deploy sets it to
+     `~/.claude`), else `~/.claude.json`. Claude rewrites that file often, so MAP reads it, writes a temporary file next
+     to it and renames it over the original (keeping its mode) only if the file did not change meanwhile, reads it back,
+     and tries again if Claude's own write won. A file that does not parse is never written: a warning event, and
+     layer 2 takes over.
+   - **Codex**: `[projects."<folder>"] trust_level = "trusted"` in `$CODEX_HOME/config.toml` (else
+     `~/.codex/config.toml`), edited with `toml_edit` so comments and layout stay. A folder you marked `untrusted` is
+     left as it is.
+   - **agy**: it keeps its answers in `trustedWorkspaces` of `~/.gemini/antigravity-cli/settings.json`, in a format MAP
+     has not confirmed, so MAP does not write it and relies on layer 2.
+
+   Folders are canonical absolute paths. MAP does this when a project is created (every source: an existing folder, a
+   new one, a clone once it succeeds; the result is a check line such as `trusted /srv/app for claude, codex`, or a
+   warning that never stops the creation), for `workspace.dir` at server start, and again before each agent starts
+   (tasks, sessions, the init task; not the sign-in and update helpers), which is a no-op when the folder is already
+   trusted. The first write for a folder and provider is a `folder.trusted` event. The project page shows, per CLI,
+   whether its config trusts the folder, with **Trust folder** (`POST /api/projects/<slug>/trust`) when one does not.
+   The files come from each provider's `trust` setting (see `map.example.toml`), not from code.
+2. **A question that still shows is `needs_trust`.** Each provider has `trust_markers` (the question's text) and
+   `trust_accept` (the option that trusts the folder). The watcher ranks it with `needs_auth`: the session needs a
+   person. It is listed under "Needs you" with the folder; the orchestrator keeps the task running without a retry or
+   a timeout (`decision.watch.trust`). **Trust this folder** on the session's card (`POST /api/sessions/<name>/trust`)
+   acts only while the question is on screen and nobody is attached or typing: it records the folder as layer 1 does
+   (when `trust_folders` is on), moves the selection to the trust option (Claude: Down from "No, exit"), checks the
+   pane, and presses Enter. Text that merely quotes a marker, followed by the agent's own prompt, does not count.
+
+Set `trust_folders = false` to keep MAP out of those files and answer the CLIs' trust prompts yourself; the button
+still answers the question (the CLI then records it itself).
+
 ## Orchestrator decisions
 
 Every branch the orchestrator takes for a task is an event `decision.<node>.<outcome>` with `task_id` set and the
@@ -446,6 +490,7 @@ one of the task's last two is not logged again, so a task parked at a branch doe
 | `decision.launch.started` / `.error` | launch → watch / retry | `start` (`hub.launch`) |
 | `decision.watch.done` | watch → verify | `check_running`: result file says done |
 | `decision.watch.failed` / `.exited` / `.auth` / `.timeout` / `.lost` | watch → retry | `check_running` |
+| `decision.watch.trust` | stays (progress) | `check_running`: the worker is at its CLI's folder-trust question; it waits for the owner (no retry, no timeout) |
 | `decision.verify.cmd_start` / `.cmd_pass` | stays (progress) | `finish`: each `verify` command, `` `cmd` · 2 of 4 `` |
 | `decision.verify.pass` / `.fail` | verify → audit / retry | `finish` |
 | `decision.audit.off` / `.pass` / `.skipped` | audit → post | `finish` (`audit.enabled`, verdict, no auditor and not required) |
@@ -519,6 +564,7 @@ All routes are under `/api`. When `server.api_token` is set, send `Authorization
 | GET | `/sessions/{name}/pane?lines=` | Pane text (the saved final pane once exited) |
 | POST | `/sessions/{name}/prompt` | Type text and press Enter (`{"text": …}`) |
 | POST | `/sessions/{name}/key` | One allow-listed key (`C-c`, `Escape`, `Enter`, `Up`, `Down`, `Tab`, `BTab`, `y`, `n`) |
+| POST | `/sessions/{name}/trust` | `{}`: answer the CLI's folder-trust question (409 unless it is on screen and nobody is attached or typing): records the folder, moves the selection to the trust option, presses Enter; returns `folder`, `recorded`, `keys`, `answered` |
 | GET/POST | `/tasks` | List, or create (`title`, `prompt`, `depends_on`, `provider`, `model`) |
 | PATCH | `/tasks/{id}` | `{"action": "retry"}` or `{"action": "cancel"}` |
 | DELETE | `/tasks/{id}` | Delete a pending or finished task |
@@ -526,7 +572,8 @@ All routes are under `/api`. When `server.api_token` is set, send `Authorization
 | GET | `/pipeline` | `provider_order`, `verify`, audit, `post_done` and retry settings from `[orchestrator]` |
 | GET/POST | `/projects` | List, or create (`name`, `slug`, `description`, `fallback`, `model`, `settings`); returns the project and `checks` |
 | GET/PATCH/DELETE | `/projects/{slug}` | Info (settings, Reflex status, decision counts), change (`threshold`, `fallback`, `model`, `questions`, `settings`, `paused`…; returns the `project` and `checks`, e.g. a seeded `orchestration/gates.md`), delete |
-| GET | `/projects/defaults` | The `map.toml` values projects inherit (provider order, verify, audit, max_parallel, post_done, tier models) |
+| GET | `/projects/defaults` | The `map.toml` values projects inherit (provider order, verify, audit, max_parallel, post_done, tier models, `trust_folders` and the CLIs it applies to) |
+| GET/POST | `/projects/{slug}/trust` | Whether each installed CLI trusts the project's folder (read from its config); `{}` marks it trusted as creating the project does, returning `checks` and the new state |
 | GET | `/templates` | Templates with their files and placeholders (built in, then `[templates] dirs`) |
 | POST | `/projects/{slug}/init/plan` | `{"template"}`: per file `create`, `skip` (exists) or `append` (missing lines); writes nothing |
 | POST | `/projects/{slug}/init` | `{"template", "description", "provider", "model"?, "set_verify"}`: writes the plan, optionally sets the project's verify to the template's, queues the "Init project" task; returns `plan`, `checks` and `task` |
@@ -597,7 +644,8 @@ cd backend && cargo test && cargo clippy --all-targets   # also regenerates fron
 cd frontend && bun run lint && bunx next typegen && bunx tsc --noEmit && bun run build
 ```
 
-Backend tests cover reset-time parsing, pending-input detection (faint suggestions and the cursor are not typing), the
+Backend tests cover folder trust (Claude's JSON and Codex's TOML in temporary `CLAUDE_CONFIG_DIR` / `CODEX_HOME`
+folders only; tests refuse to write anywhere else), reset-time parsing, pending-input detection (faint suggestions and the cursor are not typing), the
 wake-up cycle, the orchestrator's dependency order, retries and human protection, its Reflex gates (against a fake
 Reflex on a local port), and the store, all against an in-memory terminal. Git access tests make a key in a temporary
 data dir (skipped without `ssh-keygen`) and clone, fetch, pull and push only against local bare repos over `file://`;

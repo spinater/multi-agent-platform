@@ -8,4 +8,12 @@ export type ProjectDefaults = { provider_order: Array<string>, verify: Array<str
 /**
  * Providers with tier models for the Reflex tier gate.
  */
-tiers: Array<ProviderTiers>, };
+tiers: Array<ProviderTiers>, 
+/**
+ * `workspace.trust_folders`: a new project's folder is marked trusted for `trust_providers`.
+ */
+trust_folders: boolean, 
+/**
+ * Installed CLIs MAP can mark a folder trusted for (`claude`, `codex`).
+ */
+trust_providers: Array<string>, };
