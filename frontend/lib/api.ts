@@ -1,3 +1,8 @@
+import type { AgentDef } from "./generated/AgentDef";
+import type { AgentDetail } from "./generated/AgentDetail";
+import type { AgentPlan } from "./generated/AgentPlan";
+import type { AgentScope } from "./generated/AgentScope";
+import type { AgentsOverview } from "./generated/AgentsOverview";
 import type { DecideResponse } from "./generated/DecideResponse";
 import type { Decision } from "./generated/Decision";
 import type { DecisionCounts } from "./generated/DecisionCounts";
@@ -123,6 +128,15 @@ export const api = {
   /** Only ids the scanner returned are readable. */
   skillFile: (project: string | null, id: string) =>
     request<SkillFile>("GET", `/skills/file?project=${encodeURIComponent(project ?? "")}&path=${encodeURIComponent(id)}`),
+  // ---- agents (Agents screen): custom sub-agents per workspace (`scope: "project"`) or user-wide
+  agents: (project: string | null) => request<AgentsOverview>("GET", `/agents?project=${encodeURIComponent(project ?? "")}`),
+  agent: (project: string | null, scope: AgentScope, name: string) =>
+    request<AgentDetail>("GET", `/agents/${encodeURIComponent(name)}?project=${encodeURIComponent(project ?? "")}&scope=${scope}`),
+  /** Writes one file per target CLI and removes the others' files. `dryRun` only returns what it would do. */
+  saveAgent: (project: string | null, scope: AgentScope, def: AgentDef, dryRun = false) =>
+    request<AgentPlan>("PUT", `/agents${dryRun ? "?dry_run=true" : ""}`, { project: project ?? "", scope, def }),
+  deleteAgent: (project: string | null, scope: AgentScope, name: string) =>
+    request<{ removed: string[] }>("DELETE", `/agents/${encodeURIComponent(name)}?project=${encodeURIComponent(project ?? "")}&scope=${scope}`),
   // ---- project settings and provider sign-in
   projectDefaults: () => request<ProjectDefaults>("GET", "/projects/defaults"),
   inspectSource: (body: { kind: SourceKind; location: string; branch?: string }) => request<SourceInspection>("POST", "/projects/inspect", body),

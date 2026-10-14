@@ -100,6 +100,7 @@ nothing is tied to one repository, session name or provider.
 | `backend/src/repo.rs` | The corpus repo written with git plumbing, corpus export, a read-only look at a project's folder |
 | `backend/src/reflex.rs` | One Reflex process per project: export the corpus, start, health-check, restart |
 | `backend/src/usage.rs` | Plan-usage readers (Claude endpoint, Codex logs), token scans, pace, the skip line |
+| `backend/src/skills.rs`, `agents.rs` | The Skills screen's scan; custom sub-agents read and written in each CLI's format |
 | `backend/src/decide.rs` | The decision gate (Reflex, threshold, fallback), answer parsing, threshold fitting |
 | `backend/src/api/git.rs` | Git smart HTTP through `git http-backend`; a corpus push restarts Reflex |
 | `backend/src/api/` | REST and WebSocket, token, Host and Origin checks |
@@ -175,7 +176,7 @@ docker compose logs -f map                  # open http://127.0.0.1:4400 and pas
 ```
 
 - Mounted from the host: `~/.claude`, `~/.codex`, `~/.gemini` (read-write: sign-ins, history, transcripts for Usage
-  and Skills) and the CLIs in `~/.local/bin`, `~/.local/share/claude` and the Node install (read-only). Adjust
+  and Skills, user-wide agents) and the CLIs in `~/.local/bin`, `~/.local/share/claude` and the Node install (read-only). Adjust
   `docker-compose.yml` if yours live elsewhere.
 - Claude Code in the container uses `CLAUDE_CONFIG_DIR=~/.claude`, so its settings file is `~/.claude/.claude.json`
   (the host rewrites `~/.claude.json` by renaming over it, which a single-file mount cannot follow). Set
@@ -237,6 +238,33 @@ What each agent can load in the current project's workspace (`backend/src/skills
   exactly one Claude run of the project was alive at the time. Codex and Gemini loads are not recorded anywhere MAP
   can read, so their skills show "use not recorded".
 - **Run as task** queues a task in the current project with an editable prompt that loads the skill.
+
+### Agents (`#agents`, `#agents/<scope>/<name>`, `#agents/new`)
+
+Custom sub-agents for the current project and user-wide, in each CLI's own format (`backend/src/agents.rs`;
+folders in `[agents]` of `map.toml`):
+
+| CLI | Format | Project | User |
+| --- | --- | --- | --- |
+| Claude Code | Markdown, YAML header, body = prompt | `.claude/agents/**/*.md` | `~/.claude/agents` |
+| Codex | TOML (`developer_instructions`) | `.codex/agents/*.toml` | `~/.codex/agents` |
+| agy (`gemini`) | Markdown, YAML header, body = prompt | `.agents/agents/<name>.md`, `<name>/agent.md` | `~/.gemini/config/agents` |
+
+- **Matrix.** The CLIs find agents by `name`, not file name, so files are grouped by name: one row per agent and
+  scope, a column per CLI (✓ with its model, ! a file the CLI may not load, — none). Files that name no agent are
+  listed apart.
+- **Editor.** Name, description, instructions, capabilities (read, search, edit, shell, web, or all tools), a model
+  per CLI, effort, and the CLIs to write for, with a live preview of every file a save writes or removes.
+  Capabilities become Claude tools (`Read`, `Grep`, `Glob`, `Edit`, `Write`, `Bash`, `WebFetch`, `WebSearch`) and agy
+  tools from a fixed table (a misspelled agy tool can hang it). Codex has no tool list: no shell writes
+  `[features] shell_tool = false`, and read-only adds "Do not modify files." to its instructions. Effort is
+  `effort` for Claude, `model_reasoning_effort` for Codex (`max` → `xhigh`) and dropped for agy. Each lossy step is
+  shown as a note.
+- **Saving** rewrites the file the scanner found for the agent, or writes `<name>.md` / `<name>.toml` in the first
+  configured folder; it keeps keys MAP does not edit (`permissionMode`, `mcpServers`, `sandbox_mode`…), removes the
+  files of CLIs dropped from the targets, writes through a temporary file and a rename, and refuses to replace a
+  file that holds another agent. Nothing is written outside the configured folders. Run one as the main agent with
+  `claude --agent <name>` or `agy --agent <name>`.
 
 The **Reflex** screen (`#reflex`, `frontend/components/reflex/`) is the current project's decision engine: how it
 works with the last 24 h per lane, a set-up checklist that ticks itself (install, corpus, questions, calibration,
@@ -328,6 +356,10 @@ All routes are under `/api`. When `server.api_token` is set, send `Authorization
 | GET | `/skills?project=` | Context files, skills (project, user, plugin; Claude and Codex) and their use in the project's workspace |
 | PATCH | `/skills/enabled` | `{"project", "skill": <id>, "enabled"}`: switch a Claude skill for that workspace |
 | GET | `/skills/file?project=&path=<id>` | A SKILL.md, only for ids the scanner itself returned |
+| GET | `/agents?project=` | Agents of the project and the user, grouped by name, with each CLI's file, unreadable files and notes |
+| GET | `/agents/{name}?project=&scope=` | The agent as one definition (from its Claude file, else agy, else Codex), its files and notes |
+| PUT | `/agents?dry_run=` | `{"project", "scope", "def"}`: write each target's file, remove the others'; `dry_run=true` only returns the plan |
+| DELETE | `/agents/{name}?project=&scope=` | Remove every file of the agent in that scope |
 | GET | `/usage` | The latest usage report: windows, pace, tokens today, by project, skip state per provider |
 | POST | `/usage/refresh` | `{}`: read every provider now and return the report |
 | GET | `/ws` | Pushes `ServerMessage` JSON (see `frontend/lib/generated/ServerMessage.ts`) |
