@@ -61,6 +61,8 @@ pub struct ServerConfig {
     pub allowed_hosts: Vec<String>,
     /// Browser origins allowed to open `/api/ws` besides the dashboard's own (the `next dev` server by default).
     pub allowed_origins: Vec<String>,
+    /// How the installer set this machine up (`isolated` or `system`); informational, shown in Settings.
+    pub mode: Option<crate::model::InstallMode>,
 }
 
 impl Default for ServerConfig {
@@ -72,6 +74,7 @@ impl Default for ServerConfig {
             data_dir: ".map".into(),
             allowed_hosts: vec![],
             allowed_origins: vec!["http://localhost:3000".into(), "http://127.0.0.1:3000".into()],
+            mode: None,
         }
     }
 }

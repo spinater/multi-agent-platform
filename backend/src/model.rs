@@ -1815,6 +1815,18 @@ pub struct GitOpResult {
 // ---- the Settings screen (`GET /api/settings`): read-only facts about the server, the agent CLIs' binaries and the
 // git host CLIs. Never a secret: whether `api_token` or a token variable is set, never its value.
 
+/// How the installer set MAP up (`[server] mode`, written by `deploy/install.sh --mode`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum InstallMode {
+    /// Everything under one MAP folder: its own agent sign-ins, its own tmux server, projects in its workspace only.
+    Isolated,
+    /// One with the machine (a VM provisioned for MAP): the user's own CLI sign-ins and tmux server, the usual
+    /// `~/.config` / `~/.local` places, projects anywhere in the home folder.
+    System,
+}
+
 /// How MAP was started, as far as it can tell.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "snake_case")]
@@ -1857,6 +1869,8 @@ pub struct ServerSettings {
     pub reflex_binary: String,
     pub reflex_version: Option<String>,
     pub run_mode: RunMode,
+    /// `[server] mode`; `None` for a config written by hand or by an older installer.
+    pub install_mode: Option<InstallMode>,
     /// The command that restarts MAP after editing `map.toml` for this run mode (by hand: starts it again).
     pub restart_hint: String,
     /// `workspace.tmux_socket`; `None`: tmux's default server.

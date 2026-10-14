@@ -88,6 +88,7 @@ pub fn info(hub: &Hub) -> SettingsInfo {
         reflex_binary: c.reflex.binary.clone(),
         reflex_version: hub.reflex.version(&c.reflex.binary),
         run_mode: mode,
+        install_mode: c.server.mode,
         tmux_socket: c.workspace.tmux_socket.clone(),
         attach_command: attach_command(c.workspace.tmux_socket.as_deref()),
     };

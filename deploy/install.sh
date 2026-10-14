@@ -3,8 +3,8 @@
 # Builds the server and dashboard from this checkout, adds a pinned Reflex unless one is on PATH, writes a config
 # once (never overwrites it) and starts the service. The agent CLIs (claude, codex, agy) are the ones on your PATH.
 #
-#   deploy/install.sh [--home DIR] [--config-dir DIR] [--projects-dir DIR] [--port 4400] [--bind 127.0.0.1]
-#                     [--prefix DIR] [--config FILE] [--agent-login isolated|shared] [--no-service]
+#   deploy/install.sh [--mode isolated|system] [--home DIR] [--config-dir DIR] [--projects-dir DIR] [--port 4400]
+#                     [--bind 127.0.0.1] [--prefix DIR] [--config FILE] [--agent-login isolated|shared] [--no-service]
 #   deploy/install.sh --uninstall      # stops and removes the service and the app; keeps config, data, projects
 #
 # Layout (--home DIR, default ~/MAP):  DIR/app        the binary, dashboard and Reflex (replaced on every install)
@@ -13,6 +13,12 @@
 #                                      DIR/workspace  the project folder: projects can only be its sub-folders
 # --agent-login (new configs only, default isolated): isolated gives MAP's agents their own sign-ins and history in
 # DIR/config/agent-home; shared uses your own (~/.claude, ~/.codex, ~/.gemini).
+#
+# --mode isolated (default): the layout above, MAP's own agent sign-ins and its own tmux server (tmux -L map).
+# --mode system: for a machine (VM) provisioned for MAP, MAP becomes one with it: the usual places
+#   (~/.config/map/map.toml, ~/.local/share/map for the app and data, `map` linked into ~/.local/bin), your own CLI
+#   sign-ins (~/.claude, ~/.codex, ~/.gemini), the default tmux server (plain `tmux attach`), and projects anywhere
+#   in your home folder (--projects-dir to narrow it). --home is not used.
 set -euo pipefail
 
 PORT=4400
@@ -24,12 +30,14 @@ CONFIG_DIR=""
 PROJECTS_DIR=""
 SERVICE=1
 UNINSTALL=0
-AGENT_LOGIN=isolated
+AGENT_LOGIN=""
+MODE=isolated
 LABEL=com.multi-agent-platform.map
 REFLEX_VERSION=v0.2.4
 LEGACY_CONFIG="${XDG_CONFIG_HOME:-$HOME/.config}/map/map.toml"
 LEGACY_PREFIX="${XDG_DATA_HOME:-$HOME/.local/share}/map"
 
+die_early() { printf 'error: %s\n' "$*" >&2; exit 2; }
 abs() { case "$1" in /*) printf '%s' "$1" ;; "~"*) printf '%s' "$HOME${1#\~}" ;; *) printf '%s/%s' "$PWD" "$1" ;; esac; }
 
 while [ $# -gt 0 ]; do
@@ -41,12 +49,15 @@ while [ $# -gt 0 ]; do
     --projects-dir) PROJECTS_DIR="$(abs "$2")"; shift 2 ;;
     --prefix) PREFIX="$(abs "$2")"; shift 2 ;;
     --config) CONFIG="$(abs "$2")"; shift 2 ;;
+    --mode)
+      case "$2" in isolated|system) MODE="$2" ;; *) echo "--mode takes isolated or system" >&2; exit 2 ;; esac
+      shift 2 ;;
     --agent-login)
       case "$2" in isolated|shared) AGENT_LOGIN="$2" ;; *) echo "--agent-login takes isolated or shared" >&2; exit 2 ;; esac
       shift 2 ;;
     --no-service) SERVICE=0; shift ;;
     --uninstall) UNINSTALL=1; shift ;;
-    -h|--help) sed -n '2,15p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,/^set -euo/p' "$0" | sed '$d'; exit 0 ;;
     *) echo "unknown option $1" >&2; exit 2 ;;
   esac
 done
@@ -57,16 +68,30 @@ if [ -z "$HOME_DIR" ] && [ -z "$CONFIG_DIR" ] && [ -z "$CONFIG" ] && [ -f "$LEGA
   CONFIG="$LEGACY_CONFIG"
   PREFIX="${PREFIX:-$LEGACY_PREFIX}"
 fi
-HOME_DIR="${HOME_DIR:-$HOME/MAP}"
-PREFIX="${PREFIX:-$HOME_DIR/app}"
-if [ -n "$CONFIG" ]; then
+if [ "$MODE" = system ]; then
+  [ -z "$HOME_DIR" ] || die_early "--home is for --mode isolated; --mode system uses ~/.config/map and ~/.local/share/map"
+  PREFIX="${PREFIX:-$LEGACY_PREFIX}"
+  CONFIG="${CONFIG:-${CONFIG_DIR:+$CONFIG_DIR/map.toml}}"
+  CONFIG="${CONFIG:-$LEGACY_CONFIG}"
   CONFIG_DIR="$(dirname "$CONFIG")"
+  PROJECTS_DIR="${PROJECTS_DIR:-$HOME}"
+  DATA_DIR="$PREFIX/data"
+  AGENT_LOGIN="${AGENT_LOGIN:-shared}"
+  TMUX_SOCKET=""
 else
-  CONFIG_DIR="${CONFIG_DIR:-$HOME_DIR/config}"
-  CONFIG="$CONFIG_DIR/map.toml"
+  HOME_DIR="${HOME_DIR:-$HOME/MAP}"
+  PREFIX="${PREFIX:-$HOME_DIR/app}"
+  if [ -n "$CONFIG" ]; then
+    CONFIG_DIR="$(dirname "$CONFIG")"
+  else
+    CONFIG_DIR="${CONFIG_DIR:-$HOME_DIR/config}"
+    CONFIG="$CONFIG_DIR/map.toml"
+  fi
+  PROJECTS_DIR="${PROJECTS_DIR:-$HOME_DIR/workspace}"
+  DATA_DIR="$CONFIG_DIR/data"
+  AGENT_LOGIN="${AGENT_LOGIN:-isolated}"
+  TMUX_SOCKET=map
 fi
-PROJECTS_DIR="${PROJECTS_DIR:-$HOME_DIR/workspace}"
-DATA_DIR="$CONFIG_DIR/data"
 
 OS="$(uname -s)"
 ARCH="$(uname -m)"
@@ -95,6 +120,7 @@ stop_service() {
 if [ "$UNINSTALL" = 1 ]; then
   stop_service
   # Only the app: config, data and projects stay (an older prefix may hold data/ and workspace/, which are kept).
+  [ "$(readlink "$HOME/.local/bin/map" 2>/dev/null)" = "$PREFIX/bin/map" ] && rm -f "$HOME/.local/bin/map"
   rm -rf "$PREFIX/bin" "$PREFIX/dashboard"
   rmdir "$PREFIX" 2>/dev/null || true
   say "service and app removed; config $CONFIG_DIR, data $DATA_DIR and projects $PROJECTS_DIR are kept"
@@ -113,6 +139,10 @@ say "building the dashboard"
 
 mkdir -p "$PREFIX/bin" "$CONFIG_DIR/templates" "$CONFIG_DIR/agents" "$PROJECTS_DIR"
 install -m 755 "$REPO/backend/target/release/map" "$PREFIX/bin/map"
+if [ "$MODE" = system ]; then
+  # One with the machine: `map` on PATH like any other tool.
+  mkdir -p "$HOME/.local/bin" && ln -sf "$PREFIX/bin/map" "$HOME/.local/bin/map"
+fi
 rm -rf "$PREFIX/dashboard" && cp -R "$REPO/frontend/out" "$PREFIX/dashboard"
 
 # Reflex: the one on PATH, else a pinned release checked against its SHA256.
@@ -143,7 +173,7 @@ if [ -f "$CONFIG" ]; then
     printf '      [projects]\n      path = "%s"\n' "$PROJECTS_DIR"
     echo "    to $CONFIG (one [projects] table only) and restart MAP."
   fi
-  if ! grep -Eq '^[[:space:]]*\[agents_home\]' "$CONFIG"; then
+  if [ "$MODE" = isolated ] && ! grep -Eq '^[[:space:]]*\[agents_home\]' "$CONFIG"; then
     echo "    its agents share your own CLI sign-ins (no [agents_home]). To give them their own, add:"
     printf '      [agents_home]\n      mode = "isolated"\n'
     echo "    restart MAP and sign each provider in under Settings -> Agent CLIs."
@@ -157,10 +187,16 @@ else
   init_agent="# init_agent = \"$CONFIG_DIR/agents/init-agent.md\""
   [ -f "$CONFIG_DIR/agents/init-agent.md" ] && init_agent="init_agent = \"$CONFIG_DIR/agents/init-agent.md\""
   planner_agent="# planner_agent = \"$CONFIG_DIR/agents/planner-agent.md\""
+  tmux_socket="# tmux_socket = \"map\"   # MAP's sessions on their own tmux server (tmux -L map attach -t <session>)"
+  [ -n "$TMUX_SOCKET" ] && tmux_socket="# MAP's sessions live on their own tmux server: tmux -L $TMUX_SOCKET attach -t <session>
+tmux_socket = \"$TMUX_SOCKET\""
   [ -f "$CONFIG_DIR/agents/planner-agent.md" ] && planner_agent="planner_agent = \"$CONFIG_DIR/agents/planner-agent.md\""
   (umask 077 && cat >"$CONFIG" <<EOF
 # Written by deploy/install.sh. Every setting is documented in map.example.toml.
 [server]
+# isolated: MAP keeps to its own folder, sign-ins and tmux server. system: one with this machine (your sign-ins,
+# your tmux server, projects anywhere in your home folder). Informational; the settings below are what count.
+mode = "$MODE"
 bind = "$BIND:$PORT"
 # The dashboard asks for this once per browser. Keep it secret.
 api_token = "$(openssl rand -hex 32)"
@@ -173,6 +209,7 @@ data_dir = "$DATA_DIR"
 # Where tasks and sessions without a project run. Projects use their own folders.
 dir = "$DATA_DIR/workspace"
 session_prefix = "map-"
+$tmux_socket
 
 [workspace.env]
 # The PATH the installer ran with, so the service finds the same agent CLIs as your shell.
@@ -223,7 +260,13 @@ LOG_DIR="$DATA_DIR"
 layout() {
   say "layout"
   echo "    app       $PREFIX            (map, dashboard, reflex: replaced on every install)"
-  echo "    config    $CONFIG_DIR        (map.toml, templates/, agents/, agent-home/ with isolated agent logins)"
+  if [ "$MODE" = system ]; then
+    echo "    mode      system: your own CLI sign-ins, the default tmux server (tmux attach -t map-…), \`map\` in ~/.local/bin"
+    echo "    config    $CONFIG_DIR        (map.toml, templates/, agents/)"
+  else
+    echo "    mode      isolated: MAP's own sign-ins (Settings -> Agent CLIs) and tmux server (tmux -L map attach -t …)"
+    echo "    config    $CONFIG_DIR        (map.toml, templates/, agents/, agent-home/ with isolated agent logins)"
+  fi
   echo "    data      $DATA_DIR          (database, runs, corpus repos, git key, default workspace)"
   echo "    projects  $PROJECTS_DIR      (the project folder: projects are its sub-folders)"
 }

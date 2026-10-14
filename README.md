@@ -179,6 +179,7 @@ On the machine whose projects the agents should work on (Linux or macOS), from a
 deploy/install.sh                       # everything under ~/MAP (same as --home ~/MAP)
 deploy/install.sh --home /root/project/MAP
 deploy/install.sh --config-dir DIR --projects-dir DIR   # the two folders chosen one by one
+deploy/install.sh --mode system         # a VM just for MAP: your own sign-ins and tmux, ~/.config/map, projects in ~
 #   also: --port 4400 --bind 127.0.0.1 --prefix DIR --config FILE --agent-login isolated|shared --no-service
 deploy/install.sh --uninstall           # removes the service and app/; keeps config/ (with data/) and workspace/
 ```
@@ -206,6 +207,13 @@ unless `--agent-login shared`; see [Agent logins](#agent-logins)), then starts a
 prints the layout. Restarting the service leaves agent sessions in tmux running. Requirements: Rust, Bun, tmux, git,
 curl, openssl. On Linux, `sudo loginctl enable-linger $USER` keeps it running after you log out.
 
+- **Two modes.** `--mode isolated` (the default, the layout above) keeps MAP to its own folder: its agents sign in
+  with their own accounts (`agent-home/`) and its sessions live on their own tmux server (`tmux_socket = "map"`,
+  attach with `tmux -L map attach -t <session>`). `--mode system` is for a machine or VM provisioned for MAP, where
+  MAP is one with the system: config in `~/.config/map/map.toml`, app and data in `~/.local/share/map`, `map` linked
+  into `~/.local/bin`, your own CLI sign-ins (`~/.claude`, `~/.codex`, `~/.gemini`), tmux's default server (plain
+  `tmux attach -t map-…`) and projects anywhere in your home folder (`--projects-dir` narrows it; MAP's data folder
+  is never a project). The config records it as `[server] mode`, shown in Settings → Server.
 - **Existing installs.** Without flags, an install made before this layout (`~/.config/map/map.toml`, app in
   `~/.local/share/map`) keeps its config and prefix; `--config FILE` still picks a config file. An existing config is
   never rewritten: when it sets no project folder, the installer prints the `[projects] path = "…"` lines to add.

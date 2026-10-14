@@ -5,6 +5,7 @@
 
 import type { ReactNode } from "react";
 
+import type { InstallMode } from "@/lib/generated/InstallMode";
 import type { RunMode } from "@/lib/generated/RunMode";
 import type { ServerSettings } from "@/lib/generated/ServerSettings";
 import type { SettingsInfo } from "@/lib/generated/SettingsInfo";
@@ -17,6 +18,11 @@ const RUN_MODE: Record<RunMode, string> = {
   systemd: "as a systemd service",
   launchd: "as a launchd agent",
   manual: "by hand (map serve)",
+};
+
+const INSTALL_MODE: Record<InstallMode, string> = {
+  isolated: "MAP keeps to its own folder, agent sign-ins and tmux server",
+  system: "one with this machine: your own agent sign-ins and tmux server, projects anywhere in your home folder",
 };
 
 const RESTART_NOTE: Record<RunMode, string> = {
@@ -109,6 +115,10 @@ export function ServerSettingsView({ settings, error }: { settings: SettingsInfo
               {s.reflex_binary} · {s.reflex_version ?? <span className="text-warn">not installed</span>}
             </Row>
             <Row k="running">{RUN_MODE[s.run_mode]}</Row>
+            <Row k="install mode">
+              {s.install_mode ?? "not set"}
+              <span className="text-muted"> · {s.install_mode ? INSTALL_MODE[s.install_mode] : "a config written by hand or by an older installer"}</span>
+            </Row>
           </dl>
         )}
       </Card>

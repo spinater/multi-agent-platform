@@ -1,6 +1,9 @@
 # Copy to map.toml and edit. Relative paths resolve against this file's directory.
 
 [server]
+# How deploy/install.sh --mode set this machine up: "isolated" (own folder, sign-ins and tmux server) or "system"
+# (one with the machine: your sign-ins and tmux server, projects in your home folder). Informational only.
+# mode = "isolated"
 # Loopback only. To reach it from elsewhere, put an authenticating proxy (e.g. Cloudflare Access) in front,
 # add the proxy's host name to allowed_hosts, and set api_token.
 bind = "127.0.0.1:4400"
