@@ -11,6 +11,7 @@ import type { ServerInfo } from "./generated/ServerInfo";
 import type { ServerMessage } from "./generated/ServerMessage";
 import type { Session } from "./generated/Session";
 import type { Task } from "./generated/Task";
+import { refreshPlans, setPlan } from "./use-plans";
 import { setUpdatesReport } from "./use-updates";
 import { setUsageReport } from "./use-usage";
 
@@ -60,6 +61,7 @@ export function useDashboard(): DashboardState {
       setProjects(overview.projects);
       setServer(overview.server);
       setEvents(recent);
+      refreshPlans();
     } catch (err) {
       setConnection(err instanceof ApiError && err.status === 401 ? "unauthorized" : "offline");
       throw err;
@@ -108,6 +110,9 @@ export function useDashboard(): DashboardState {
           break;
         case "updates":
           setUpdatesReport(msg.report);
+          break;
+        case "plan":
+          setPlan(msg.plan);
           break;
         case "resync":
           void reload().catch(() => {});

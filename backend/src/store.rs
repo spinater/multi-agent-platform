@@ -11,7 +11,7 @@ use serde::de::DeserializeOwned;
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions, SqliteRow};
 use sqlx::{Row, SqlitePool};
 
-use crate::model::{CaseScore, Decision, DecisionStats, DecisionSummary, Event, HourBucket, Lane, LaneSummary, Level, Project, ReflexCase, Session, Task, TaskStatus};
+use crate::model::{CaseScore, Decision, DecisionStats, DecisionSummary, Event, HourBucket, Lane, LaneSummary, Level, Plan, PlanStatus, PlanTask, Project, ReflexCase, Session, Task, TaskStatus};
 use crate::savings;
 
 #[derive(Clone)]
@@ -39,6 +39,18 @@ pub struct NewTask {
     pub provider: Option<String>,
     pub model: Option<String>,
     pub project: Option<String>,
+}
+
+/// A validated draft plan (plans.rs).
+#[derive(Debug, Clone)]
+pub struct NewPlan {
+    pub project: Option<String>,
+    pub title: String,
+    pub summary: String,
+    pub revision: i64,
+    pub replaces: Option<i64>,
+    pub session: Option<String>,
+    pub tasks: Vec<PlanTask>,
 }
 
 /// What a decision cost, or would have cost, in fallback tokens (the savings report, savings.rs).
@@ -279,7 +291,142 @@ impl Store {
     pub async fn delete_project(&self, slug: &str) -> Result<()> {
         sqlx::query("DELETE FROM decisions WHERE project = ?").bind(slug).execute(&self.pool).await?;
         sqlx::query("DELETE FROM reflex_cases WHERE project = ?").bind(slug).execute(&self.pool).await?;
+        sqlx::query("DELETE FROM plan_tasks WHERE plan_id IN (SELECT id FROM plans WHERE project = ?)").bind(slug).execute(&self.pool).await?;
+        sqlx::query("DELETE FROM plans WHERE project = ?").bind(slug).execute(&self.pool).await?;
         sqlx::query("DELETE FROM projects WHERE slug = ?").bind(slug).execute(&self.pool).await?;
+        Ok(())
+    }
+
+    // ---- plans (plans.rs)
+
+    /// Stores a draft and its tasks in one transaction; returns its id.
+    pub async fn insert_plan(&self, p: &NewPlan) -> Result<i64> {
+        let mut tx = self.pool.begin().await?;
+        let id: i64 = sqlx::query("INSERT INTO plans (project, title, summary, status, revision, replaces, session, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?) RETURNING id")
+            .bind(&p.project)
+            .bind(&p.title)
+            .bind(&p.summary)
+            .bind(PlanStatus::Draft.as_str())
+            .bind(p.revision)
+            .bind(p.replaces)
+            .bind(&p.session)
+            .bind(Utc::now())
+            .fetch_one(&mut *tx)
+            .await?
+            .get("id");
+        Self::insert_plan_tasks(&mut tx, id, &p.tasks).await?;
+        tx.commit().await?;
+        Ok(id)
+    }
+
+    async fn insert_plan_tasks(tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>, plan_id: i64, tasks: &[PlanTask]) -> Result<()> {
+        for (i, t) in tasks.iter().enumerate() {
+            sqlx::query("INSERT INTO plan_tasks (plan_id, position, key, title, prompt, depends_on, provider, model, task_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")
+                .bind(plan_id)
+                .bind(i as i64)
+                .bind(&t.key)
+                .bind(&t.title)
+                .bind(&t.prompt)
+                .bind(serde_json::to_string(&t.depends_on)?)
+                .bind(&t.provider)
+                .bind(&t.model)
+                .bind(t.task_id)
+                .execute(&mut **tx)
+                .await?;
+        }
+        Ok(())
+    }
+
+    async fn plan_from_row(&self, row: &SqliteRow) -> Result<Plan> {
+        let id: i64 = row.get("id");
+        let rows = sqlx::query("SELECT * FROM plan_tasks WHERE plan_id = ? ORDER BY position").bind(id).fetch_all(&self.pool).await?;
+        let tasks = rows
+            .iter()
+            .map(|r| {
+                Ok(PlanTask {
+                    key: r.get("key"),
+                    title: r.get("title"),
+                    prompt: r.get("prompt"),
+                    depends_on: serde_json::from_str(r.get("depends_on"))?,
+                    provider: r.get("provider"),
+                    model: r.get("model"),
+                    task_id: r.get("task_id"),
+                })
+            })
+            .collect::<Result<_>>()?;
+        Ok(Plan {
+            id,
+            project: row.get("project"),
+            title: row.get("title"),
+            summary: row.get("summary"),
+            status: parse_enum(row.get("status"))?,
+            revision: row.get("revision"),
+            replaces: row.get("replaces"),
+            session: row.get("session"),
+            reason: row.get("reason"),
+            tasks,
+            created_at: row.get("created_at"),
+            decided_at: row.get("decided_at"),
+        })
+    }
+
+    pub async fn plan(&self, id: i64) -> Result<Option<Plan>> {
+        let row = sqlx::query("SELECT * FROM plans WHERE id = ?").bind(id).fetch_optional(&self.pool).await?;
+        match row {
+            Some(row) => Ok(Some(self.plan_from_row(&row).await?)),
+            None => Ok(None),
+        }
+    }
+
+    /// Newest first; `project`: `None` every plan, `Some("")` the default workspace's, else that project's.
+    pub async fn plans(&self, project: Option<&str>, limit: i64) -> Result<Vec<Plan>> {
+        let rows = sqlx::query("SELECT * FROM plans WHERE (?1 IS NULL OR (?1 = '' AND project IS NULL) OR project = ?1) ORDER BY id DESC LIMIT ?2")
+            .bind(project)
+            .bind(limit)
+            .fetch_all(&self.pool)
+            .await?;
+        let mut out = vec![];
+        for row in &rows {
+            out.push(self.plan_from_row(row).await?);
+        }
+        Ok(out)
+    }
+
+    /// Moves the plan from `from` to `to` (with `reason`, and `decided_at` now) only if it is still at `from`;
+    /// returns whether it moved, so two approvals cannot both win.
+    pub async fn set_plan_status(&self, id: i64, from: PlanStatus, to: PlanStatus, reason: Option<&str>) -> Result<bool> {
+        let done = sqlx::query("UPDATE plans SET status = ?, reason = COALESCE(?, reason), decided_at = ? WHERE id = ? AND status = ?")
+            .bind(to.as_str())
+            .bind(reason)
+            .bind(Utc::now())
+            .bind(id)
+            .bind(from.as_str())
+            .execute(&self.pool)
+            .await?;
+        Ok(done.rows_affected() > 0)
+    }
+
+    /// Replaces a draft's title, summary and tasks; returns false when it is no longer a draft.
+    pub async fn edit_plan(&self, id: i64, title: &str, summary: &str, tasks: &[PlanTask]) -> Result<bool> {
+        let mut tx = self.pool.begin().await?;
+        let done = sqlx::query("UPDATE plans SET title = ?, summary = ? WHERE id = ? AND status = ?")
+            .bind(title)
+            .bind(summary)
+            .bind(id)
+            .bind(PlanStatus::Draft.as_str())
+            .execute(&mut *tx)
+            .await?;
+        if done.rows_affected() == 0 {
+            return Ok(false);
+        }
+        sqlx::query("DELETE FROM plan_tasks WHERE plan_id = ?").bind(id).execute(&mut *tx).await?;
+        Self::insert_plan_tasks(&mut tx, id, tasks).await?;
+        tx.commit().await?;
+        Ok(true)
+    }
+
+    pub async fn set_plan_task_id(&self, plan_id: i64, key: &str, task_id: i64) -> Result<()> {
+        sqlx::query("UPDATE plan_tasks SET task_id = ? WHERE plan_id = ? AND key = ?").bind(task_id).bind(plan_id).bind(key).execute(&self.pool).await?;
         Ok(())
     }
 

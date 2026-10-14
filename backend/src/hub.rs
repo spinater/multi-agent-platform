@@ -188,12 +188,26 @@ impl Hub {
     /// only that project's decision endpoints and its corpus (see `api::project_scope`), never the rest of the API.
     /// `None` without an `api_token`, when the API is open anyway.
     pub fn project_token(&self, slug: &str) -> Option<String> {
+        self.derived_token(b"map-project:", slug)
+    }
+
+    /// The default workspace's planner token (`$MAP_PROJECT_TOKEN` of `<prefix>plan`): it opens only
+    /// `/api/workspace/plans` (see `api::workspace_scope`). `None` without an `api_token`.
+    pub fn workspace_token(&self) -> Option<String> {
+        self.derived_token(b"map-workspace:", "plans")
+    }
+
+    fn derived_token(&self, label: &[u8], value: &str) -> Option<String> {
         use hmac::{KeyInit, Mac};
         let key = self.config.server.api_token.as_deref()?;
         let mut mac = hmac::Hmac::<sha2::Sha256>::new_from_slice(key.as_bytes()).expect("HMAC takes any key length");
-        mac.update(b"map-project:");
-        mac.update(slug.as_bytes());
+        mac.update(label);
+        mac.update(value.as_bytes());
         Some(mac.finalize().into_bytes().iter().map(|b| format!("{b:02x}")).collect())
+    }
+
+    pub fn announce_plan(&self, plan: &crate::model::Plan) {
+        self.send(ServerMessage::Plan { plan: Box::new(plan.clone()) });
     }
 
     /// The API as agents on this machine reach it (a wildcard bind is reached through loopback).
@@ -387,6 +401,15 @@ impl Hub {
     /// [`Hub::launch`] with `command` (a template like `interactive`) in place of the provider's interactive
     /// command, without its `extra_args` or prompt argument; used for the provider's sign-in.
     pub async fn launch_command(self: &Arc<Self>, req: LaunchRequest, command: Option<&[String]>) -> Result<Session> {
+        self.launch_with(req, command, &[]).await
+    }
+
+    /// [`Hub::launch`] with `env` exported after MAP's own variables (the planner's plans URL and token).
+    pub async fn launch_env(self: &Arc<Self>, req: LaunchRequest, env: &[(String, String)]) -> Result<Session> {
+        self.launch_with(req, None, env).await
+    }
+
+    async fn launch_with(self: &Arc<Self>, req: LaunchRequest, command: Option<&[String]>, env: &[(String, String)]) -> Result<Session> {
         let spec = self.spec(&req.provider)?.clone();
         let model = Self::resolve_model(&spec, req.model.as_deref())?;
         let suffix = match req.name.as_deref().map(str::trim).filter(|n| !n.is_empty()) {
@@ -438,6 +461,9 @@ impl Hub {
             script.push_str(&format!("export MAP_DECIDE_URL={}\n", quote(&format!("{}/projects/{slug}/decide", self.local_api_url()))?));
             script.push_str(&format!("export MAP_API_URL={}\n", quote(&self.local_api_url())?));
             script.push_str(&format!("export MAP_PROJECT_TOKEN={}\n", quote(&self.project_token(slug).unwrap_or_default())?));
+        }
+        for (k, v) in env {
+            script.push_str(&format!("export {k}={}\n", quote(v)?));
         }
         script.push_str(&format!("exec {}\n", argv.join(" ")));
         let script_path = dir.join("launch.sh");

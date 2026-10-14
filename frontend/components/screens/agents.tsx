@@ -8,12 +8,14 @@ import { providerColor } from "@/lib/colors";
 import type { AgentRow } from "@/lib/generated/AgentRow";
 import type { AgentScope } from "@/lib/generated/AgentScope";
 import type { AgentsOverview } from "@/lib/generated/AgentsOverview";
+import type { PlannerInstructions } from "@/lib/generated/PlannerInstructions";
+import { plansApi } from "@/lib/use-plans";
 
 import { AgentEditor } from "../agents/agent-editor";
 import { AgentMatrix } from "../agents/agent-matrix";
 import { agentArg, AGENT_PROVIDERS, parseAgentArg, PROVIDER_FORMAT, PROVIDER_LABEL } from "../agents/shared";
 import { useApp } from "../app-context";
-import { Main, PageHeader, SectionTitle } from "../shell/page";
+import { Main, Modal, PageHeader, SectionTitle } from "../shell/page";
 import { TopBar, workspaceName } from "../shell/top-bar";
 import { Button, Empty } from "../ui";
 
@@ -45,6 +47,70 @@ function Folders({ data }: { data: AgentsOverview }) {
         </div>
       ))}
     </div>
+  );
+}
+
+/** Agents MAP itself runs in every project (read-only here; `[templates] planner_agent` in map.toml replaces the
+ * instructions). */
+function BuiltinAgents() {
+  const { go } = useApp();
+  const [text, setText] = useState<PlannerInstructions | { error: string } | null>(null);
+  const [open, setOpen] = useState(false);
+  const read = () => {
+    setOpen(true);
+    plansApi
+      .instructions()
+      .then(setText)
+      .catch((e: Error) => setText({ error: e.message }));
+  };
+  return (
+    <section className="flex flex-col gap-3">
+      <SectionTitle glyph="◆" note="run by MAP · read-only">
+        Built in
+      </SectionTitle>
+      <div className="flex flex-col rounded-xl border border-line bg-surface">
+        <div className="flex flex-wrap items-start gap-x-4 gap-y-2.5 px-4 py-3">
+          <span className="flex min-w-0 flex-1 basis-[280px] flex-col gap-1">
+            <span className="flex flex-wrap items-center gap-2">
+              <span className="font-mono text-[13px] font-semibold text-text">planner</span>
+              <span className="inline-flex h-[18px] items-center rounded border border-accent/35 bg-accent/10 px-1.5 font-mono text-[9px] font-medium tracking-[0.1em] whitespace-nowrap text-accent uppercase">
+                built-in · every project
+              </span>
+            </span>
+            <span className="text-[12px] leading-[1.45] text-nav">
+              Requirements analyst and planner you talk to: it reads the project, asks what changes the plan, and submits draft plans of tasks that wait for your approval. Never writes code.
+              Session <span className="font-mono">&lt;prefix&gt;plan-&lt;slug&gt;</span>, any provider.
+            </span>
+          </span>
+          <div className="flex flex-wrap gap-2">
+            <Button onClick={read}>Instructions</Button>
+            <Button onClick={() => go("command", "requirements")}>Talk to it →</Button>
+          </div>
+        </div>
+      </div>
+      {open && (
+        <Modal onClose={() => setOpen(false)} label="Planner instructions" width={860}>
+          <div className="flex items-center justify-between gap-2.5 border-b border-line px-[18px] py-3.5">
+            <span className="flex min-w-0 flex-col gap-1">
+              <span className="font-mono text-[11px] font-semibold tracking-[0.14em] uppercase">Planner instructions</span>
+              <span className="truncate font-mono text-[10.5px] text-muted">
+                {text && "source" in text ? (text.source === "built-in" ? "built in · backend/templates/planner-agent.md · replace with [templates] planner_agent" : text.source) : "…"}
+              </span>
+            </span>
+            <button onClick={() => setOpen(false)} className="size-[26px] flex-none cursor-pointer rounded-md border border-line-2 text-nav" aria-label="Close">
+              ×
+            </button>
+          </div>
+          <div className="p-[18px]">
+            {text && "error" in text ? (
+              <p className="text-sm text-bad">{text.error}</p>
+            ) : (
+              <pre className="max-h-[65vh] overflow-auto rounded-lg border border-line bg-inset p-3 font-mono text-[11.5px] leading-[1.55] whitespace-pre-wrap text-text-2">{text?.content ?? "Loading…"}</pre>
+            )}
+          </div>
+        </Modal>
+      )}
+    </section>
   );
 }
 
@@ -115,6 +181,8 @@ export function AgentsScreen() {
             </>
           }
         />
+
+        <BuiltinAgents />
 
         {ours && "error" in ours && <p className="rounded-lg border border-bad/40 bg-bad/10 px-3 py-2 text-sm text-bad">Could not scan agents: {ours.error}</p>}
         {!ours && <Empty>Scanning agent folders…</Empty>}

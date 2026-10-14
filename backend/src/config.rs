@@ -385,11 +385,13 @@ pub struct TemplatesConfig {
     pub dirs: Vec<PathBuf>,
     /// The init agent's instructions; unset: the ones built into the binary (`backend/templates/init-agent.md`).
     pub init_agent: Option<PathBuf>,
+    /// The planner agent's instructions; unset: the ones built into the binary (`backend/templates/planner-agent.md`).
+    pub planner_agent: Option<PathBuf>,
 }
 
 impl Default for TemplatesConfig {
     fn default() -> Self {
-        Self { dirs: vec!["~/.config/map/templates".into()], init_agent: None }
+        Self { dirs: vec!["~/.config/map/templates".into()], init_agent: None, planner_agent: None }
     }
 }
 
@@ -830,6 +832,9 @@ impl Config {
         if let Some(path) = &mut templates.init_agent {
             *path = home(path);
         }
+        if let Some(path) = &mut templates.planner_agent {
+            *path = home(path);
+        }
 
         config.projects.root = home(&config.projects.root);
         config.projects.git_timeout_secs = config.projects.git_timeout_secs.clamp(5, 3600);
@@ -930,9 +935,10 @@ mod tests {
     #[test]
     fn template_paths_expand_home() {
         let home = PathBuf::from(std::env::var_os("HOME").unwrap());
-        let c = Config::parse("[workspace]\ndir = \"/r\"\n[templates]\ndirs = [\"~/t\", \"rel\"]\ninit_agent = \"agent.md\"\n", Path::new("/etc/map")).unwrap();
+        let c = Config::parse("[workspace]\ndir = \"/r\"\n[templates]\ndirs = [\"~/t\", \"rel\"]\ninit_agent = \"agent.md\"\nplanner_agent = \"~/planner.md\"\n", Path::new("/etc/map")).unwrap();
         assert_eq!(c.templates.dirs, vec![home.join("t"), PathBuf::from("/etc/map/rel")]);
         assert_eq!(c.templates.init_agent, Some(PathBuf::from("/etc/map/agent.md")));
+        assert_eq!(c.templates.planner_agent, Some(home.join("planner.md")));
         let c = Config::parse("[workspace]\ndir = \"/r\"\n", Path::new("/")).unwrap();
         assert_eq!(c.templates.dirs, vec![home.join(".config/map/templates")]);
     }
