@@ -16,6 +16,7 @@ export const SESSION_TONE: Record<SessionState, Tone> = {
   waiting_input: "accent",
   rate_limited: "warn",
   needs_auth: "bad",
+  needs_trust: "warn",
   error: "bad",
   stalled: "warn",
   exited: "idle",

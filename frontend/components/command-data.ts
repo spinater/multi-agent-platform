@@ -21,8 +21,8 @@ export const projectKey = (slug: string | null | undefined) => slug ?? WS_KEY;
 export const keySlug = (key: string) => (key === WS_KEY ? null : key);
 
 const LIVE_BUSY = ["running", "verifying", "auditing"];
-export const NEEDS_YOU = ["waiting_input", "needs_auth", "stalled", "error"] as const;
-const NEED_TAG: Record<string, string> = { waiting_input: "input", needs_auth: "sign in", stalled: "stalled", error: "error" };
+export const NEEDS_YOU = ["waiting_input", "needs_auth", "needs_trust", "stalled", "error"] as const;
+const NEED_TAG: Record<string, string> = { waiting_input: "input", needs_auth: "sign in", needs_trust: "trust folder", stalled: "stalled", error: "error" };
 
 export type ProviderState = { word: string; tone: Tone; signIn: boolean; signedIn: boolean | null };
 

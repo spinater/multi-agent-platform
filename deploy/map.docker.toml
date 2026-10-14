@@ -17,6 +17,10 @@ data_dir = "/data/map"
 # Where tasks and sessions without a project run (create it as a git repo: `git init ${MAP_DIR}/data/workspace`).
 dir = "/data/workspace"
 session_prefix = "map-"
+# MAP marks the default workspace and each project's folder as trusted for Claude Code and Codex before it starts an
+# agent there; set false to answer the CLIs' own trust prompts yourself. (Here Claude Code's file is
+# ~/.claude/.claude.json, from CLAUDE_CONFIG_DIR in docker-compose.yml.)
+trust_folders = true
 
 [workspace.env]
 # The host's agent CLIs; keep in sync with PATH in docker-compose.yml (MAP_HOME and MAP_NODE_DIR from .env).

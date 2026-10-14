@@ -58,6 +58,7 @@ pub fn router(hub: Arc<Hub>) -> Router {
         .route("/sessions/{name}/pane", get(pane))
         .route("/sessions/{name}/prompt", post(prompt))
         .route("/sessions/{name}/key", post(key))
+        .route("/sessions/{name}/trust", post(trust_session))
         .route("/tasks", get(tasks).post(create_task))
         .route("/tasks/{id}", axum::routing::patch(update_task).delete(delete_task))
         .route("/orchestrator", get(orchestrator).post(set_orchestrator))
@@ -90,6 +91,7 @@ pub fn router(hub: Arc<Hub>) -> Router {
         // ---- project settings and provider sign-in
         .route("/projects/defaults", get(projects::defaults))
         .route("/projects/inspect", post(projects::inspect))
+        .route("/projects/{slug}/trust", get(projects::trust_state).post(projects::trust))
         .route("/providers/{name}/login", get(projects::login_state).post(projects::login_start))
         // ---- usage: plan limits per provider (usage.rs)
         .route("/usage", get(usage))
@@ -313,6 +315,17 @@ async fn key(State(hub): State<Arc<Hub>>, UrlPath(name): UrlPath<String>, Json(b
     hub.managed(&name).await?;
     hub.term.send_key(&name, &body.key).await?;
     Ok(Json(json!({ "ok": true })))
+}
+
+/// "Trust this folder": only while the pane shows the CLI's folder-trust question and nobody is attached or typing,
+/// records the folder as trusted and picks the CLI's trust option (409 otherwise). Takes `{}`.
+async fn trust_session(State(hub): State<Arc<Hub>>, UrlPath(name): UrlPath<String>, Json(_): Json<Value>) -> ApiResult<crate::model::TrustAnswer> {
+    match crate::trust::answer(&hub, &name).await {
+        Ok(answer) => Ok(Json(answer)),
+        Err(crate::trust::AnswerError::NotFound(why)) => Err(ApiError(StatusCode::NOT_FOUND, why)),
+        Err(crate::trust::AnswerError::Conflict(why)) => Err(ApiError(StatusCode::CONFLICT, why)),
+        Err(crate::trust::AnswerError::Failed(err)) => Err(err.into()),
+    }
 }
 
 async fn tasks(State(hub): State<Arc<Hub>>) -> ApiResult<Vec<Task>> {

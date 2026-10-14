@@ -309,6 +309,12 @@ impl Orchestrator {
                 record(&self.hub, Kind::WATCH_AUTH, &task, format!("session {name} needs_auth · {provider} sign-in")).await;
                 self.retry_or_fail(task, &format!("{provider} needs a new sign-in; moving to another provider")).await
             }
+            Some(SessionState::NeedsTrust) => {
+                // Blocked on the owner, not hung: no retry and no timeout while the question is on screen.
+                let detail = session.and_then(|s| s.detail).unwrap_or_else(|| "asks to trust its folder".into());
+                record(&self.hub, Kind::WATCH_TRUST, &task, format!("session {name} needs_trust · {detail} · waiting for the owner")).await;
+                Ok(())
+            }
             _ => {
                 let limit = chrono::Duration::minutes(self.hub.config.orchestrator.task_timeout_minutes as i64);
                 let started = session.map_or(task.updated_at, |s| s.created_at);
@@ -634,6 +640,27 @@ mod tests {
         orch.tick().await.unwrap();
         assert!(term.sessions.lock().unwrap().contains_key(&s));
         assert_eq!(hub.store.task(t.id).await.unwrap().unwrap().status, TaskStatus::Running);
+    }
+
+    #[tokio::test]
+    async fn a_worker_at_the_trust_question_waits_for_the_owner() {
+        // A zero timeout would retry any other running task at once.
+        let (hub, term, _dir) = setup("task_timeout_minutes = 0").await;
+        let t = hub.store.create_task(new_task("a", vec![])).await.unwrap();
+        let mut orch = Orchestrator::new(hub.clone());
+        orch.tick().await.unwrap();
+        let s = hub.store.task(t.id).await.unwrap().unwrap().session.unwrap();
+        term.set_pane(&s, crate::detect::CLAUDE_TRUST_PANE);
+        crate::watcher::Watcher::new(hub.clone()).tick(Utc::now()).await.unwrap();
+        assert_eq!(hub.store.session(&s).await.unwrap().unwrap().state, SessionState::NeedsTrust);
+        orch.tick().await.unwrap();
+        orch.tick().await.unwrap();
+        let task = hub.store.task(t.id).await.unwrap().unwrap();
+        assert_eq!((task.status, task.attempts), (TaskStatus::Running, 1), "not done, not retried, not timed out");
+        assert!(term.sessions.lock().unwrap().contains_key(&s), "the worker is kept");
+        let kinds = decisions_of(&hub, t.id).await;
+        assert_eq!(kinds.iter().filter(|k| *k == "watch.trust").count(), 1, "{kinds:?}");
+        assert!(!kinds.iter().any(|k| k.starts_with("retry.") || k == "watch.timeout"), "{kinds:?}");
     }
 
     #[tokio::test]

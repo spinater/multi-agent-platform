@@ -140,7 +140,15 @@ impl Watcher {
             }
         } else {
             let stalled_for = mem.changed_at.map(|t| now - t).unwrap_or_default();
-            let (state, detail) = Self::classify(&s, &sig, changed_recently, stalled_for, cfg.stall_minutes, spec.startup_secs, now);
+            let (state, mut detail) = Self::classify(&s, &sig, changed_recently, stalled_for, cfg.stall_minutes, spec.startup_secs, now);
+            if state == SessionState::NeedsTrust {
+                let dir = hub.work_dir(s.project.as_deref()).await;
+                let folder = crate::trust::folder_key(&dir).unwrap_or_else(|_| dir.display().to_string());
+                detail = Some(format!("Asks to trust {folder}"));
+                if s.state != SessionState::NeedsTrust {
+                    hub.event(Level::Warning, "session.needs_trust", Some(&s.name), s.task_id, format!("{} asks whether to trust {folder}; press Trust this folder or answer it in the console", s.provider)).await;
+                }
+            }
             if state == SessionState::NeedsAuth && s.state != SessionState::NeedsAuth {
                 hub.cool_down(&s.provider, now + chrono::Duration::minutes(hub.config.orchestrator.provider_cooldown_minutes as i64));
                 hub.event(Level::Error, "session.needs_auth", Some(&s.name), s.task_id, format!("{} needs you to sign in again", s.provider)).await;
@@ -169,6 +177,10 @@ impl Watcher {
     ) -> (SessionState, Option<String>) {
         if let Some(marker) = &sig.needs_auth {
             return (SessionState::NeedsAuth, Some(marker.clone()));
+        }
+        // Before pending input: the question's own `❯ No, exit` line looks like typing.
+        if let Some(marker) = &sig.needs_trust {
+            return (SessionState::NeedsTrust, Some(marker.clone()));
         }
         if sig.pending_input {
             return (SessionState::WaitingInput, Some("A person is typing on the input line".into()));
@@ -255,6 +267,23 @@ mod tests {
         w.tick(t0 + chrono::Duration::minutes(1)).await.unwrap();
         assert!(term.sent(&name).is_empty());
         assert_eq!(hub.store.session(&name).await.unwrap().unwrap().state, SessionState::RateLimited);
+    }
+
+    #[tokio::test]
+    async fn trust_question_is_needs_trust_not_idle_or_waiting() {
+        let (hub, term, dir) = setup().await;
+        let name = launch(&hub).await;
+        let mut w = Watcher::new(hub.clone());
+        term.set_pane(&name, crate::detect::CLAUDE_TRUST_PANE);
+        w.tick(Utc::now()).await.unwrap();
+        // Unchanged on the next tick: still not idle.
+        w.tick(Utc::now() + chrono::Duration::seconds(30)).await.unwrap();
+        let s = hub.store.session(&name).await.unwrap().unwrap();
+        assert_eq!(s.state, SessionState::NeedsTrust);
+        let folder = dir.path().canonicalize().unwrap();
+        assert_eq!(s.detail.as_deref(), Some(format!("Asks to trust {}", folder.display()).as_str()));
+        let events = hub.store.events(50, Some(&name)).await.unwrap();
+        assert_eq!(events.iter().filter(|e| e.kind == "session.needs_trust").count(), 1, "announced once");
     }
 
     #[tokio::test]

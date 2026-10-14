@@ -21,6 +21,7 @@ mod skills;
 mod store;
 mod templates;
 mod terminal;
+mod trust;
 mod updates;
 mod usage;
 mod watcher;
@@ -97,6 +98,8 @@ async fn serve(config: Config) -> Result<()> {
     let hub = open(config).await?;
     // MAP's gitconfig and known_hosts, before any agent starts (regenerated on every change after this).
     tracing::info!("git config for agents: {}", hub.gitconfig().display());
+    // The default workspace, before the orchestrator can start an agent there (projects are trusted when created).
+    trust::trust_workspace(&hub).await;
     tokio::spawn(watcher::run(hub.clone()));
     tokio::spawn(orchestrator::run(hub.clone()));
     tokio::spawn(usage::run(hub.clone()));

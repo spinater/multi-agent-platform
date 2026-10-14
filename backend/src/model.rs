@@ -29,6 +29,9 @@ pub enum SessionState {
     /// The provider reported a quota or rate limit; the watcher wakes the session at `reset_at`.
     RateLimited,
     NeedsAuth,
+    /// The CLI asks whether to trust the folder it runs in (`trust_markers`); a person answers it, or presses
+    /// "Trust this folder" on the dashboard.
+    NeedsTrust,
     Error,
     /// No pane change for the configured stall window.
     Stalled,
@@ -64,6 +67,51 @@ pub struct Session {
     pub attached: bool,
     pub created_at: DateTime<Utc>,
     pub last_activity_at: DateTime<Utc>,
+}
+
+/// `POST /api/sessions/{name}/trust`: what MAP did about the folder-trust question on the session's screen.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct TrustAnswer {
+    pub session: String,
+    /// The folder the session runs in (canonical path).
+    pub folder: String,
+    /// The CLI's own record: "marked in <file>", "already trusted in <file>", why it was not written.
+    pub recorded: String,
+    /// The keys sent to the pane, in order (`Down`, `Enter`).
+    pub keys: Vec<String>,
+    /// The question is gone from the screen after the keys.
+    pub answered: bool,
+}
+
+/// `GET /api/projects/{slug}/trust`: whether each installed CLI trusts the project's folder (read from its config).
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct FolderTrust {
+    /// The folder (canonical path).
+    pub folder: String,
+    /// `workspace.trust_folders`: MAP marks folders trusted before it starts an agent there.
+    pub enabled: bool,
+    pub providers: Vec<ProviderTrust>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct ProviderTrust {
+    pub provider: String,
+    /// The CLI's config file MAP reads and writes; `None` when MAP cannot mark folders for this CLI.
+    pub file: Option<String>,
+    /// `None`: unknown (no file MAP can read, or it does not parse).
+    pub trusted: Option<bool>,
+    pub note: String,
+}
+
+/// `POST /api/projects/{slug}/trust`: what marking the folder did, and the state after it.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct FolderTrusted {
+    pub checks: Vec<CheckLine>,
+    pub trust: FolderTrust,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -1005,6 +1053,10 @@ pub struct ProjectDefaults {
     pub session_prefix: String,
     /// Providers with tier models for the Reflex tier gate.
     pub tiers: Vec<ProviderTiers>,
+    /// `workspace.trust_folders`: a new project's folder is marked trusted for `trust_providers`.
+    pub trust_folders: bool,
+    /// Installed CLIs MAP can mark a folder trusted for (`claude`, `codex`).
+    pub trust_providers: Vec<String>,
 }
 
 /// What the wizard found at a project's folder before creating the project.

@@ -16,6 +16,9 @@ data_dir = ".map"
 dir = "../my-repo"
 # Only tmux sessions with this prefix are managed; nothing else is ever touched.
 session_prefix = "map-"
+# MAP marks the default workspace and each project's folder as trusted for Claude Code and Codex before it starts an
+# agent there; set false to answer the CLIs' own trust prompts yourself.
+trust_folders = true
 
 # Exported in each agent's launch script and in verify/post_done commands.
 [workspace.env]
@@ -85,6 +88,17 @@ timeout_secs = 600
 #                 channel = { file = "~/...json", key = "...", default = "..." }. latest = { url = "" } clears it.
 #   update        run in a helper tmux session `<session_prefix>update-<name>` when you press Update; [] hides it.
 #                 Refused when the CLI is installed where this user cannot write (the Docker deploy's read-only mounts).
+#
+# Folder trust (workspace.trust_folders above):
+#   trust         where the CLI records trusted folders, which MAP writes before starting it in a folder:
+#                 { format = "claude_json" | "codex_toml", file = "~/...", dir_env = "VAR", dir_file = "..." }.
+#                 With dir_env set (in [workspace.env] or MAP's environment) the file is <$dir_env>/<dir_file>.
+#                 Built in: claude  { format = "claude_json", file = "~/.claude.json", dir_env = "CLAUDE_CONFIG_DIR", dir_file = ".claude.json" }
+#                           codex   { format = "codex_toml", file = "~/.codex/config.toml", dir_env = "CODEX_HOME", dir_file = "config.toml" }
+#                 None for gemini (agy). trust = { file = "" } turns it off for one provider.
+#   trust_markers pane text of the CLI's trust question; the session then shows as needs_trust.
+#   trust_accept  the label of the option that trusts the folder ("Yes, I trust this folder"), which the dashboard's
+#                 "Trust this folder" button selects.
 
 [providers.claude]
 # Unattended workers need this, or they stop at every permission prompt (the watcher shows them as waiting).

@@ -261,6 +261,9 @@ pub async fn create_with(hub: &Hub, req: NewProject, settings: ProjectSettings) 
     }
     let project = Project { settings, ..project };
     hub.event(Level::Info, "project.created", None, None, format!("Project {slug} created")).await;
+    // Every source ends here with the folder in place (made, cloned into, or used as is). A failed write is a
+    // warning line; the launch-time check and the watcher's `needs_trust` are the backstops.
+    checks.extend(crate::trust::trust_folder(hub, &folder).await);
 
     match hub.restart_reflex(&slug).await {
         Ok(s) => {

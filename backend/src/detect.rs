@@ -240,6 +240,68 @@ pub fn last_assistant_message(pane: &str) -> String {
     out.join("\n").trim().to_string()
 }
 
+/// How far up from the bottom a trust question is looked for (non-empty lines).
+const TRUST_LINES: usize = 30;
+
+/// A CLI's "trust this folder?" question at the bottom of a pane.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TrustPrompt {
+    /// The `trust_markers` entry that matched.
+    pub marker: String,
+    /// The pane above the question (escapes kept when the capture had them), for [`end_decision`]: the question's
+    /// own `❯ No, exit` line is a selection, not typing.
+    pub above: String,
+    /// Lines the selection must move to reach a `trust_accept` option (negative: up); `None` when the selected
+    /// option or the accepting one cannot be told from the text.
+    pub moves: Option<i64>,
+}
+
+fn squash(s: &str) -> String {
+    s.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// A line of a selection list whose option is the selected one (`❯ No, exit`, `› 1. Trust and continue`).
+fn selected_option(line: &str) -> bool {
+    let rest = line.trim_start_matches(|c: char| c.is_whitespace() || c == '│' || c == '|');
+    let mut chars = rest.chars();
+    matches!(chars.next(), Some('❯' | '›' | '▸' | '▶' | '→' | '>')) && chars.next().is_some_and(char::is_whitespace)
+}
+
+/// The CLI's folder-trust question, when it is the last thing on screen: a `trust_markers` phrase in the bottom
+/// lines (whitespace squashed, so a phrase wrapped onto the next line counts) with neither an idle nor a working
+/// marker below it. Agent output that merely quotes a marker is followed by the agent's own prompt, so it does not
+/// count.
+pub fn trust_prompt(spec: &ProviderSpec, pane: &str) -> Option<TrustPrompt> {
+    let markers: Vec<(String, &String)> = spec.trust_markers.iter().map(|m| (squash(m), m)).filter(|(s, _)| !s.is_empty()).collect();
+    if markers.is_empty() {
+        return None;
+    }
+    let raw: Vec<&str> = pane.split('\n').collect();
+    let rows: Vec<(usize, String)> = raw.iter().enumerate().map(|(k, l)| (k, strip_ansi(l))).filter(|(_, l)| !l.trim().is_empty()).collect();
+    let window = &rows[rows.len().saturating_sub(TRUST_LINES)..];
+    // `first`: where the question starts, with the phrase that matched; `end`: the last line any phrase ends on.
+    let (mut first, mut end) = (None, None);
+    for i in 0..window.len() {
+        let line = squash(&window[i].1);
+        let next = window.get(i + 1).map_or("", |r| r.1.as_str());
+        let joined = squash(&format!("{} {next}", window[i].1));
+        if let Some((s, m)) = markers.iter().find(|(s, _)| joined.contains(s.as_str())) {
+            first.get_or_insert((i, (*m).clone()));
+            end = Some(if line.contains(s.as_str()) { i } else { i + 1 });
+        }
+    }
+    let ((first, marker), end) = (first?, end?);
+    let busy = |l: &String| spec.idle_markers.iter().chain(&spec.working_markers).any(|m| !m.is_empty() && l.contains(m.as_str()));
+    if window[(end + 1).min(window.len())..].iter().any(|(_, l)| busy(l)) {
+        return None;
+    }
+    let accept: Vec<String> = spec.trust_accept.iter().map(|a| squash(a)).filter(|a| !a.is_empty()).collect();
+    let selected = window.iter().rposition(|(_, l)| selected_option(l)).filter(|&s| s >= first);
+    let target = window.iter().rposition(|(_, l)| accept.iter().any(|a| squash(l).contains(a.as_str())));
+    let moves = selected.zip(target).map(|(s, t)| t as i64 - s as i64);
+    Some(TrustPrompt { marker, above: raw[..window[first].0].join("\n"), moves })
+}
+
 #[derive(Debug, Default, Clone, PartialEq)]
 pub struct PaneSignals {
     /// The bottom-most rate-limit line and the reset time parsed from it.
@@ -247,6 +309,8 @@ pub struct PaneSignals {
     /// How many rate-limit lines the scanned tail holds; a rise means a new hit even if the text repeats.
     pub rate_limit_count: usize,
     pub needs_auth: Option<String>,
+    /// The `trust_markers` phrase of a folder-trust question on screen ([`trust_prompt`]).
+    pub needs_trust: Option<String>,
     pub error: Option<String>,
     pub pending_input: bool,
     pub idle_marker: bool,
@@ -275,6 +339,7 @@ pub fn scan(spec: &ProviderSpec, raw_pane: &str, scan_lines: usize, now: DateTim
         rate_limit,
         rate_limit_count,
         needs_auth,
+        needs_trust: trust_prompt(spec, raw_pane).map(|t| t.marker),
         error: ERROR_LINE.find(&bottom).map(|m| m.as_str().trim().chars().take(180).collect()),
         pending_input: !pending_input(raw_pane).is_empty(),
         idle_marker: spec.idle_markers.iter().any(|m| bottom.contains(m.as_str())),
@@ -283,10 +348,70 @@ pub fn scan(spec: &ProviderSpec, raw_pane: &str, scan_lines: usize, now: DateTim
     }
 }
 
+/// Claude Code's folder-trust question as a worker's pane showed it in /data/workspace (the Docker deploy).
+#[cfg(test)]
+pub const CLAUDE_TRUST_PANE: &str = " Accessing workspace:
+ /data/workspace
+ Quick safety check: Is this a project you created or one you trust? (Like your own code, a well-known open source project, or work from your team). If not, take a moment to review what's in this folder first.
+ Claude Code'll be able to read, edit, and execute files here.
+ Security guide
+ ❯ No, exit
+   Yes, I trust this folder
+ Enter to confirm · Esc to cancel
+";
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use chrono::Timelike;
+
+    fn claude() -> ProviderSpec {
+        crate::config::builtin_providers().remove("claude").unwrap()
+    }
+
+    #[test]
+    fn claude_trust_question_is_needs_trust_with_one_move_down() {
+        let p = trust_prompt(&claude(), CLAUDE_TRUST_PANE).expect("trust prompt");
+        assert_eq!(p.marker, "Is this a project you created or one you trust");
+        assert_eq!(p.moves, Some(1));
+        assert!(!p.above.contains('❯'), "the selection line is not part of `above`: {:?}", p.above);
+        assert_eq!(end_decision(0, &p.above), EndDecision::End);
+        let s = scan(&claude(), CLAUDE_TRUST_PANE, 40, at(10, 0));
+        assert_eq!(s.needs_trust.as_deref(), Some("Is this a project you created or one you trust"));
+        // The selection on "Yes": nothing left to move.
+        let on_yes = CLAUDE_TRUST_PANE.replace(" ❯ No, exit\n   Yes,", "   No, exit\n ❯ Yes,");
+        assert_eq!(trust_prompt(&claude(), &on_yes).unwrap().moves, Some(0));
+        // Wrapped by a narrow pane, with escapes from `capture-pane -e`.
+        let narrow = "Quick safety check: Is this a project you\ncreated or one you trust? (Like your own code)\n\x1b[1m❯\x1b[0m No, exit\n  Yes, I trust\nthis folder\n";
+        assert!(trust_prompt(&claude(), narrow).is_some());
+    }
+
+    #[test]
+    fn ordinary_output_about_trust_is_not_a_trust_question() {
+        let spec = claude();
+        for pane in [
+            "● I checked the TLS trust store and the certificate chain.\nDo you trust this vendor? Ask security.\n╭──╮\n│ > │\n╰──╯\n? for shortcuts\n",
+            "● Reading detect.rs: trust_markers = [\"Yes, I trust this folder\"]\n✻ Working… (esc to interrupt)\n",
+            "● Done. The marker \"Is this a project you created or one you trust\" is matched in detect.rs.\n\n╭──╮\n│ > │\n╰──╯\n  ? for shortcuts\n",
+            "trust me, it works\n",
+        ] {
+            assert!(trust_prompt(&spec, pane).is_none(), "false positive: {pane}");
+            assert!(scan(&spec, pane, 40, at(10, 0)).needs_trust.is_none());
+        }
+        let mut none = spec.clone();
+        none.trust_markers.clear();
+        assert!(trust_prompt(&none, CLAUDE_TRUST_PANE).is_none());
+    }
+
+    #[test]
+    fn codex_and_agy_trust_questions() {
+        let providers = crate::config::builtin_providers();
+        let codex = "Trust this folder? Codex can read, edit, and run files here, subject to your\npermission settings.\n\n› 1. Trust and continue\n  2. Open restricted\n";
+        let p = trust_prompt(&providers["codex"], codex).unwrap();
+        assert_eq!(p.moves, Some(0));
+        let agy = "Do you trust the contents of this project?\n> No, exit\n  Yes, I trust this folder\n";
+        assert_eq!(trust_prompt(&providers["gemini"], agy).unwrap().moves, Some(1));
+    }
 
     fn at(h: u32, m: u32) -> DateTime<Local> {
         Local.with_ymd_and_hms(2026, 10, 13, h, m, 0).unwrap()

@@ -50,6 +50,7 @@ impl Kind {
     pub const WATCH_FAILED: Kind = k("decision.watch.failed", N::Watch, N::Retry, W, "reported failure → retry or fail");
     pub const WATCH_EXITED: Kind = k("decision.watch.exited", N::Watch, N::Retry, W, "session exited without a result → retry or fail");
     pub const WATCH_AUTH: Kind = k("decision.watch.auth", N::Watch, N::Retry, W, "provider needs sign-in → retry or fail");
+    pub const WATCH_TRUST: Kind = k("decision.watch.trust", N::Watch, N::Watch, W, "CLI asks to trust its folder · waiting for the owner");
     pub const WATCH_TIMEOUT: Kind = k("decision.watch.timeout", N::Watch, N::Retry, W, "timed out → retry or fail");
     pub const WATCH_LOST: Kind = k("decision.watch.lost", N::Watch, N::Retry, W, "running without a session → retry or fail");
     // finish(): verify commands.
@@ -109,6 +110,7 @@ pub const ALL: &[Kind] = &[
     Kind::WATCH_FAILED,
     Kind::WATCH_EXITED,
     Kind::WATCH_AUTH,
+    Kind::WATCH_TRUST,
     Kind::WATCH_TIMEOUT,
     Kind::WATCH_LOST,
     Kind::VERIFY_CMD_START,
@@ -212,7 +214,7 @@ pub fn model(hub: &Hub, tick_secs: u64) -> DecisionModel {
         point(N::Ready, "Ready?", "Are all depends_on tasks done, and is a worker slot free?", "every depends_on task is done && active < max_parallel; a failed or cancelled dependency blocks", "Orchestrator::tick · orchestrator.max_parallel", false),
         point(N::Pick, "Pick provider", "Which provider takes this task, with which model?", "task.provider if pinned, else the first of the project's providers (or provider_order) that is on PATH, not cooling down and under its session limit; with the project's tier gate on and no pinned model, a confident Reflex `tier` answer (light | standard | heavy) takes that provider's model from orchestrator.tiers, an unsure one keeps the usual model", "pick_provider() · tier_gate() · project settings · orchestrator.provider_order · orchestrator.tiers", false),
         point(N::Launch, "Launch", "Did the worker session start?", "hub.launch(LaunchRequest) returns Ok; an error cools the provider down for 5m", "start() · hub.launch", false),
-        point(N::Watch, "Watch", "What has the worker reported?", "$MAP_RESULT_FILE status done | failed; session exited or needs_auth; started > task_timeout_minutes ago", "check_running() · orchestrator.task_timeout_minutes", false),
+        point(N::Watch, "Watch", "What has the worker reported?", "$MAP_RESULT_FILE status done | failed; session exited or needs_auth; started > task_timeout_minutes ago; needs_trust waits for the owner (no timeout)", "check_running() · orchestrator.task_timeout_minutes", false),
         point(N::Verify, "Verify", "Does every verify command exit 0?", "each cfg.verify command, in order, exits 0 (30m limit each)", "finish() · orchestrator.verify", false),
         point(N::Audit, "Audit", "Does the change need an audit, and what does the auditor answer?", "with the project's audit gate on, a confident Reflex `needs_audit` = no accepts the task on verification; otherwise (yes, unsure, Reflex not running) the first auditor in audit.chain with a VERDICT line: PASS | FAIL; none → audit.required decides", "audit_gate() · audit() · orchestrator.audit · project reflex_gates", false),
         point(N::Post, "post_done", "Do the post_done hooks pass?", "each cfg.post_done command exits 0; a failure fails the task without a retry", "finish() · orchestrator.post_done", false),

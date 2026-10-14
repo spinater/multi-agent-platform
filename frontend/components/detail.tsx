@@ -3,6 +3,7 @@
 import clsx from "clsx";
 import { useEffect, useRef } from "react";
 
+import { api } from "@/lib/api";
 import { providerColor } from "@/lib/colors";
 import type { OrchestratorStatus } from "@/lib/generated/OrchestratorStatus";
 import type { Session } from "@/lib/generated/Session";
@@ -179,6 +180,17 @@ export function DetailCard({
       if (!live) lines.push({ text: `[exited] final pane saved under .map/runs/${s.name}/`, tone: "muted" });
       const actions: Action[] = [];
       if (s.state === "needs_auth") actions.push({ label: `Sign in to ${s.provider}`, kind: "primary", run: () => openAuth(s.provider) });
+      if (s.state === "needs_trust")
+        actions.push({
+          label: "Trust this folder",
+          kind: "primary",
+          // Refused (409) unless the question is on screen and nobody is attached or typing.
+          run: () =>
+            void api.trustSession(s.name).then(
+              (a) => toast(a.answered ? `Trusted ${a.folder} · ${a.keys.join(" ")}` : `Sent ${a.keys.join(" ")}, but the question is still on screen`, a.answered ? "ok" : "warn"),
+              (err: Error) => toast(err.message, "bad"),
+            ),
+        });
       if (t) actions.push({ label: `Open task #${t.id}`, run: () => select(`t:${t.id}`), nav: true });
       actions.push({ label: "Console", run: () => onOpenConsole(s.name) });
       actions.push(flyBtn);
