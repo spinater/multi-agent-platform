@@ -155,6 +155,61 @@ impl Orchestrator {
         p
     }
 
+    /// The project's Reflex tier gate: the provider's model for the tier Reflex is sure of, for a task without a
+    /// pinned model. `None` (gate off, no tiers for `provider`, Reflex unsure) keeps the usual model.
+    async fn tier_gate(&self, task: &Task, provider: &str) -> Option<String> {
+        let slug = task.project.as_deref()?;
+        if task.model.is_some() || !crate::project_settings::gates(&self.hub, task).await.tier {
+            return None;
+        }
+        let tiers = self.hub.config.orchestrator.tiers.get(provider).filter(|t| !t.is_empty())?;
+        let said = crate::gates::ask(&self.hub, slug, &crate::gates::task_state(task), crate::gates::tier_question()).await;
+        let tier = match &said {
+            crate::gates::Said::Answer { answer, .. } => answer.as_str(),
+            crate::gates::Said::Unsure(_) => None,
+        };
+        let model = tier.and_then(|t| tiers.get(t)).map(String::from);
+        let detail = match (tier, &model) {
+            (Some(t), Some(m)) => format!("tier: {t} · {} · {provider} → {m}", said.detail()),
+            (Some(t), None) => format!("tier: {t} · {} · no {t} model for {provider}, usual model", said.detail()),
+            _ => format!("tier: {} · usual model", said.detail()),
+        };
+        record(&self.hub, Kind::tier(tier), task, detail).await;
+        model
+    }
+
+    /// The project's Reflex audit gate; true when Reflex is sure the change needs no audit, which accepts the task on
+    /// verification. Off, unsure, not running or "yes": false, and the audit runs as before.
+    async fn audit_gate(&self, task: &Task, dir: &std::path::Path) -> bool {
+        let Some(slug) = task.project.as_deref() else { return false };
+        if !crate::project_settings::gates(&self.hub, task).await.audit {
+            return false;
+        }
+        // Not running: no need to read the change.
+        let said = match crate::gates::not_running(&self.hub, slug) {
+            Some(said) => said,
+            None => {
+                let state = crate::gates::audit_state(&self.hub, task, dir).await;
+                crate::gates::ask(&self.hub, slug, &state, crate::gates::needs_audit_question()).await
+            }
+        };
+        match &said {
+            crate::gates::Said::Answer { answer, .. } if answer == &serde_json::Value::Bool(false) => {
+                record(&self.hub, Kind::AUDIT_SKIPPED_REFLEX, task, format!("needs_audit: no · {} · accepted on verification", said.detail())).await;
+                self.hub.event(Level::Info, "task.audit_skipped", task.session.as_deref(), Some(task.id), "Reflex: no audit needed; accepted on verification").await;
+                true
+            }
+            crate::gates::Said::Answer { .. } => {
+                record(&self.hub, Kind::AUDIT_REFLEX_SAID_AUDIT, task, format!("needs_audit: yes · {}", said.detail())).await;
+                false
+            }
+            crate::gates::Said::Unsure(_) => {
+                record(&self.hub, Kind::AUDIT_REFLEX_ABSTAINED, task, format!("needs_audit: {}", said.detail())).await;
+                false
+            }
+        }
+    }
+
     /// Returns true when a worker session was started.
     async fn start(&self, mut task: Task) -> Result<bool> {
         let Some(provider) = self.pick_provider(&task).await else {
@@ -166,10 +221,11 @@ impl Orchestrator {
             }
             return Ok(false);
         };
-        record(&self.hub, Kind::PICK_CHOSEN, &task, dec::pick_detail(&self.hub, &task, Some(&provider)).await).await;
         let spec = self.hub.spec(&provider)?;
         // A model only carries over when it belongs to the chosen provider.
-        let model = task.model.clone().filter(|m| spec.models.contains(m)).or(crate::project_settings::model(&self.hub, &task, &provider).await);
+        let usual = task.model.clone().filter(|m| spec.models.contains(m)).or(crate::project_settings::model(&self.hub, &task, &provider).await);
+        let model = self.tier_gate(&task, &provider).await.or(usual);
+        record(&self.hub, Kind::PICK_CHOSEN, &task, dec::pick_detail(&self.hub, &task, Some(&provider)).await).await;
         task.attempts += 1;
         let session = format!("{}task-{}-{}", self.hub.config.workspace.session_prefix, task.id, task.attempts);
         let previous_failure = if task.attempts > 1 { task.result.clone() } else { None };
@@ -346,7 +402,7 @@ impl Orchestrator {
             }
         }
 
-        if task.status == TaskStatus::Auditing {
+        if task.status == TaskStatus::Auditing && !self.audit_gate(&task, &dir).await {
             match self.audit(&task).await? {
                 Verdict::Pass(by) => {
                     record(hub, Kind::AUDIT_PASS, &task, format!("{by}: VERDICT: PASS")).await;
@@ -695,6 +751,181 @@ mod tests {
         assert!(hub.step.step(Duration::from_secs(10)).await);
         assert_eq!(hub.store.task(t.id).await.unwrap().unwrap().status, TaskStatus::Running);
         looping.abort();
+    }
+
+    // ---- Reflex gates
+
+    use crate::gates::fake::{self, FakeReflex};
+    use crate::model::{ProjectProvider, ProjectSettings, ProjectSource, ReflexGates, SourceKind};
+    use serde_json::{Value, json};
+
+    /// Audit on with an auditor that always passes (`echo`); `claude` and `codex` count as installed.
+    async fn gate_setup(gates: ReflexGates, providers: Vec<ProjectProvider>) -> (Arc<Hub>, tempfile::TempDir, String) {
+        let dir = tempfile::tempdir().unwrap();
+        let text = format!(
+            "[workspace]\ndir = \"{0}\"\n[server]\ndata_dir = \"{0}/data\"\n[orchestrator]\nprovider_order = [\"claude\"]\n[orchestrator.audit]\nenabled = true\nchain = [\"claude\"]\n\
+             [reflex]\nbinary = \"/nonexistent/reflex\"\n[providers.claude]\nbinary = \"/bin/sh\"\nheadless = [\"/bin/echo\", \"VERDICT: PASS\"]\n[providers.codex]\nbinary = \"/bin/sh\"\n",
+            dir.path().display()
+        );
+        let config = Config::parse(&text, Path::new("/")).unwrap();
+        let hub = Hub::new(config, Store::memory().await.unwrap(), Arc::new(FakeTerminal::default()));
+        let source = ProjectSource { kind: SourceKind::Empty, location: Some(dir.path().join("app").display().to_string()), branch: None };
+        let new = crate::projects::NewProject { name: "App".into(), slug: None, description: String::new(), fallback: Some("none".into()), model: None };
+        let settings = ProjectSettings { source, providers, reflex_gates: gates, ..Default::default() };
+        let (p, _) = crate::projects::create_with(&hub, new, settings).await.unwrap();
+        (hub, dir, p.slug)
+    }
+
+    async fn reflex_answering(hub: &Hub, slug: &str, answers: Vec<Value>) -> FakeReflex {
+        let reflex = fake::start(answers).await;
+        fake::attach(hub, slug, reflex.port, Some(0.5)).await;
+        reflex
+    }
+
+    fn no_audit(confidence: f64) -> Value {
+        fake::answer("needs_audit", json!({"noul": {"yes": false}}), confidence)
+    }
+
+    /// Runs one task of the project to its end (the worker reports done) and returns its decision kinds.
+    async fn run_task(hub: &Arc<Hub>, task: NewTask) -> (Task, Vec<String>) {
+        let t = hub.store.create_task(task).await.unwrap();
+        let mut orch = Orchestrator::new(hub.clone());
+        orch.tick().await.unwrap();
+        let session = hub.store.task(t.id).await.unwrap().unwrap().session.unwrap();
+        std::fs::write(hub.result_file(&session), r#"{"status":"done","summary":"fixed the typo in the README"}"#).unwrap();
+        settle(&mut orch).await;
+        (hub.store.task(t.id).await.unwrap().unwrap(), decisions_of(hub, t.id).await)
+    }
+
+    fn project_task(slug: &str) -> NewTask {
+        NewTask { project: Some(slug.into()), ..new_task("Fix README typo", vec![]) }
+    }
+
+    fn after_verify(kinds: &[String]) -> Vec<&str> {
+        let i = kinds.iter().position(|k| k == "verify.pass").unwrap();
+        kinds[i + 1..].iter().map(String::as_str).collect()
+    }
+
+    #[tokio::test]
+    async fn gates_off_leave_the_audit_and_model_alone() {
+        let (hub, _dir, slug) = gate_setup(ReflexGates::default(), vec![]).await;
+        let reflex = reflex_answering(&hub, &slug, vec![no_audit(0.9), fake::answer("tier", json!({"choice": {"index": 0}}), 0.9)]).await;
+        let (t, kinds) = run_task(&hub, project_task(&slug)).await;
+        assert_eq!(t.status, TaskStatus::Done, "{:?}", t.result);
+        assert_eq!(&kinds[..3], ["ready.go", "pick.chosen", "launch.started"]);
+        assert_eq!(after_verify(&kinds), ["audit.ask", "audit.pass", "post.pass", "end.closed"]);
+        assert_eq!(hub.store.session(t.session.as_deref().unwrap()).await.unwrap().unwrap().model, "sonnet");
+        assert!(reflex.bodies.lock().unwrap().is_empty(), "Reflex is never asked");
+        assert!(hub.store.decisions(&slug, 10).await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_confident_no_skips_the_audit() {
+        let (hub, _dir, slug) = gate_setup(ReflexGates { audit: true, tier: false }, vec![]).await;
+        let reflex = reflex_answering(&hub, &slug, vec![no_audit(0.9)]).await;
+        let (t, kinds) = run_task(&hub, project_task(&slug)).await;
+        assert_eq!(t.status, TaskStatus::Done, "{:?}", t.result);
+        assert_eq!(after_verify(&kinds), ["audit.skipped_reflex", "post.pass", "end.closed"]);
+        let trace = hub.store.decision_events(t.id, 50).await.unwrap();
+        let skipped = trace.iter().find(|e| e.kind == "decision.audit.skipped_reflex").unwrap();
+        assert!(skipped.message.starts_with("needs_audit: no · confidence 9.0e-1 ≥ 5.0e-1 · decision #"), "{}", skipped.message);
+        assert!(trace.iter().all(|e| crate::decisions::ALL.iter().any(|k| k.kind == e.kind)));
+
+        // Reflex read the task, the worker's summary and the change; the question is in the project's decision log.
+        let bodies = reflex.bodies.lock().unwrap().clone();
+        let state = bodies[0]["state"].as_str().unwrap();
+        assert!(state.contains("Fix README typo") && state.contains("fixed the typo in the README") && state.contains("Not a git repository"), "{state}");
+        assert_eq!(bodies[0]["questions"][0]["id"], "needs_audit");
+        let rows = hub.store.decisions(&slug, 10).await.unwrap();
+        assert_eq!((rows.len(), rows[0].question.id.as_str(), rows[0].lane), (1, "needs_audit", crate::model::Lane::Reflex));
+        assert!(rows[0].state.contains("Worker summary"));
+        let counts = crate::decisions::counts(&hub, Utc::now() - chrono::Duration::hours(1), None).await.unwrap();
+        use crate::model::DecisionNode as N;
+        assert!(counts.edges.iter().any(|e| e.from == N::Audit && e.to == N::Post && e.count == 1));
+    }
+
+    #[tokio::test]
+    async fn the_audit_runs_on_yes_abstain_low_confidence_or_reflex_down() {
+        let cases: [(&str, Option<Vec<Value>>); 5] = [
+            ("audit.reflex_said_audit", Some(vec![fake::answer("needs_audit", json!({"noul": {"yes": true}}), 0.9)])),
+            ("audit.reflex_abstained", Some(vec![fake::answer("needs_audit", Value::Null, 0.0)])),
+            ("audit.reflex_abstained", Some(vec![no_audit(0.1)])),
+            // Reported running, but nothing answers on its port.
+            ("audit.reflex_abstained", None),
+            // Not running at all (no Reflex binary).
+            ("audit.reflex_abstained", Some(vec![])),
+        ];
+        for (i, (kind, answers)) in cases.into_iter().enumerate() {
+            let (hub, _dir, slug) = gate_setup(ReflexGates { audit: true, tier: false }, vec![]).await;
+            match answers {
+                Some(a) if a.is_empty() => {}
+                Some(a) => {
+                    reflex_answering(&hub, &slug, a).await;
+                }
+                None => fake::attach(&hub, &slug, fake::closed_port(), Some(0.5)).await,
+            }
+            let (t, kinds) = run_task(&hub, project_task(&slug)).await;
+            assert_eq!(t.status, TaskStatus::Done, "case {i}: {:?}", t.result);
+            assert_eq!(after_verify(&kinds), [kind, "audit.ask", "audit.pass", "post.pass", "end.closed"], "case {i}");
+            let message = hub.store.decision_events(t.id, 50).await.unwrap().into_iter().find(|e| e.kind == format!("decision.{kind}")).unwrap().message;
+            let expect = ["needs_audit: yes · confidence 9.0e-1", "needs_audit: Reflex abstained", "below the threshold", "Reflex is not reachable", "Reflex is error, not running"][i];
+            assert!(message.contains(expect), "case {i}: {message}");
+        }
+    }
+
+    #[tokio::test]
+    async fn the_tier_gate_picks_the_light_model() {
+        let (hub, _dir, slug) = gate_setup(ReflexGates { audit: false, tier: true }, vec![]).await;
+        let reflex = reflex_answering(&hub, &slug, vec![fake::answer("tier", json!({"choice": {"index": 0}}), 0.9)]).await;
+        let t = hub.store.create_task(project_task(&slug)).await.unwrap();
+        Orchestrator::new(hub.clone()).tick().await.unwrap();
+        let t = hub.store.task(t.id).await.unwrap().unwrap();
+        assert_eq!(hub.store.session(t.session.as_deref().unwrap()).await.unwrap().unwrap().model, "haiku");
+        assert_eq!(decisions_of(&hub, t.id).await, ["ready.go", "pick.tier_light", "pick.chosen", "launch.started"]);
+        let tier = hub.store.decision_events(t.id, 50).await.unwrap().into_iter().find(|e| e.kind == "decision.pick.tier_light").unwrap();
+        assert!(tier.message.starts_with("tier: light · confidence 9.0e-1 ≥ 5.0e-1 · decision #") && tier.message.ends_with("claude → haiku"), "{}", tier.message);
+        let bodies = reflex.bodies.lock().unwrap().clone();
+        assert_eq!(bodies[0]["questions"][0]["options"], json!(["light", "standard", "heavy"]));
+        assert!(bodies[0]["state"].as_str().unwrap().starts_with("Task: Fix README typo"));
+        assert_eq!(hub.store.decisions(&slug, 10).await.unwrap()[0].question.id, "tier");
+    }
+
+    #[tokio::test]
+    async fn the_tier_gate_keeps_a_pinned_model_and_skips_providers_without_tiers() {
+        // Pinned model: Reflex is not asked.
+        let (hub, _dir, slug) = gate_setup(ReflexGates { audit: false, tier: true }, vec![]).await;
+        let reflex = reflex_answering(&hub, &slug, vec![fake::answer("tier", json!({"choice": {"index": 2}}), 0.9)]).await;
+        let t = hub.store.create_task(NewTask { model: Some("fable".into()), ..project_task(&slug) }).await.unwrap();
+        Orchestrator::new(hub.clone()).tick().await.unwrap();
+        let t = hub.store.task(t.id).await.unwrap().unwrap();
+        assert_eq!(hub.store.session(t.session.as_deref().unwrap()).await.unwrap().unwrap().model, "fable");
+        assert_eq!(decisions_of(&hub, t.id).await, ["ready.go", "pick.chosen", "launch.started"]);
+        assert!(reflex.bodies.lock().unwrap().is_empty());
+
+        // codex has no [orchestrator.tiers.codex]: the gate does nothing, the project's model stays.
+        let codex = vec![ProjectProvider { name: "codex".into(), model: Some("gpt-6-luna".into()), max_parallel: None }];
+        let (hub, _dir, slug) = gate_setup(ReflexGates { audit: false, tier: true }, codex).await;
+        let reflex = reflex_answering(&hub, &slug, vec![fake::answer("tier", json!({"choice": {"index": 2}}), 0.9)]).await;
+        let t = hub.store.create_task(project_task(&slug)).await.unwrap();
+        Orchestrator::new(hub.clone()).tick().await.unwrap();
+        let t = hub.store.task(t.id).await.unwrap().unwrap();
+        let session = hub.store.session(t.session.as_deref().unwrap()).await.unwrap().unwrap();
+        assert_eq!((session.provider.as_str(), session.model.as_str()), ("codex", "gpt-6-luna"));
+        assert_eq!(decisions_of(&hub, t.id).await, ["ready.go", "pick.chosen", "launch.started"]);
+        assert!(reflex.bodies.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn an_unsure_tier_keeps_the_usual_model() {
+        let (hub, _dir, slug) = gate_setup(ReflexGates { audit: false, tier: true }, vec![]).await;
+        reflex_answering(&hub, &slug, vec![fake::answer("tier", json!({"choice": {"index": 0}}), 0.1)]).await;
+        let t = hub.store.create_task(project_task(&slug)).await.unwrap();
+        Orchestrator::new(hub.clone()).tick().await.unwrap();
+        let t = hub.store.task(t.id).await.unwrap().unwrap();
+        assert_eq!(hub.store.session(t.session.as_deref().unwrap()).await.unwrap().unwrap().model, "sonnet");
+        assert_eq!(decisions_of(&hub, t.id).await, ["ready.go", "pick.tier_abstained", "pick.chosen", "launch.started"]);
+        let message = hub.store.decision_events(t.id, 50).await.unwrap().into_iter().find(|e| e.kind == "decision.pick.tier_abstained").unwrap().message;
+        assert!(message.starts_with("tier: Confidence 1.0e-1 is below the threshold 5.0e-1") && message.ends_with("usual model"), "{message}");
     }
 
     #[tokio::test]

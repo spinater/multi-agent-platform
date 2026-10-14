@@ -37,6 +37,11 @@ impl Kind {
     // start() / pick_provider().
     pub const PICK_CHOSEN: Kind = k("decision.pick.chosen", N::Pick, N::Launch, I, "provider chosen → launch");
     pub const PICK_NONE: Kind = k("decision.pick.none", N::Pick, N::Pick, W, "no provider available · waiting");
+    // start(): the project's Reflex tier gate, for a task without a pinned model.
+    pub const PICK_TIER_LIGHT: Kind = k("decision.pick.tier_light", N::Pick, N::Pick, I, "Reflex: light task · tier model");
+    pub const PICK_TIER_STANDARD: Kind = k("decision.pick.tier_standard", N::Pick, N::Pick, I, "Reflex: standard task · tier model");
+    pub const PICK_TIER_HEAVY: Kind = k("decision.pick.tier_heavy", N::Pick, N::Pick, I, "Reflex: heavy task · tier model");
+    pub const PICK_TIER_ABSTAINED: Kind = k("decision.pick.tier_abstained", N::Pick, N::Pick, I, "Reflex unsure or not running · usual model");
     // start() / hub.launch().
     pub const LAUNCH_STARTED: Kind = k("decision.launch.started", N::Launch, N::Watch, I, "session started → watch");
     pub const LAUNCH_ERROR: Kind = k("decision.launch.error", N::Launch, N::Retry, E, "launch error → retry or fail");
@@ -54,6 +59,10 @@ impl Kind {
     pub const VERIFY_PASS: Kind = k("decision.verify.pass", N::Verify, N::Audit, S, "all exit 0 → audit");
     // finish() / audit().
     pub const AUDIT_OFF: Kind = k("decision.audit.off", N::Audit, N::Post, I, "audit off → post_done");
+    // finish(): the project's Reflex audit gate, before any auditor is asked.
+    pub const AUDIT_SKIPPED_REFLEX: Kind = k("decision.audit.skipped_reflex", N::Audit, N::Post, S, "Reflex: no audit needed → post_done");
+    pub const AUDIT_REFLEX_SAID_AUDIT: Kind = k("decision.audit.reflex_said_audit", N::Audit, N::Audit, I, "Reflex: audit needed · asking an auditor");
+    pub const AUDIT_REFLEX_ABSTAINED: Kind = k("decision.audit.reflex_abstained", N::Audit, N::Audit, I, "Reflex unsure or not running · asking an auditor");
     pub const AUDIT_ASK: Kind = k("decision.audit.ask", N::Audit, N::Audit, I, "asking an auditor");
     pub const AUDIT_UNAVAILABLE: Kind = k("decision.audit.unavailable", N::Audit, N::Audit, W, "auditor unavailable · next in chain");
     pub const AUDIT_PASS: Kind = k("decision.audit.pass", N::Audit, N::Post, S, "VERDICT: PASS → post_done");
@@ -73,11 +82,27 @@ impl Kind {
     pub const RETRY_KEPT: Kind = k("decision.retry.kept", N::Retry, N::Watch, W, "person attached or typing → keep watching");
 }
 
+impl Kind {
+    /// The tier gate's outcome for Reflex's answer (`None`: it abstained).
+    pub fn tier(tier: Option<&str>) -> Kind {
+        match tier {
+            Some("light") => Kind::PICK_TIER_LIGHT,
+            Some("standard") => Kind::PICK_TIER_STANDARD,
+            Some("heavy") => Kind::PICK_TIER_HEAVY,
+            _ => Kind::PICK_TIER_ABSTAINED,
+        }
+    }
+}
+
 pub const ALL: &[Kind] = &[
     Kind::READY_GO,
     Kind::READY_BLOCKED,
     Kind::PICK_CHOSEN,
     Kind::PICK_NONE,
+    Kind::PICK_TIER_LIGHT,
+    Kind::PICK_TIER_STANDARD,
+    Kind::PICK_TIER_HEAVY,
+    Kind::PICK_TIER_ABSTAINED,
     Kind::LAUNCH_STARTED,
     Kind::LAUNCH_ERROR,
     Kind::WATCH_DONE,
@@ -91,6 +116,9 @@ pub const ALL: &[Kind] = &[
     Kind::VERIFY_FAIL,
     Kind::VERIFY_PASS,
     Kind::AUDIT_OFF,
+    Kind::AUDIT_SKIPPED_REFLEX,
+    Kind::AUDIT_REFLEX_SAID_AUDIT,
+    Kind::AUDIT_REFLEX_ABSTAINED,
     Kind::AUDIT_ASK,
     Kind::AUDIT_UNAVAILABLE,
     Kind::AUDIT_PASS,
@@ -182,11 +210,11 @@ pub fn model(hub: &Hub, tick_secs: u64) -> DecisionModel {
     let cfg = &hub.config.orchestrator;
     let nodes = vec![
         point(N::Ready, "Ready?", "Are all depends_on tasks done, and is a worker slot free?", "every depends_on task is done && active < max_parallel; a failed or cancelled dependency blocks", "Orchestrator::tick · orchestrator.max_parallel", false),
-        point(N::Pick, "Pick provider", "Which provider takes this task?", "task.provider if pinned, else the first of the project's providers (or provider_order) that is on PATH, not cooling down and under its session limit", "pick_provider() · project settings · orchestrator.provider_order", false),
+        point(N::Pick, "Pick provider", "Which provider takes this task, with which model?", "task.provider if pinned, else the first of the project's providers (or provider_order) that is on PATH, not cooling down and under its session limit; with the project's tier gate on and no pinned model, a confident Reflex `tier` answer (light | standard | heavy) takes that provider's model from orchestrator.tiers, an unsure one keeps the usual model", "pick_provider() · tier_gate() · project settings · orchestrator.provider_order · orchestrator.tiers", false),
         point(N::Launch, "Launch", "Did the worker session start?", "hub.launch(LaunchRequest) returns Ok; an error cools the provider down for 5m", "start() · hub.launch", false),
         point(N::Watch, "Watch", "What has the worker reported?", "$MAP_RESULT_FILE status done | failed; session exited or needs_auth; started > task_timeout_minutes ago", "check_running() · orchestrator.task_timeout_minutes", false),
         point(N::Verify, "Verify", "Does every verify command exit 0?", "each cfg.verify command, in order, exits 0 (30m limit each)", "finish() · orchestrator.verify", false),
-        point(N::Audit, "Audit", "What does the auditor answer?", "first auditor in audit.chain with a VERDICT line: PASS | FAIL; none → audit.required decides", "audit() · orchestrator.audit", false),
+        point(N::Audit, "Audit", "Does the change need an audit, and what does the auditor answer?", "with the project's audit gate on, a confident Reflex `needs_audit` = no accepts the task on verification; otherwise (yes, unsure, Reflex not running) the first auditor in audit.chain with a VERDICT line: PASS | FAIL; none → audit.required decides", "audit_gate() · audit() · orchestrator.audit · project reflex_gates", false),
         point(N::Post, "post_done", "Do the post_done hooks pass?", "each cfg.post_done command exits 0; a failure fails the task without a retry", "finish() · orchestrator.post_done", false),
         point(N::End, "End decision", "Can the worker session be closed?", "End unless a tmux client is attached or the input line has text", "detect::end_decision(clients, pane)", false),
         point(N::Retry, "Retry or fail", "Is there an attempt left?", "attempts < max_attempts → pending again with the failure in the prompt; a person in the session keeps it running", "retry_or_fail() · orchestrator.max_attempts", false),
@@ -204,7 +232,7 @@ pub fn model(hub: &Hub, tick_secs: u64) -> DecisionModel {
         edge(N::Watch, N::Retry, "failed · exited · auth · timeout"),
         edge(N::Verify, N::Audit, "all pass"),
         edge(N::Verify, N::Retry, "command failed"),
-        edge(N::Audit, N::Post, "PASS · off · skipped"),
+        edge(N::Audit, N::Post, "PASS · off · skipped · Reflex: no audit"),
         edge(N::Audit, N::Retry, "FAIL"),
         edge(N::Post, N::End, "hooks ok"),
         edge(N::Post, N::Failed, "hook failed"),

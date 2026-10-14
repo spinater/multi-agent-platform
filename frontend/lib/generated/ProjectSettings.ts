@@ -2,6 +2,7 @@
 import type { ProjectAudit } from "./ProjectAudit";
 import type { ProjectProvider } from "./ProjectProvider";
 import type { ProjectSource } from "./ProjectSource";
+import type { ReflexGates } from "./ReflexGates";
 
 /**
  * A project's own settings, stored in the platform database (not in `map.toml`).
@@ -22,4 +23,8 @@ audit: ProjectAudit | null,
 /**
  * The orchestrator starts none of the project's pending tasks while set.
  */
-paused: boolean, };
+paused: boolean, 
+/**
+ * Decisions the orchestrator asks the project's Reflex first, never an LLM.
+ */
+reflex_gates: ReflexGates, };

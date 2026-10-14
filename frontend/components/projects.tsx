@@ -455,9 +455,10 @@ function Settings({ info }: { info: ProjectInfo }) {
   const saveSettings = async () => {
     setError("");
     try {
-      await api.updateProject(p.slug, { settings });
+      const r = await api.updateProject(p.slug, { settings });
       setEdited(null);
-      toast("orchestrator settings saved");
+      const warn = r.checks.some((c) => c.level === "warning" || c.level === "error");
+      toast(["orchestrator settings saved", ...r.checks.map((c) => c.text)].join(" · "), warn ? "warn" : "ok");
     } catch (e) {
       setError(errText(e));
     }
@@ -508,7 +509,7 @@ function Settings({ info }: { info: ProjectInfo }) {
         )}
         {form && (
           <Box title="Checks">
-            <ChecksEditor form={form} onChange={patch} defaults={defaults} providers={providers} />
+            <ChecksEditor form={form} onChange={patch} defaults={defaults} providers={providers} domains={info.reflex.domains.length || info.reflex.state === "no_corpus" ? info.reflex.domains : undefined} />
             <div className="flex items-center gap-2">
               <Btn tone="primary" onClick={saveSettings} disabled={!edited}>
                 Save orchestrator settings

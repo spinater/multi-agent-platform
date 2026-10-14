@@ -226,7 +226,10 @@ export function nowChecks(args: {
         if (e.kind === "decision.audit.unavailable") status.set(who, { mark: "✕", color: WARN, text: e.message });
         if (e.kind === "decision.audit.ask") status.set(who, { mark: "▸", color: INFO, text: e.message });
       }
+      // The project's Reflex audit gate, asked before any auditor (yes, unsure or not running: the audit runs).
+      const gate = since.find((e) => e.kind.startsWith("decision.audit.reflex_"));
       return [
+        ...(gate ? [{ mark: "·", color: INFO, text: `Reflex gate · ${gate.message}` }] : []),
         ...model.audit_chain.map((p) => status.get(p) ?? { mark: "·", color: IDLE, text: `${p} · next in chain` }),
         { mark: "·", color: IDLE, text: `audit.required = ${model.audit_required}` },
       ];

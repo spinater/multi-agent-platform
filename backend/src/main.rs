@@ -4,6 +4,7 @@ mod config;
 mod decide;
 mod decisions;
 mod detect;
+mod gates;
 mod hub;
 mod login;
 mod model;

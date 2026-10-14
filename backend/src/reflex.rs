@@ -76,6 +76,12 @@ impl Manager {
         self.status.lock().unwrap().get(slug).cloned().unwrap_or_else(|| status(ReflexState::Stopped, "", vec![]))
     }
 
+    /// Tests: report `state` for `slug` without a process (a fake Reflex answers on the project's port).
+    #[cfg(test)]
+    pub fn pretend(&self, slug: &str, state: ReflexState) {
+        self.set(slug, status(state, "test", vec![]));
+    }
+
     fn set(&self, slug: &str, s: ReflexStatus) -> ReflexStatus {
         self.status.lock().unwrap().insert(slug.to_string(), s.clone());
         s

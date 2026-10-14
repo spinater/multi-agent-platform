@@ -23,6 +23,8 @@ nothing is tied to one repository, session name or provider.
     (`VERDICT: PASS`), then `post_done` hooks (e.g. commit).
   - **Retries.** A failed check retries the task with the failure output in the new prompt, up to `max_attempts`.
   - **Human safety.** It never kills a worker that someone is attached to, or one with typing on its input line.
+  - **Reflex gates.** A project can let its own Reflex answer two repeated decisions instead of an LLM: whether a
+    finished change needs the LLM audit, and which model tier a task needs. See [Reflex gates](#reflex-gates).
 - **Projects.** A project is a folder on the machine MAP is installed on, a corpus repo and its own
   [Reflex](https://reflex.gist.rs) decision engine.
   - **Folder.** Tasks and sessions of a project run in its folder, in place: an existing folder (a git repo or not),
@@ -40,8 +42,9 @@ nothing is tied to one repository, session name or provider.
   - **Create.** Creating a project returns check lines: the folder used (its git branch and commits) or created,
     the corpus repo, Reflex started or why not, each provider found and signed in.
   - **Settings.** Each project can set its own provider order (with a model and a session limit per provider), verify
-    commands and audit (on, off, or a given auditor), and can be paused so the orchestrator starts none of its pending
-    tasks. Unset fields fall back to `[orchestrator]` in `map.toml`. They live in the database, not in a file.
+    commands and audit (on, off, or a given auditor), the [Reflex gates](#reflex-gates), and can be paused so the
+    orchestrator starts none of its pending tasks. Unset fields fall back to `[orchestrator]` in `map.toml`. They live
+    in the database, not in a file.
   - **Calibration.** The threshold is fitted from labeled cases (the ρ-quantile of Reflex's confidence on the cases
     it got right), and Reflex's own calibrator learns from `feedback`. Every decision is logged with its lane.
 - **Sign-in.** Each provider shows whether it is signed in, from its credential files (`credentials` in its spec: only
@@ -114,6 +117,7 @@ nothing is tied to one repository, session name or provider.
 | `backend/src/updates.rs` | CLI update checks (version command vs. latest source), update helper sessions |
 | `backend/src/skills.rs`, `agents.rs` | The Skills screen's scan; custom sub-agents read and written in each CLI's format |
 | `backend/src/decide.rs` | The decision gate (Reflex, threshold, fallback), answer parsing, threshold fitting |
+| `backend/src/gates.rs` | The orchestrator's Reflex gates (`needs_audit`, `tier`): their state text, the ask, the `orchestration` seed |
 | `backend/src/api/git.rs` | Git smart HTTP through `git http-backend`; a corpus push restarts Reflex |
 | `backend/src/api/` | REST and WebSocket, token, Host and Origin checks |
 | `backend/src/model.rs` | Shared types, exported to TypeScript by ts-rs |
@@ -335,12 +339,15 @@ one of the task's last two is not logged again, so a task parked at a branch doe
 | `decision.ready.go` | ready → pick | `tick`: dependencies done, slot free |
 | `decision.ready.blocked` | ready → blocked | `tick`: a dependency failed or was cancelled |
 | `decision.pick.chosen` / `.none` | pick → launch / stays | `start` (`pick_provider`); `none` while no provider is available |
+| `decision.pick.tier_light` / `.tier_standard` / `.tier_heavy` / `.tier_abstained` | stays (progress) | `start` (`tier_gate`): the project's tier gate, before `pick.chosen` |
 | `decision.launch.started` / `.error` | launch → watch / retry | `start` (`hub.launch`) |
 | `decision.watch.done` | watch → verify | `check_running`: result file says done |
 | `decision.watch.failed` / `.exited` / `.auth` / `.timeout` / `.lost` | watch → retry | `check_running` |
 | `decision.verify.cmd_start` / `.cmd_pass` | stays (progress) | `finish`: each `verify` command, `` `cmd` · 2 of 4 `` |
 | `decision.verify.pass` / `.fail` | verify → audit / retry | `finish` |
 | `decision.audit.off` / `.pass` / `.skipped` | audit → post | `finish` (`audit.enabled`, verdict, no auditor and not required) |
+| `decision.audit.skipped_reflex` | audit → post | `finish` (`audit_gate`): Reflex is sure the change needs no audit |
+| `decision.audit.reflex_said_audit` / `.reflex_abstained` | stays (progress) | `audit_gate`: Reflex said yes, or was unsure or not running; the audit runs |
 | `decision.audit.fail` / `.no_auditor` | audit → retry | `finish` |
 | `decision.audit.ask` / `.unavailable` | stays (progress) | `audit`: each auditor of `audit.chain` |
 | `decision.post.cmd_pass` | stays (progress) | `finish`: each `post_done` hook |
@@ -349,6 +356,52 @@ one of the task's last two is not logged again, so a task parked at a branch doe
 | `decision.retry.again` / `.failed` / `.kept` | retry → ready / failed / watch | `retry_or_fail`, and `start` after a launch error |
 
 The older `task.*` events (`task.started`, `task.retry`, `task.done`…) are still sent.
+
+## Reflex gates
+
+Two decisions the orchestrator makes for every task of a project can be asked of the project's own Reflex first:
+local, model-free, a few milliseconds. Neither ever calls an LLM to decide: whenever Reflex is not running, abstains,
+reads Thai text, or answers below the project's threshold (or the project has no threshold yet), the orchestrator does
+exactly what it does with the gate off. Both are off by default; turn them on per project under **Settings → Checks →
+Reflex gates** (or in the wizard's Checks step), stored as `settings.reflex_gates = { audit, tier }`.
+
+- **Audit gate** (saves whole audit runs). When a task would be audited (audit on), the orchestrator asks the yes/no
+  question `needs_audit`, "Does this change need a careful LLM audit before it is accepted?", with the task's title
+  and prompt, the worker's summary and `git diff --stat HEAD` from the project's folder (`git status --short` when it
+  is not a git repo or has no commit yet), each shortened. A confident **no** accepts the task on verification and
+  goes on to `post_done` (`decision.audit.skipped_reflex`, with the confidence and the decision log row). **Yes**,
+  unsure or not running: the audit runs as before (`decision.audit.reflex_said_audit` / `.reflex_abstained`).
+- **Model tier** (cheaper models for light work). For a task without a pinned model, the orchestrator asks the choice
+  question `tier` (`light`, `standard`, `heavy`) with the task's title and prompt. A confident answer starts the
+  worker on that tier's model for the chosen provider (`decision.pick.tier_<tier>`); unsure, the usual model (the
+  project's model for the provider, else its default; `decision.pick.tier_abstained`). A pinned model is never
+  changed, and providers without tier models are not asked. Tier models come from `map.toml`:
+
+  ```toml
+  # Built in for claude only; a [orchestrator.tiers.claude] table replaces it. A tier left out keeps the usual model.
+  [orchestrator.tiers.claude]
+  light = "haiku"
+  standard = "sonnet"
+  heavy = "opus"
+  [orchestrator.tiers.codex]     # none built in for codex or gemini
+  light = "gpt-6-luna"
+  ```
+
+  Each model must be in the provider's `models` list when that list is not empty.
+
+Each gate question is logged in the project's decision log (with its state text) like any `/decide` call, so it shows
+on the Reflex screen and in its stats, and can be marked right or wrong to become a calibration case. The gates ask
+with route `reflex_gated`: Reflex's answer counts only at or above the threshold, and the fallback is never asked.
+
+**The `orchestration` domain.** The answers come from an `orchestration/` domain in the project's corpus. Turning a
+gate on (when creating the project or in its settings) adds a seed `orchestration/gates.md` if the corpus has no
+such domain, through the normal corpus write (one commit, Reflex restarts), and saves `needs_audit` and `tier` as the
+project's questions; the check lines say so. The seed is runbook prose to edit to the project's own rules: changes
+that need an audit (money, auth and permissions, schema and migrations, deploy, data deletion, security) and changes
+that do not (docs, comments, copy, tests only, formatting, renames), and what light, standard and heavy tasks look
+like. It is never added twice, and not at all when the corpus already has 8 domains (the most Reflex takes): the
+check line asks you to archive one and add the domain yourself. Calibrate both questions on the Reflex screen before
+relying on them; until the project has a threshold, the gates only score in shadow and change nothing.
 
 ## API
 
@@ -369,8 +422,8 @@ All routes are under `/api`. When `server.api_token` is set, send `Authorization
 | GET/POST | `/orchestrator` | Status, or `{"running": true}` |
 | GET | `/pipeline` | `provider_order`, `verify`, audit, `post_done` and retry settings from `[orchestrator]` |
 | GET/POST | `/projects` | List, or create (`name`, `slug`, `description`, `fallback`, `model`, `settings`); returns the project and `checks` |
-| GET/PATCH/DELETE | `/projects/{slug}` | Info (settings, Reflex status, decision counts), change (`threshold`, `fallback`, `model`, `questions`, `settings`, `paused`…), delete |
-| GET | `/projects/defaults` | The `map.toml` values projects inherit (provider order, verify, audit, max_parallel, post_done) |
+| GET/PATCH/DELETE | `/projects/{slug}` | Info (settings, Reflex status, decision counts), change (`threshold`, `fallback`, `model`, `questions`, `settings`, `paused`…; returns the `project` and `checks`, e.g. a seeded `orchestration/gates.md`), delete |
+| GET | `/projects/defaults` | The `map.toml` values projects inherit (provider order, verify, audit, max_parallel, post_done, tier models) |
 | GET | `/templates` | Templates with their files and placeholders (built in, then `[templates] dirs`) |
 | POST | `/projects/{slug}/init/plan` | `{"template"}`: per file `create`, `skip` (exists) or `append` (missing lines); writes nothing |
 | POST | `/projects/{slug}/init` | `{"template", "description", "provider", "model"?, "set_verify"}`: writes the plan, optionally sets the project's verify to the template's, queues the "Init project" task; returns `plan`, `checks` and `task` |
@@ -431,8 +484,8 @@ cd frontend && bun run lint && bunx next typegen && bunx tsc --noEmit && bun run
 ```
 
 Backend tests cover reset-time parsing, pending-input detection (faint suggestions and the cursor are not typing), the
-wake-up cycle, the orchestrator's dependency order, retries and human protection, and the store, all against an
-in-memory terminal.
+wake-up cycle, the orchestrator's dependency order, retries and human protection, its Reflex gates (against a fake
+Reflex on a local port), and the store, all against an in-memory terminal.
 
 ## Roadmap
 

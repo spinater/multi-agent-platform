@@ -927,6 +927,26 @@ pub struct ProjectSettings {
     pub audit: Option<ProjectAudit>,
     /// The orchestrator starts none of the project's pending tasks while set.
     pub paused: bool,
+    /// Decisions the orchestrator asks the project's Reflex first, never an LLM.
+    pub reflex_gates: ReflexGates,
+}
+
+/// Repeated orchestrator decisions answered by the project's Reflex (its `orchestration` corpus domain). An answer
+/// below the project's threshold, an abstain or a Reflex that is not running leaves today's behaviour.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
+#[serde(default)]
+#[ts(export)]
+pub struct ReflexGates {
+    /// Ask `needs_audit` before the LLM audit; a confident "no" accepts the task on verification.
+    pub audit: bool,
+    /// Ask `tier` (light, standard, heavy) for a task without a pinned model and use `[orchestrator.tiers]`.
+    pub tier: bool,
+}
+
+impl ReflexGates {
+    pub fn any(&self) -> bool {
+        self.audit || self.tier
+    }
 }
 
 /// One line of what creating a project did, for the dashboard to reveal in order.
@@ -944,6 +964,24 @@ pub struct ProjectCreated {
     pub checks: Vec<CheckLine>,
 }
 
+/// `PATCH /api/projects/{slug}`: the project after the change, and what else the change did (a seeded corpus file).
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct ProjectUpdated {
+    pub project: ProjectInfo,
+    pub checks: Vec<CheckLine>,
+}
+
+/// `[orchestrator.tiers.<provider>]`: the model the Reflex tier gate picks per task weight; `None` keeps the usual one.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct ProviderTiers {
+    pub provider: String,
+    pub light: Option<String>,
+    pub standard: Option<String>,
+    pub heavy: Option<String>,
+}
+
 /// The `map.toml` values a project falls back to when it does not set its own.
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[ts(export)]
@@ -956,6 +994,8 @@ pub struct ProjectDefaults {
     pub max_parallel: usize,
     pub post_done: Vec<String>,
     pub session_prefix: String,
+    /// Providers with tier models for the Reflex tier gate.
+    pub tiers: Vec<ProviderTiers>,
 }
 
 /// What the wizard found at a project's folder before creating the project.

@@ -191,7 +191,7 @@ pub async fn create_with(hub: &Hub, req: NewProject, settings: ProjectSettings) 
         threshold: None,
         fallback,
         model: req.model.filter(|m| !m.is_empty()),
-        questions: vec![],
+        questions: crate::gates::questions(&settings.reflex_gates),
         created_at: Utc::now(),
         settings: ProjectSettings::default(),
     };
@@ -217,8 +217,13 @@ pub async fn create_with(hub: &Hub, req: NewProject, settings: ProjectSettings) 
         }
         std::fs::create_dir_all(hub.project_dir(&slug))?;
         repo::init_bare(&corpus).await?;
-        repo::commit(&corpus, &corpus_seed(), "Initial corpus").await?;
-        check(&mut checks, Level::Success, format!("corpus repo created · /git/{slug}/corpus.git · 1 example domain"));
+        let mut seed = corpus_seed();
+        if settings.reflex_gates.any() {
+            seed.push((crate::gates::SEED_PATH.into(), Some(crate::gates::SEED.into())));
+        }
+        repo::commit(&corpus, &seed, "Initial corpus").await?;
+        let domains = if seed.len() > 1 { format!("example domain + {} for the Reflex gates", crate::gates::SEED_PATH) } else { "1 example domain".into() };
+        check(&mut checks, Level::Success, format!("corpus repo created · /git/{slug}/corpus.git · {domains}"));
         hub.put_project(&Project { settings: settings.clone(), ..project.clone() }).await
     };
     if let Err(err) = setup.await {
@@ -260,8 +265,20 @@ pub async fn create_with(hub: &Hub, req: NewProject, settings: ProjectSettings) 
     }
     let verify = project.settings.verify.clone().unwrap_or_else(|| hub.config.orchestrator.verify.clone());
     let audit = project.settings.audit.as_ref().map_or(hub.config.orchestrator.audit.enabled, |a| a.enabled);
-    check(&mut checks, Level::Info, format!("verify: {} command(s) · audit {}{}", verify.len(), if audit { "on" } else { "off" }, if project.settings.paused { " · paused" } else { "" }));
+    let gates = crate::gates::names(&project.settings.reflex_gates);
+    let gates = if gates.is_empty() { String::new() } else { format!(" · Reflex gates: {}", gates.join(", ")) };
+    check(&mut checks, Level::Info, format!("verify: {} command(s) · audit {}{gates}{}", verify.len(), if audit { "on" } else { "off" }, if project.settings.paused { " · paused" } else { "" }));
     Ok((project, checks))
+}
+
+/// The Reflex domains in the project's corpus repo (archived ones left out).
+pub async fn corpus_domains(hub: &Hub, slug: &str) -> Result<BTreeSet<String>> {
+    Ok(repo::files(&hub.corpus_repo(slug))
+        .await?
+        .iter()
+        .filter(|f| validate_corpus_path(&f.path).is_ok() && domain_of(&f.path) != repo::ARCHIVE_DIR)
+        .map(|f| domain_of(&f.path).to_string())
+        .collect())
 }
 
 /// Commits one file to a project repo (`None` deletes it); a corpus change restarts Reflex.
@@ -271,12 +288,7 @@ pub async fn write_file(hub: &Hub, slug: &str, repo_name: &str, path: &str, cont
             validate_corpus_path(path)?;
             let repo_path = hub.corpus_repo(slug);
             if content.is_some() {
-                let mut domains: BTreeSet<String> = repo::files(&repo_path)
-                    .await?
-                    .iter()
-                    .filter(|f| validate_corpus_path(&f.path).is_ok() && domain_of(&f.path) != repo::ARCHIVE_DIR)
-                    .map(|f| domain_of(&f.path).to_string())
-                    .collect();
+                let mut domains = corpus_domains(hub, slug).await?;
                 domains.insert(domain_of(path).to_string());
                 if domains.len() > reflex::MAX_DOMAINS {
                     bail!("Reflex takes at most {} domains per corpus", reflex::MAX_DOMAINS);

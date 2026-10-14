@@ -220,6 +220,13 @@ impl Store {
         Ok(())
     }
 
+    /// Tests: move a project's Reflex to `port` (a fake Reflex); `save_project` never changes a port.
+    #[cfg(test)]
+    pub async fn set_project_port(&self, slug: &str, port: u16) -> Result<()> {
+        sqlx::query("UPDATE projects SET port = ? WHERE slug = ?").bind(port).bind(slug).execute(&self.pool).await?;
+        Ok(())
+    }
+
     fn project_row(row: &SqliteRow) -> Result<Project> {
         Ok(Project {
             slug: row.get("slug"),

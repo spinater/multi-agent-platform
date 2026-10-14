@@ -16,8 +16,8 @@ import type { Overview } from "./generated/Overview";
 import type { PipelineInfo } from "./generated/PipelineInfo";
 import type { ProjectCreated } from "./generated/ProjectCreated";
 import type { ProjectDefaults } from "./generated/ProjectDefaults";
-import type { ProjectInfo } from "./generated/ProjectInfo";
 import type { ProjectSettings } from "./generated/ProjectSettings";
+import type { ProjectUpdated } from "./generated/ProjectUpdated";
 import type { SourceInspection } from "./generated/SourceInspection";
 import type { SourceKind } from "./generated/SourceKind";
 import type { Question } from "./generated/Question";
@@ -107,7 +107,8 @@ export const api = {
 
   createProject: (body: { name: string; slug?: string; description?: string; fallback?: string; model?: string; settings?: ProjectSettings }) =>
     request<ProjectCreated>("POST", "/projects", body),
-  updateProject: (slug: string, body: ProjectUpdate) => request<ProjectInfo>("PATCH", `/projects/${slug}`, body),
+  /** `checks` says what else the change did, such as seeding the corpus for a Reflex gate just turned on. */
+  updateProject: (slug: string, body: ProjectUpdate) => request<ProjectUpdated>("PATCH", `/projects/${slug}`, body),
   deleteProject: (slug: string) => request("DELETE", `/projects/${slug}`),
   repo: (slug: string, repo: RepoName) => request<RepoListing>("GET", `/projects/${slug}/repos/${repo}`),
   readFile: (slug: string, repo: RepoName, path: string) =>
@@ -170,7 +171,8 @@ export const api = {
 
 /** The platform hosts one repo per project: the Reflex corpus. The code stays in the project's own folder. */
 export type RepoName = "corpus";
-export type Route = "auto" | "reflex" | "llm";
+/** `reflex_gated`: Reflex at or above the threshold only, never the fallback (what the orchestrator's Reflex gates use). */
+export type Route = "auto" | "reflex" | "llm" | "reflex_gated";
 export type ProjectUpdate = {
   name?: string;
   description?: string;
@@ -178,7 +180,7 @@ export type ProjectUpdate = {
   fallback?: string;
   model?: string | null;
   questions?: Question[];
-  /** Providers, verify, audit and paused; the source is kept. */
+  /** Providers, verify, audit, paused and the Reflex gates; the source is kept. */
   settings?: ProjectSettings;
   paused?: boolean;
 };
