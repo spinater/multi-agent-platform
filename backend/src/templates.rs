@@ -15,7 +15,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::hub::Hub;
 use crate::model::{CheckLine, InitPlan, InitStarted, Level, PlanAction, PlannedFile, Project, TemplateFile, TemplateInfo, TemplateSource};
+use crate::reflex_screen::{self, Domains};
 use crate::store::NewTask;
+use crate::{projects, reflex, repo};
 
 /// The built-in template's files, embedded at build time. A test checks this list against the folder.
 macro_rules! builtin {
@@ -52,6 +54,11 @@ const TEAM_PROCESS: &[(&str, &str)] = builtin!["team-process":
 pub const INIT_AGENT: &str = include_str!("../templates/init-agent.md");
 
 pub const INIT_TITLE: &str = "Init project";
+
+/// Lines that open and close the parts of the init agent's instructions about drafting the Reflex corpus, left out
+/// of the prompt when the corpus is not to be drafted.
+const CORPUS_START: &str = "<!-- corpus -->";
+const CORPUS_END: &str = "<!-- /corpus -->";
 
 const MANIFEST: &str = "template.toml";
 /// Limits for a user template folder, so a mistyped path (a home folder) is refused rather than read whole.
@@ -412,6 +419,52 @@ pub fn apply(t: &Template, folder: &Path) -> Result<InitPlan> {
 
 // ---- the init agent
 
+/// The project's Reflex corpus as the init agent finds it, so a re-init extends it instead of duplicating it.
+pub struct CorpusFacts {
+    /// Live domains → their files and total size; `_archive/` left out.
+    pub live: Domains,
+    /// Domains under `_archive/`.
+    pub archived: Vec<String>,
+    /// `example/example.md` is still the placeholder written when the project was created.
+    pub placeholder: bool,
+}
+
+impl CorpusFacts {
+    /// The live domains as a list for a check line, or `none`.
+    pub fn domains(&self) -> String {
+        if self.live.is_empty() { "none".into() } else { self.live.keys().cloned().collect::<Vec<_>>().join(", ") }
+    }
+}
+
+const PLACEHOLDER_FILE: &str = "example/example.md";
+
+/// The corpus repo's domains now, read from its main branch.
+pub async fn corpus_facts(hub: &Hub, slug: &str) -> Result<CorpusFacts> {
+    let repo_path = hub.corpus_repo(slug);
+    let files = repo::files(&repo_path).await.context("reading the corpus repo")?;
+    let (live, archived) = reflex_screen::corpus_domains(&files);
+    let seed = projects::corpus_seed().into_iter().find(|(p, _)| p == PLACEHOLDER_FILE).and_then(|(_, c)| c);
+    let only_seed = live.get("example").is_some_and(|(paths, _)| paths.len() == 1 && paths[0] == PLACEHOLDER_FILE);
+    let placeholder = only_seed && seed.is_some() && repo::read(&repo_path, PLACEHOLDER_FILE).await == seed;
+    Ok(CorpusFacts { live, archived: archived.into_keys().collect(), placeholder })
+}
+
+/// The instructions with their corpus parts (between [`CORPUS_START`] and [`CORPUS_END`] lines) kept, markers
+/// dropped, or left out.
+pub fn corpus_parts(instructions: &str, keep: bool) -> String {
+    let mut out = vec![];
+    let mut inside = false;
+    for line in instructions.lines() {
+        match line.trim() {
+            CORPUS_START => inside = true,
+            CORPUS_END => inside = false,
+            _ if inside && !keep => {}
+            _ => out.push(line),
+        }
+    }
+    out.join("\n")
+}
+
 /// Everything the init agent is told about this run, besides its instructions.
 pub struct InitContext<'a> {
     pub project: &'a Project,
@@ -423,11 +476,13 @@ pub struct InitContext<'a> {
     pub before: &'a [String],
     /// The verify commands the orchestrator runs after the agent reports done.
     pub verify: &'a [String],
+    /// The corpus as it is now, when the agent drafts it; `None` leaves the corpus out of the prompt.
+    pub corpus: Option<&'a CorpusFacts>,
 }
 
-/// The init task's prompt: the instructions, then this run's facts (description, files, placeholders, checks).
+/// The init task's prompt: the instructions, then this run's facts (description, files, placeholders, corpus, checks).
 pub fn init_prompt(instructions: &str, c: &InitContext) -> String {
-    let mut p = format!("{}\n\n---\n# This run\n\n", instructions.trim());
+    let mut p = format!("{}\n\n---\n# This run\n\n", corpus_parts(instructions, c.corpus.is_some()).trim());
     p.push_str(&format!("- Project: {} (`{}`), folder `{}`.\n", c.project.name, c.project.slug, c.workspace.display()));
     p.push_str(&format!("- Template: {} (`{}`). {}\n", c.template.title, c.template.name, c.template.description));
     p.push_str("\n## The folder\n\n");
@@ -467,6 +522,9 @@ pub fn init_prompt(instructions: &str, c: &InitContext) -> String {
     if !c.template.fill.is_empty() {
         p.push_str(&format!("\nThe template's files to complete: {}.\n", c.template.fill.iter().map(|f| format!("`{f}`")).collect::<Vec<_>>().join(", ")));
     }
+    if let Some(corpus) = c.corpus {
+        corpus_section(&mut p, &c.project.slug, corpus);
+    }
     p.push_str("\n## Checks after you report done\n\n");
     if c.verify.is_empty() {
         p.push_str("No verify commands are set for this project; run `bash scripts/verify.sh` yourself anyway.\n");
@@ -474,6 +532,40 @@ pub fn init_prompt(instructions: &str, c: &InitContext) -> String {
         p.push_str(&format!("The orchestrator runs: {}. They must exit 0, or the task is retried with their output.\n", c.verify.iter().map(|v| format!("`{v}`")).collect::<Vec<_>>().join(", ")));
     }
     p
+}
+
+/// The corpus as it is and its rules, so the agent extends what is there and stays within Reflex's limits.
+fn corpus_section(p: &mut String, slug: &str, corpus: &CorpusFacts) {
+    p.push_str("\n## The Reflex corpus\n\n");
+    if corpus.live.is_empty() {
+        p.push_str("- Domains now: none.\n");
+    } else {
+        p.push_str(&format!("- Domains now ({}): {}.\n", corpus.live.len(), corpus.domains()));
+        for (domain, (paths, bytes)) in &corpus.live {
+            let shown: Vec<String> = paths.iter().take(20).map(|f| format!("`{f}`")).collect();
+            let more = if paths.len() > shown.len() { format!(" and {} more", paths.len() - shown.len()) } else { String::new() };
+            p.push_str(&format!("  - `{domain}`: {}{more} ({bytes} bytes)\n", shown.join(", ")));
+        }
+    }
+    if corpus.placeholder {
+        p.push_str(&format!("- `{PLACEHOLDER_FILE}` is still the placeholder written when the project was created: delete it once a real domain is in.\n"));
+    } else if corpus.live.contains_key("example") {
+        p.push_str("- `example` is not the placeholder any more (it changed after the project was created): keep it as a real domain.\n");
+    }
+    if !corpus.archived.is_empty() {
+        p.push_str(&format!("- Archived under `{}/` (not loaded, not counted; leave them): {}.\n", repo::ARCHIVE_DIR, corpus.archived.join(", ")));
+    }
+    p.push_str(&format!(
+        "- Rules: 1 to {max} top-level domains, `orchestration` included; files are `<domain>/<file>.md`, domain and file names \
+         with a-z, 0-9, `_` and `-`; only `.md` files count. A write that would make more than {max} domains is refused, and every \
+         domain listed above counts until it is deleted.\n",
+        max = reflex::MAX_DOMAINS
+    ));
+    p.push_str(&format!(
+        "- This project's corpus: `$MAP_API_URL/projects/{slug}/repos/corpus` (GET lists it), `$MAP_API_URL/projects/{slug}/repos/corpus/file` \
+         (GET `?path=`; PUT `{{\"path\", \"content\", \"message\"}}`, `\"content\": null` deletes) and `${{MAP_API_URL%/api}}/git/{slug}/corpus.git`, \
+         each with `Authorization: Bearer $MAP_PROJECT_TOKEN`. The token is in your environment only: never print it or write it down.\n"
+    ));
 }
 
 /// The init agent's instructions: `templates.init_agent` when set, else the built-in ones.
@@ -498,6 +590,7 @@ pub struct InitRequest {
     pub provider: String,
     pub model: Option<String>,
     pub set_verify: bool,
+    pub draft_corpus: bool,
 }
 
 fn check(checks: &mut Vec<CheckLine>, level: Level, text: impl Into<String>) {
@@ -524,6 +617,7 @@ pub async fn init(hub: &Hub, slug: &str, req: InitRequest) -> Result<InitStarted
     let instructions = instructions(hub)?;
     let workspace = hub.workspace_of(&project);
     let before = top_level(&workspace);
+    let corpus = if req.draft_corpus { Some(corpus_facts(hub, slug).await?) } else { None };
     let plan = apply(&template, &workspace)?;
 
     let mut checks = vec![];
@@ -549,7 +643,12 @@ pub async fn init(hub: &Hub, slug: &str, req: InitRequest) -> Result<InitStarted
         check(&mut checks, Level::Info, format!("verify: {} {source} command(s) run after the init agent{}", verify.len(), if verify.is_empty() { String::new() } else { format!(": {}", verify.join(" · ")) }));
     }
 
-    let ctx = InitContext { project: &project, workspace: &workspace, description, template: &template.info, plan: &plan, before: &before, verify: &verify };
+    match &corpus {
+        Some(c) => check(&mut checks, Level::Info, format!("corpus: the init agent will draft domains (currently: {})", c.domains())),
+        None => check(&mut checks, Level::Info, "corpus: left as is"),
+    }
+
+    let ctx = InitContext { project: &project, workspace: &workspace, description, template: &template.info, plan: &plan, before: &before, verify: &verify, corpus: corpus.as_ref() };
     let prompt = init_prompt(&instructions, &ctx);
     let task = hub
         .store
@@ -582,9 +681,14 @@ mod tests {
 
     /// `claude` counts as installed (`/bin/sh`); templates only from `<tmp>/templates`.
     async fn hub(extra: &str) -> (Arc<Hub>, tempfile::TempDir) {
+        hub_with("", extra).await
+    }
+
+    /// `server` goes into `[server]`, `extra` into `[templates]`.
+    async fn hub_with(server: &str, extra: &str) -> (Arc<Hub>, tempfile::TempDir) {
         let dir = tempfile::tempdir().unwrap();
         let text = format!(
-            "[workspace]\ndir = \"{0}\"\n[server]\ndata_dir = \"{0}/data\"\n[orchestrator]\nprovider_order = [\"claude\"]\nverify = [\"global-check\"]\n[orchestrator.audit]\nchain = [\"claude\"]\n[reflex]\nbinary = \"/nonexistent/reflex\"\n[providers.claude]\nbinary = \"/bin/sh\"\ncredentials = []\n[providers.codex]\nbinary = \"/nonexistent/codex\"\n[templates]\ndirs = [\"{0}/templates\"]\n{extra}\n",
+            "[workspace]\ndir = \"{0}\"\n[server]\ndata_dir = \"{0}/data\"\n{server}\n[orchestrator]\nprovider_order = [\"claude\"]\nverify = [\"global-check\"]\n[orchestrator.audit]\nchain = [\"claude\"]\n[reflex]\nbinary = \"/nonexistent/reflex\"\n[providers.claude]\nbinary = \"/bin/sh\"\ncredentials = []\n[providers.codex]\nbinary = \"/nonexistent/codex\"\n[templates]\ndirs = [\"{0}/templates\"]\n{extra}\n",
             dir.path().display()
         );
         let config = Config::parse(&text, Path::new("/")).unwrap();
@@ -598,7 +702,7 @@ mod tests {
     }
 
     fn request(description: &str) -> InitRequest {
-        InitRequest { template: "team-process".into(), description: description.into(), provider: "claude".into(), model: Some("opus".into()), set_verify: true }
+        InitRequest { template: "team-process".into(), description: description.into(), provider: "claude".into(), model: Some("opus".into()), set_verify: true, draft_corpus: true }
     }
 
     #[test]
@@ -817,6 +921,25 @@ mod tests {
         assert!(task.prompt.contains("already had files before the template: README.md"));
         assert!(task.prompt.contains("The orchestrator runs: `bash scripts/verify.sh`"));
         assert!(task.prompt.starts_with("# Init project"), "the built-in instructions come first");
+        // The corpus is drafted by default: the instructions, the corpus as it is, its rules and how to write it.
+        for part in [
+            "## Draft the Reflex corpus",
+            "a domain named `orchestration`",
+            "Reflex tokenises\n   English only",
+            "-H \"Authorization: Bearer $MAP_PROJECT_TOKEN\"",
+            "jq -Rs",
+            "\"content\": null",
+            "## The Reflex corpus",
+            "- Domains now (1): example.\n  - `example`: `example/example.md`",
+            "`example/example.md` is still the placeholder",
+            "1 to 8 top-level domains",
+            "`<domain>/<file>.md`",
+            &format!("`$MAP_API_URL/projects/{slug}/repos/corpus/file`"),
+            &format!("`${{MAP_API_URL%/api}}/git/{slug}/corpus.git`"),
+        ] {
+            assert!(task.prompt.contains(part), "{part} missing from:\n{}", task.prompt);
+        }
+        assert!(!task.prompt.contains("<!-- corpus -->") && !task.prompt.contains("<!-- /corpus -->"), "the markers are dropped");
 
         let p = hub.store.project(&slug).await.unwrap().unwrap();
         assert_eq!(p.settings.verify, Some(vec!["bash scripts/verify.sh".to_string()]));
@@ -824,15 +947,73 @@ mod tests {
         assert!(text[0].starts_with("template team-process · ") && text[0].ends_with("0 skipped (exist)"), "{text:?}");
         assert!(text.iter().any(|t| t.starts_with(&format!("task #{} Init project queued · claude (opus)", task.id))), "{text:?}");
         assert!(text.iter().any(|t| t.contains("orchestrator is paused")), "{text:?}");
+        assert!(text.contains(&"corpus: the init agent will draft domains (currently: example)"), "{text:?}");
 
         // Again, without taking the template's verify: everything is skipped and the project's commands stay.
         hub.store.save_project(&crate::model::Project { settings: ProjectSettings { verify: None, ..p.settings.clone() }, ..p }).await.unwrap();
-        let again = init(&hub, &slug, InitRequest { set_verify: false, model: None, ..request("Same.") }).await.unwrap();
+        let again = init(&hub, &slug, InitRequest { set_verify: false, model: None, draft_corpus: false, ..request("Same.") }).await.unwrap();
         assert!(again.plan.files.iter().all(|f| f.action == PlanAction::Skip));
         assert_eq!(hub.store.project(&slug).await.unwrap().unwrap().settings.verify, None);
         assert!(again.task.prompt.contains("Still unfilled from an earlier init"), "the placeholders are still in CLAUDE.md");
         assert!(again.task.prompt.contains("The orchestrator runs: `global-check`"));
         assert!(again.checks.iter().any(|c| c.text.starts_with("verify: 1 map.toml's command(s)")));
+        // Not drafting the corpus leaves every word about it out of the prompt.
+        for part in ["Reflex corpus", "MAP_PROJECT_TOKEN", "repos/corpus", "orchestration", "<!-- corpus -->"] {
+            assert!(!again.task.prompt.contains(part), "{part} in:\n{}", again.task.prompt);
+        }
+        assert!(again.task.prompt.contains("## Rules") && again.task.prompt.contains("## When you finish"));
+        assert!(again.checks.iter().any(|c| c.text == "corpus: left as is"));
+    }
+
+    #[test]
+    fn corpus_parts_are_kept_or_left_out() {
+        let text = "a\n\n<!-- corpus -->\n## Corpus\nwrite it\n\n<!-- /corpus -->\n## Rules\n- one\n  <!-- corpus -->\n  - two\n  <!-- /corpus -->\nend";
+        assert_eq!(corpus_parts(text, false), "a\n\n## Rules\n- one\nend");
+        assert_eq!(corpus_parts(text, true), "a\n\n## Corpus\nwrite it\n\n## Rules\n- one\n  - two\nend");
+        // The built-in instructions open and close each part, and keep their own sections either way.
+        let starts = INIT_AGENT.lines().filter(|l| l.trim() == CORPUS_START).count();
+        assert!(starts >= 1 && starts == INIT_AGENT.lines().filter(|l| l.trim() == CORPUS_END).count());
+        let without = corpus_parts(INIT_AGENT, false);
+        assert!(!without.contains("corpus") && without.contains("## What to do") && without.contains("## When you finish"), "{without}");
+        assert!(corpus_parts(INIT_AGENT, true).contains("## Draft the Reflex corpus"));
+        assert_eq!(corpus_parts("# Mine\nno parts", false), "# Mine\nno parts");
+    }
+
+    /// A re-init sees the domains already written (and the archived ones), so it extends them instead of adding
+    /// copies; the prompt names the token's variable, never its value.
+    #[tokio::test]
+    async fn init_lists_the_corpus_domains_and_never_the_token() {
+        let (hub, dir) = hub_with("api_token = \"secret-api-token\"", "").await;
+        let folder = dir.path().join("app");
+        std::fs::create_dir_all(&folder).unwrap();
+        let slug = project(&hub, &folder).await;
+        let corpus = hub.corpus_repo(&slug);
+        let files = [
+            ("example/example.md".to_string(), Some("Our own example domain: refunds over 100 EUR need a manager.\n".to_string())),
+            ("routing/tickets.md".to_string(), Some("When a ticket mentions an invoice, it goes to billing.\n".to_string())),
+            ("_archive/old/a.md".to_string(), Some("old\n".to_string())),
+        ];
+        repo::commit(&corpus, &files, "Domains").await.unwrap();
+
+        let started = init(&hub, &slug, request("A support desk for a gym chain.")).await.unwrap();
+        let prompt = &started.task.prompt;
+        assert!(prompt.contains("- Domains now (2): example, routing.\n"), "{prompt}");
+        assert!(prompt.contains("  - `routing`: `routing/tickets.md`"), "{prompt}");
+        assert!(prompt.contains("`example` is not the placeholder any more"), "{prompt}");
+        assert!(!prompt.contains("is still the placeholder written"), "{prompt}");
+        assert!(prompt.contains("Archived under `_archive/` (not loaded, not counted; leave them): old."), "{prompt}");
+        let token = hub.project_token(&slug).unwrap();
+        assert!(!prompt.contains(&token) && !prompt.contains("secret-api-token"), "no token value in the prompt");
+        assert!(prompt.contains("$MAP_PROJECT_TOKEN"));
+        assert!(started.checks.iter().any(|c| c.text == "corpus: the init agent will draft domains (currently: example, routing)"), "{:?}", started.checks);
+
+        // An empty corpus says so.
+        repo::commit(&corpus, &[("example/example.md".into(), None), ("routing/tickets.md".into(), None)], "Empty").await.unwrap();
+        let facts = corpus_facts(&hub, &slug).await.unwrap();
+        assert_eq!((facts.domains().as_str(), facts.placeholder, facts.archived.as_slice()), ("none", false, ["old".to_string()].as_slice()));
+        let started = init(&hub, &slug, request("Again.")).await.unwrap();
+        assert!(started.task.prompt.contains("- Domains now: none.\n"));
+        assert!(started.checks.iter().any(|c| c.text == "corpus: the init agent will draft domains (currently: none)"));
     }
 
     #[tokio::test]
@@ -848,6 +1029,8 @@ mod tests {
         assert!(started.plan.folder_empty);
         assert!(started.task.prompt.starts_with("# My own init\nDo it my way."));
         assert!(started.task.prompt.contains("It was empty before the template"));
+        // Own instructions without corpus parts still get the corpus facts.
+        assert!(started.task.prompt.contains("## The Reflex corpus") && started.task.prompt.contains("is still the placeholder written"));
 
         std::fs::remove_file(&path).unwrap();
         assert!(init(&hub, &slug, request("x")).await.is_err(), "a missing instructions file is an error, not a silent fallback");

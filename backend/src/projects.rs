@@ -109,7 +109,8 @@ fn domain_of(path: &str) -> &str {
     path.split('/').next().unwrap_or("").trim_end_matches(".md")
 }
 
-fn corpus_seed() -> Vec<(String, Option<String>)> {
+/// The placeholder domain a new project's corpus starts with (the init agent replaces it when it drafts the corpus).
+pub(crate) fn corpus_seed() -> Vec<(String, Option<String>)> {
     vec![(
         "example/example.md".into(),
         Some(

@@ -327,7 +327,7 @@ pub struct DecisionFeedbackBody {
     add_case: bool,
 }
 
-fn yes() -> bool {
+pub(super) fn yes() -> bool {
     true
 }
 

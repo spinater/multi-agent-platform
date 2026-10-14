@@ -163,8 +163,9 @@ export const api = {
   templates: () => request<TemplateInfo[]>("GET", "/templates"),
   /** What each file would become (create, skip, append); writes nothing. */
   initPlan: (slug: string, template: string) => request<InitPlan>("POST", `/projects/${slug}/init/plan`, { template }),
-  /** Writes the template (never overwriting a file) and queues the "Init project" task pinned to `provider`. */
-  initProject: (slug: string, body: { template: string; description: string; provider: string; model?: string; set_verify: boolean }) =>
+  /** Writes the template (never overwriting a file) and queues the "Init project" task pinned to `provider`;
+   * with `draft_corpus` it also drafts the project's Reflex corpus from the description. */
+  initProject: (slug: string, body: { template: string; description: string; provider: string; model?: string; set_verify: boolean; draft_corpus: boolean }) =>
     request<InitStarted>("POST", `/projects/${slug}/init`, body),
 };
 

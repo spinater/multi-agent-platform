@@ -60,6 +60,7 @@ export function ProjectInit({ slug }: { slug: string }) {
   const [picked, setPicked] = useState("");
   const [model, setModel] = useState("");
   const [setVerify, setSetVerify] = useState(true);
+  const [draftCorpus, setDraftCorpus] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [result, setResult] = useState<InitStarted | null>(null);
@@ -127,7 +128,7 @@ export function ProjectInit({ slug }: { slug: string }) {
     setBusy(true);
     setError("");
     try {
-      const r = await api.initProject(slug, { template: template.name, description, provider, model: model || undefined, set_verify: setVerify });
+      const r = await api.initProject(slug, { template: template.name, description, provider, model: model || undefined, set_verify: setVerify, draft_corpus: draftCorpus });
       setResult(r);
       setPlan(r.plan);
       setShown(0);
@@ -214,6 +215,12 @@ export function ProjectInit({ slug }: { slug: string }) {
               The init agent fills each placeholder from this text and the code already in the folder, makes scripts/verify.sh run the stack&apos;s real
               checks, and writes the first cards in tasks/todo/. It sets up a skeleton only in an empty folder, and only when you ask for one here.
             </p>
+            <Check
+              on={draftCorpus}
+              onClick={() => !result && setDraftCorpus(!draftCorpus)}
+              label="Draft the Reflex corpus from this description"
+              sub="written in English (Reflex reads English only) · up to 8 domains, including an orchestration domain used by the orchestrator's Reflex gates"
+            />
           </Card>
 
           <Card className="flex flex-col gap-3.5 p-[18px]">

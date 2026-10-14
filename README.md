@@ -311,6 +311,18 @@ process into its folder and has an init agent fill in the project-specific parts
   files laid down and the placeholders left. It fills every placeholder, makes `scripts/verify.sh` run the stack's
   real checks, sets up a skeleton only in a folder that was empty and only when the description asks for one, writes
   the first cards in `tasks/todo/` from 001, never rewrites existing files, and does not commit: you review first.
+- **Reflex corpus.** With "Draft the Reflex corpus from this description" ticked (`draft_corpus`, on by default),
+  the init agent also writes the project's corpus: 1–8 domains for the decisions the description implies (routing,
+  triage, approvals…), always including `orchestration` (which changes need a careful LLM audit, such as money,
+  auth, schema, deploy and data deletion, and which do not, such as docs, copy, tests only and formatting; which
+  tasks are light, standard or heavy work, for the orchestrator's Reflex gates). Each domain is English prose
+  written like a runbook (a few hundred to ~1500 words), even when the description is in Thai, since Reflex reads
+  English only. The agent writes them with `$MAP_PROJECT_TOKEN` through `PUT /api/projects/<slug>/repos/corpus/file`
+  (or one push to `corpus.git`), deletes the `example/` placeholder once real domains exist, checks the result with
+  `GET .../repos/corpus`, adds a line to the project's `CLAUDE.md` that states sent to `$MAP_DECIDE_URL` must be in
+  English, and lists what it wrote in its summary. The prompt carries the corpus's current domains (so a re-init
+  extends them rather than adding copies) and its rules. Unticked, the prompt says nothing about the corpus, and
+  the check lines say `corpus: left as is`.
 
 ## Writing tasks
 
