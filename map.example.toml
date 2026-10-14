@@ -51,6 +51,19 @@ required = false
 chain = ["gemini", "claude", "codex"]
 timeout_secs = 600
 
+# Models for a project's Reflex tier gate (project settings → Reflex gates → tier): the project's Reflex rates each
+# task without a pinned model light, standard or heavy, and the worker gets this provider's model for that tier.
+# Built in for claude only (haiku / sonnet / opus); a table here replaces the built-in one. Providers without a
+# table, and tiers left out, keep the model they would have used. Each model must be in the provider's `models`.
+# [orchestrator.tiers.claude]
+# light = "haiku"
+# standard = "sonnet"
+# heavy = "opus"
+# [orchestrator.tiers.codex]
+# light = "gpt-6-luna"
+# standard = "gpt-6-astra"
+# heavy = "gpt-6-sol"
+
 # Built-in providers: claude, codex, gemini (the `agy` CLI). Any field below overrides the built-in value.
 # Templates substitute {binary}, {model}, {session} and, for headless, {prompt}.
 

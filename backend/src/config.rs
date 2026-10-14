@@ -125,6 +125,40 @@ pub struct OrchestratorConfig {
     /// Shell commands run after a task passes (e.g. a commit). `{id}` and `{title}` are substituted, shell-quoted.
     pub post_done: Vec<String>,
     pub audit: AuditConfig,
+    /// Models for the project Reflex tier gate (`[orchestrator.tiers.<provider>]`). Built in for `claude` only; a
+    /// provider without a table, or a tier left out, keeps the model it would have used anyway.
+    pub tiers: BTreeMap<String, TierModels>,
+}
+
+/// One provider's model per task weight, for the Reflex tier gate.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct TierModels {
+    pub light: Option<String>,
+    pub standard: Option<String>,
+    pub heavy: Option<String>,
+}
+
+impl TierModels {
+    /// The model for `tier` (`light`, `standard` or `heavy`).
+    pub fn get(&self, tier: &str) -> Option<&str> {
+        match tier {
+            "light" => self.light.as_deref(),
+            "standard" => self.standard.as_deref(),
+            "heavy" => self.heavy.as_deref(),
+            _ => None,
+        }
+        .filter(|m| !m.is_empty())
+    }
+
+    pub fn is_empty(&self) -> bool {
+        ["light", "standard", "heavy"].iter().all(|t| self.get(t).is_none())
+    }
+}
+
+/// Tier models used when `map.toml` has no `[orchestrator.tiers.claude]`.
+fn builtin_claude_tiers() -> TierModels {
+    TierModels { light: Some("haiku".into()), standard: Some("sonnet".into()), heavy: Some("opus".into()) }
 }
 
 impl Default for OrchestratorConfig {
@@ -139,6 +173,7 @@ impl Default for OrchestratorConfig {
             verify: vec![],
             post_done: vec![],
             audit: AuditConfig::default(),
+            tiers: BTreeMap::new(),
         }
     }
 }
@@ -707,6 +742,26 @@ impl Config {
                 bail!("unknown provider `{name}` in orchestrator settings");
             }
         }
+        let tiers = &mut config.orchestrator.tiers;
+        for (name, t) in tiers.iter() {
+            let spec = config.providers.get(name).with_context(|| format!("unknown provider `{name}` in [orchestrator.tiers]"))?;
+            for (tier, model) in [("light", &t.light), ("standard", &t.standard), ("heavy", &t.heavy)] {
+                if let Some(m) = model.as_deref().filter(|m| !m.is_empty())
+                    && !spec.models.is_empty()
+                    && !spec.models.iter().any(|x| x == m)
+                {
+                    bail!("orchestrator.tiers.{name}.{tier}: model `{m}` is not in {name}'s models ({})", spec.models.join(", "));
+                }
+            }
+        }
+        // The built-in claude tiers, without any model a changed `models` list no longer has.
+        if !tiers.contains_key("claude")
+            && let Some(spec) = config.providers.get("claude")
+        {
+            let keep = |m: Option<String>| m.filter(|m| spec.models.is_empty() || spec.models.contains(m));
+            let b = builtin_claude_tiers();
+            tiers.insert("claude".into(), TierModels { light: keep(b.light), standard: keep(b.standard), heavy: keep(b.heavy) });
+        }
         Ok(config)
     }
 }
@@ -831,6 +886,27 @@ mod tests {
     fn new_provider_needs_binary_and_command() {
         let err = Config::parse("[workspace]\ndir = \"/r\"\n[providers.aider]\nbinary = \"aider\"\n", Path::new("/")).unwrap_err();
         assert!(format!("{err:#}").contains("needs `binary` and `interactive`"));
+    }
+
+    #[test]
+    fn tiers_default_for_claude_only_and_are_checked() {
+        let c = Config::parse("[workspace]\ndir = \"/r\"\n", Path::new("/")).unwrap();
+        let claude = &c.orchestrator.tiers["claude"];
+        assert_eq!((claude.get("light"), claude.get("standard"), claude.get("heavy")), (Some("haiku"), Some("sonnet"), Some("opus")));
+        assert!(!c.orchestrator.tiers.contains_key("codex") && !c.orchestrator.tiers.contains_key("gemini"));
+        let c = Config::parse("[workspace]\ndir = \"/r\"\n[orchestrator.tiers.codex]\nlight = \"gpt-6-luna\"\n", Path::new("/")).unwrap();
+        assert_eq!(c.orchestrator.tiers["codex"].get("light"), Some("gpt-6-luna"));
+        assert_eq!(c.orchestrator.tiers["codex"].get("heavy"), None);
+        assert_eq!(c.orchestrator.tiers["claude"].get("light"), Some("haiku"), "claude keeps its built-in tiers");
+        // A configured claude table replaces the built-in one.
+        let c = Config::parse("[workspace]\ndir = \"/r\"\n[orchestrator.tiers.claude]\nheavy = \"fable\"\n", Path::new("/")).unwrap();
+        assert_eq!((c.orchestrator.tiers["claude"].get("light"), c.orchestrator.tiers["claude"].get("heavy")), (None, Some("fable")));
+        let err = Config::parse("[workspace]\ndir = \"/r\"\n[orchestrator.tiers.codex]\nlight = \"haiku\"\n", Path::new("/")).unwrap_err();
+        assert!(format!("{err:#}").contains("not in codex's models"), "{err:#}");
+        assert!(Config::parse("[workspace]\ndir = \"/r\"\n[orchestrator.tiers.nope]\nlight = \"x\"\n", Path::new("/")).is_err());
+        // Built-in tiers drop models a changed list no longer has.
+        let c = Config::parse("[workspace]\ndir = \"/r\"\n[providers.claude]\nmodels = [\"sonnet\"]\n", Path::new("/")).unwrap();
+        assert_eq!((c.orchestrator.tiers["claude"].get("light"), c.orchestrator.tiers["claude"].get("standard")), (None, Some("sonnet")));
     }
 
     #[test]

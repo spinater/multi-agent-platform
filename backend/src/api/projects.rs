@@ -12,7 +12,8 @@ use super::{ApiError, ApiResult, not_found};
 use crate::decide::{self, Route};
 use crate::hub::Hub;
 use crate::model::{
-    DecideResponse, Decision, FitResult, Project, ProjectCreated, ProjectDefaults, ProjectInfo, ProjectSettings, Question, ReflexStatus, RepoListing, SourceInspection, SourceKind,
+    DecideResponse, Decision, FitResult, Project, ProjectCreated, ProjectDefaults, ProjectInfo, ProjectSettings, ProjectUpdated, Question, ReflexStatus, RepoListing, SourceInspection,
+    SourceKind,
 };
 use crate::projects::{self, NewProject, validate_fallback, validate_questions, validate_repo_path};
 use crate::{project_settings, reflex, repo};
@@ -70,14 +71,16 @@ pub struct UpdateBody {
     #[serde(default, deserialize_with = "present")]
     model: Option<Option<String>>,
     questions: Option<Vec<Question>>,
-    /// Replaces providers, verify, audit and paused; the source is kept (it records how the repo was made).
+    /// Replaces providers, verify, audit, paused and the Reflex gates; the source is kept (it records how the repo was made).
     settings: Option<ProjectSettings>,
     /// Pauses or resumes the project without sending the rest of its settings.
     paused: Option<bool>,
 }
 
-pub async fn update(State(hub): State<Arc<Hub>>, UrlPath(slug): UrlPath<String>, Json(b): Json<UpdateBody>) -> ApiResult<ProjectInfo> {
+/// Turning a Reflex gate on also seeds the corpus's `orchestration` domain; the check lines say what was done.
+pub async fn update(State(hub): State<Arc<Hub>>, UrlPath(slug): UrlPath<String>, Json(b): Json<UpdateBody>) -> ApiResult<ProjectUpdated> {
     let mut p = load(&hub, &slug).await?;
+    let gates_before = p.settings.reflex_gates;
     if let Some(name) = b.name.map(|n| n.trim().to_string()).filter(|n| !n.is_empty()) {
         p.name = name;
     }
@@ -110,7 +113,9 @@ pub async fn update(State(hub): State<Arc<Hub>>, UrlPath(slug): UrlPath<String>,
         p.settings.paused = paused;
     }
     hub.put_project(&p).await?;
-    Ok(Json(hub.project_info(p).await?))
+    let checks = crate::gates::seed(&hub, &slug, &gates_before).await?;
+    let p = load(&hub, &slug).await?;
+    Ok(Json(ProjectUpdated { project: hub.project_info(p).await?, checks }))
 }
 
 pub async fn delete(State(hub): State<Arc<Hub>>, UrlPath(slug): UrlPath<String>) -> ApiResult<Value> {

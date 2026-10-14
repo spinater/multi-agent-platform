@@ -26,6 +26,9 @@ pub enum Route {
     Reflex,
     /// Only the fallback.
     Llm,
+    /// Reflex's answer only at or above the threshold (none without a threshold); never the fallback. The
+    /// orchestrator's Reflex gates ask this way, so an unsure Reflex leaves today's behaviour rather than an LLM call.
+    ReflexGated,
 }
 
 /// Reflex's outcome as the option text (choice, score) or a boolean (noul); `null` when it abstained.
@@ -283,7 +286,7 @@ pub async fn decide(hub: &Hub, project: &Project, state: &str, questions: &[Ques
         let g = gate(route, thai, project.threshold, &reflex_answer, confidence, r.is_some());
         let use_fallback = match route {
             Route::Llm => true,
-            Route::Reflex => false,
+            Route::Reflex | Route::ReflexGated => false,
             Route::Auto => !g.passes() && project.fallback != "none",
         };
         let mut reason = g.reason(use_fallback.then_some(project.fallback.as_str()));
@@ -468,6 +471,10 @@ mod tests {
         assert_eq!(gate(Route::Auto, false, Some(1e-4), &Value::Null, None, false), Gate::Unreachable);
         assert!(gate(Route::Reflex, false, None, &a, Some(1e-5), true).passes());
         assert_eq!(gate(Route::Llm, false, Some(1e-4), &a, Some(1e-3), true), Gate::LlmOnly);
+        // The orchestrator's gates: the threshold applies, and without one Reflex only scores in shadow.
+        assert!(gate(Route::ReflexGated, false, Some(1e-4), &a, Some(2e-4), true).passes());
+        assert!(!gate(Route::ReflexGated, false, Some(1e-4), &a, Some(3e-5), true).passes());
+        assert!(!gate(Route::ReflexGated, false, None, &a, Some(0.9), true).passes());
         assert_eq!(Gate::Above(2.13e-4, 1e-4).reason(None), "Confidence 2.1e-4 is at or above the threshold 1.0e-4: answered locally, no LLM call.");
         assert_eq!(Gate::Below(3e-5, 1e-4).reason(None), "Confidence 3.0e-5 is below the threshold 1.0e-4, and no fallback was asked.");
     }

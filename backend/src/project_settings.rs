@@ -6,7 +6,7 @@ use std::collections::{BTreeSet, HashSet};
 use anyhow::{Context, Result, bail};
 
 use crate::hub::Hub;
-use crate::model::{ProjectDefaults, ProjectSettings, Role, SourceKind, Task};
+use crate::model::{ProjectDefaults, ProjectSettings, ProviderTiers, ReflexGates, Role, SourceKind, Task};
 
 pub fn defaults(hub: &Hub) -> ProjectDefaults {
     let o = &hub.config.orchestrator;
@@ -18,6 +18,12 @@ pub fn defaults(hub: &Hub) -> ProjectDefaults {
         max_parallel: o.max_parallel,
         post_done: o.post_done.clone(),
         session_prefix: hub.config.workspace.session_prefix.clone(),
+        tiers: o
+            .tiers
+            .iter()
+            .filter(|(_, t)| !t.is_empty())
+            .map(|(p, t)| ProviderTiers { provider: p.clone(), light: t.light.clone(), standard: t.standard.clone(), heavy: t.heavy.clone() })
+            .collect(),
     }
 }
 
@@ -77,6 +83,11 @@ pub async fn verify(hub: &Hub, task: &Task) -> Vec<String> {
 
 pub async fn audit_enabled(hub: &Hub, task: &Task) -> bool {
     of(hub, task).await.and_then(|s| s.audit).map_or(hub.config.orchestrator.audit.enabled, |a| a.enabled)
+}
+
+/// The project's Reflex gates; all off for the default workspace.
+pub async fn gates(hub: &Hub, task: &Task) -> ReflexGates {
+    of(hub, task).await.map(|s| s.reflex_gates).unwrap_or_default()
 }
 
 pub async fn audit_chain(hub: &Hub, task: &Task) -> Vec<String> {
