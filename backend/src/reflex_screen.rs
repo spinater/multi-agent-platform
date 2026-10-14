@@ -287,7 +287,7 @@ mod tests {
 
         let dir = tempfile::tempdir().unwrap();
         let text = format!(
-            "[workspace]\ndir = \"{0}\"\n[server]\ndata_dir = \"{0}/data\"\n[reflex]\nbinary = \"{0}/no-reflex\"\n",
+            "[projects]\npath = \"{0}\"\n[workspace]\ndir = \"{0}\"\n[server]\ndata_dir = \"{0}/data\"\n[reflex]\nbinary = \"{0}/no-reflex\"\n",
             dir.path().display()
         );
         let config = Config::parse(&text, std::path::Path::new("/")).unwrap();

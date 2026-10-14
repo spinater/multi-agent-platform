@@ -1,5 +1,5 @@
 # Runs MAP on this machine at 127.0.0.1:${MAP_PORT}. Put a tunnel or an authenticating proxy in front to reach it
-# from elsewhere. Settings come from .env (copy .env.example); `map.toml` lives in ${MAP_DIR} (start from
+# from elsewhere. Settings come from .env (copy .env.example); `map.toml` lives in ${MAP_CONFIG_DIR} (start from
 # deploy/map.docker.toml). See README, "Deploy with Docker Compose".
 services:
   map:
@@ -13,6 +13,7 @@ services:
     image: multi-agent-platform:local
     container_name: map
     restart: unless-stopped
+    command: ["serve", "-c", "${MAP_CONFIG_DIR}/map.toml"]
     ports:
       - "127.0.0.1:${MAP_PORT:-4400}:4400"
     environment:
@@ -22,12 +23,17 @@ services:
       # ~/.claude.json by renaming over it, which a single-file bind mount cannot follow. Sign-in stays shared.
       CLAUDE_CONFIG_DIR: ${MAP_HOME}/.claude
     volumes:
-      # Config (read-only) and state: the database, run files, corpus repos, and MAP's own git access (data/map/git:
-      # its SSH key, known_hosts, identity and the gitconfig agents get as GIT_CONFIG_GLOBAL).
-      - ${MAP_DIR}/map.toml:/config/map.toml:ro
-      - ${MAP_DIR}/data:/data
-      # The folder that holds your projects, at the same path: projects are folders the agents work in place. Set
-      # [projects] root in map.toml to this path so "Clone from git" puts new projects here.
+      # The config folder, at the same path as on the host: map.toml (read-only), templates/, agents/ and data/ (the
+      # database, run files, corpus repos, the default workspace, and MAP's own git access in data/git: its SSH key,
+      # known_hosts, identity and the gitconfig agents get as GIT_CONFIG_GLOBAL).
+      - ${MAP_CONFIG_DIR:?set MAP_CONFIG_DIR in .env}:${MAP_CONFIG_DIR}
+      - ${MAP_CONFIG_DIR}/map.toml:${MAP_CONFIG_DIR}/map.toml:ro
+      # The project folder, at the same path: projects can only be its sub-folders, and the dashboard's folder
+      # picker browses nothing else. Set [projects] path in map.toml to this same path. Mounting it at another path
+      # works too: then set [projects] roots = [{ name = "Projects", path = "<container path>", host_path =
+      # "<host path>" }] so the dashboard also shows where each folder is on the host. Each extra folder you want
+      # projects in needs its own mount here and its own entry in `roots`; agents in the container can reach only
+      # what is mounted.
       - ${MAP_PROJECTS_DIR:?set MAP_PROJECTS_DIR in .env}:${MAP_PROJECTS_DIR}
       # No ~/.ssh is needed: clone, pull and push use MAP's own key from data/ (Settings → Git & SSH). Optional, only
       # if it exists on the host (a missing file becomes an empty directory): your global git config, which MAP's

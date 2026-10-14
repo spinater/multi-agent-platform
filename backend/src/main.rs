@@ -18,6 +18,7 @@ mod reflex_screen;
 mod savings;
 mod settings;
 mod repo;
+mod roots;
 mod skills;
 mod store;
 mod templates;
@@ -72,6 +73,9 @@ async fn main() -> Result<()> {
 }
 
 async fn open(config: Config) -> Result<Arc<Hub>> {
+    for warning in &config.warnings {
+        tracing::warn!("map.toml: {warning}");
+    }
     std::fs::create_dir_all(&config.server.data_dir).with_context(|| format!("creating {}", config.server.data_dir.display()))?;
     let store = Store::open(&config.server.data_dir.join("map.db")).await?;
     Ok(Hub::new(config, store, Arc::new(Tmux::new())))
@@ -80,6 +84,9 @@ async fn open(config: Config) -> Result<Arc<Hub>> {
 async fn check(config: Config) -> Result<()> {
     let hub = open(config).await?;
     println!("workspace: {}", hub.config.workspace.dir.display());
+    for r in hub.config.projects.roots() {
+        println!("projects:  {} ({})", r.path.display(), if r.path.is_dir() { "ok" } else { "missing: create it to pick project folders in it" });
+    }
     println!("dashboard: {}", hub.config.server.static_dir.display());
     let reflex = &hub.config.reflex.binary;
     let found = if reflex.contains('/') { std::path::Path::new(reflex).exists() } else { std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default()).any(|d| d.join(reflex).is_file()) };

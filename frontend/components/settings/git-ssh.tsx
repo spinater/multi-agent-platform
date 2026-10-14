@@ -667,7 +667,7 @@ function HowItWorks({ access }: { access: GitAccess }) {
           <dd className="break-all">{access.gitconfig_path}</dd>
           <dt className="text-muted">includes</dt>
           <dd className="break-all">{access.includes.length ? access.includes.join(" · ") : "none (no ~/.gitconfig here)"}</dd>
-          <dt className="text-muted">projects root</dt>
+          <dt className="text-muted">project folder</dt>
           <dd className="break-all">{access.projects_root}</dd>
         </dl>
       </div>

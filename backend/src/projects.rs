@@ -129,34 +129,30 @@ pub async fn create(hub: &Hub, req: NewProject) -> Result<Project> {
     create_with(hub, req, ProjectSettings { source, ..Default::default() }).await.map(|(p, _)| p)
 }
 
-/// Checks the project's folder and returns it as an absolute path: an existing folder for `local`, a missing or
-/// empty one for `empty` and `clone` (created or cloned into by the caller). Folders that are the platform's own or
-/// another project's are refused.
-async fn project_folder(hub: &Hub, kind: SourceKind, location: Option<&str>, slug: &str) -> Result<std::path::PathBuf> {
+/// Checks the project's folder and returns its real absolute path (`roots::real_path`): an existing folder for
+/// `local`, a missing or empty one for `empty` and `clone` (created or cloned into by the caller). It must be a
+/// sub-folder of the project folder (`[projects] path`, or one of `roots`), reached without `..` or a symlink out of
+/// it. Folders that are the platform's own or overlap another project's are refused. The wizard's inspect calls this
+/// too (with an empty `slug`), so it shows the same error before the project is made.
+pub async fn project_folder(hub: &Hub, kind: SourceKind, location: Option<&str>, slug: &str) -> Result<std::path::PathBuf> {
     if kind == SourceKind::Git {
         bail!("the platform no longer clones into its own data folder: use \"clone\" to clone the repo into a folder on this machine");
     }
     let path = crate::login::expand_home(location.unwrap_or_default().trim());
-    let path = match kind {
-        SourceKind::Local => {
-            if !path.is_dir() {
-                bail!("{} is not a folder on this machine", path.display());
-            }
-            path.canonicalize()?
-        }
-        _ => {
-            if path.exists() && (!path.is_dir() || std::fs::read_dir(&path)?.next().is_some()) {
-                bail!("{} already exists and is not an empty folder", path.display());
-            }
-            path
-        }
-    };
+    if kind == SourceKind::Local && !path.is_dir() {
+        bail!("{} is not a folder on this machine", path.display());
+    }
+    let (path, _) = crate::roots::check_project_folder(hub.config.projects.roots(), &path)?;
+    if kind != SourceKind::Local && path.exists() && (!path.is_dir() || std::fs::read_dir(&path)?.next().is_some()) {
+        bail!("{} already exists and is not an empty folder", path.display());
+    }
     let data = hub.config.server.data_dir.canonicalize().unwrap_or_else(|_| hub.config.server.data_dir.clone());
     if path.starts_with(&data) || data.starts_with(&path) {
         bail!("{} overlaps the platform's data folder {}", path.display(), data.display());
     }
     for other in hub.store.projects().await? {
         let theirs = hub.workspace_of(&other);
+        let theirs = crate::roots::real_path(&theirs).unwrap_or(theirs);
         if other.slug != slug && (path.starts_with(&theirs) || theirs.starts_with(&path)) {
             bail!("{} overlaps project {}'s folder {}", path.display(), other.slug, theirs.display());
         }

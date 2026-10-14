@@ -34,7 +34,8 @@ nothing is tied to one repository, session name or provider.
     a new empty one MAP creates, or a new folder MAP clones a repo into (see [Git access](#git-access)). MAP never
     copies or hosts a project's code, runs git there only when you ask (clone, fetch, pull, push), and adds no files
     to it unless you init it with a template (see [Init a project](#init-a-project)); deleting a project leaves the
-    folder alone. Two projects cannot share a folder or nest.
+    folder alone. Two projects cannot share a folder or nest. The folder must be a sub-folder of the
+    [project folder](#project-folder) (`[projects] path`), picked in the wizard's folder browser.
   - **Corpus.** A bare git repo of the platform's own, served at `/git/<slug>/corpus.git`: clone, push, or edit
     files from the dashboard.
   - **Decide before calling an LLM.** `POST /api/projects/<slug>/decide` asks Reflex first (local, no model, a few
@@ -119,6 +120,7 @@ nothing is tied to one repository, session name or provider.
 | `backend/src/hub.rs` | Launching and closing sessions; the single place that writes state and broadcasts it |
 | `backend/src/terminal/` | `Terminal` trait; `tmux.rs` in production, `fake.rs` in tests |
 | `backend/src/projects.rs` | Creating projects on a folder (existing or new) and deleting them; folder and corpus path rules |
+| `backend/src/roots.rs` | The project folder: where project folders may be (real paths, no `..`, no symlink out), and the folder picker's listing |
 | `backend/src/templates.rs` | Project templates (built-in and `[templates] dirs`), the create/skip/append plan, laying one down, the init agent's task |
 | `backend/src/project_settings.rs` | Per-project providers, verify, audit and pause, as the orchestrator asks for them |
 | `backend/src/trust.rs` | Folder trust: marking folders trusted in Claude Code's and Codex's config, answering the trust question |
@@ -173,16 +175,39 @@ cargo run --release -- serve -c ../map.toml
 On the machine whose projects the agents should work on (Linux or macOS), from a checkout:
 
 ```sh
-deploy/install.sh                 # --port 4400 --bind 127.0.0.1 --prefix DIR --config FILE --no-service
-deploy/install.sh --uninstall     # removes the service; keeps the config and data
+deploy/install.sh                       # everything under ~/MAP (same as --home ~/MAP)
+deploy/install.sh --home /root/project/MAP
+deploy/install.sh --config-dir DIR --projects-dir DIR   # the two folders chosen one by one
+#   also: --port 4400 --bind 127.0.0.1 --prefix DIR --config FILE --no-service
+deploy/install.sh --uninstall           # removes the service and app/; keeps config/ (with data/) and workspace/
 ```
 
-It builds the server and dashboard, installs them under `~/.local/share/map`, adds a pinned Reflex (checked by
-SHA256) unless one is on PATH, writes `~/.config/map/map.toml` once with a fresh `api_token` and your current PATH
-(so the service finds the same `claude`, `codex`, `agy`), and starts a systemd user service (`map.service`) or a
-launchd agent (`com.multi-agent-platform.map`). Restarting the service leaves agent sessions in tmux running.
-Requirements: Rust, Bun, tmux, git, curl, openssl. On Linux, `sudo loginctl enable-linger $USER` keeps it running
-after you log out.
+An install is laid out around two folders you choose, the **config folder** and the **project folder**:
+
+```
+~/MAP/                    --home DIR
+├── app/                  --prefix: map, the dashboard, Reflex; replaced on every install or upgrade
+├── config/               --config-dir: never touched by an upgrade
+│   ├── map.toml          written once (never overwritten)
+│   ├── templates/        your project templates ([templates] dirs)
+│   ├── agents/           init-agent.md here replaces the built-in init agent's instructions
+│   └── data/             database, run files, corpus repos, MAP's git key, logs, the default workspace
+└── workspace/            --projects-dir: the project folder; projects can only be its sub-folders
+```
+
+It builds the server and dashboard into `app/`, adds a pinned Reflex (checked by SHA256) unless one is on PATH,
+creates the folders, writes `config/map.toml` once with a fresh `api_token`, your current PATH (so the service finds
+the same `claude`, `codex`, `agy`), `data_dir`, the default workspace `config/data/workspace` (a git repo inside the
+data folder, so it is never a project) and `[projects] path` = the project folder, then starts a systemd user service
+(`map.service`) or a launchd agent (`com.multi-agent-platform.map`) that runs `map serve -c <config>/map.toml`, and
+prints the layout. Restarting the service leaves agent sessions in tmux running. Requirements: Rust, Bun, tmux, git,
+curl, openssl. On Linux, `sudo loginctl enable-linger $USER` keeps it running after you log out.
+
+- **Existing installs.** Without flags, an install made before this layout (`~/.config/map/map.toml`, app in
+  `~/.local/share/map`) keeps its config and prefix; `--config FILE` still picks a config file. An existing config is
+  never rewritten: when it sets no project folder, the installer prints the `[projects] path = "…"` lines to add.
+- **Changing a folder later.** Run the installer again with the new flags (a config that exists is kept, so edit its
+  `[projects] path` too), or edit `map.toml` and restart MAP. See [Project folder](#project-folder).
 
 Development, with hot reload for the dashboard:
 
@@ -199,10 +224,10 @@ token refresh on one side never logs out the other). It publishes on `127.0.0.1`
 authenticating proxy in front to reach it from elsewhere.
 
 ```sh
-cp .env.example .env                        # your uid/gid, user, home, Node dir, MAP_DIR, projects dir, port
-mkdir -p ~/map-deploy/data/map && git init ~/map-deploy/data/workspace
-cp deploy/map.docker.toml ~/map-deploy/map.toml
-#   set api_token (openssl rand -hex 32), the PATH in [workspace.env], and allowed_hosts for your tunnel's name
+cp .env.example .env                        # uid/gid, user, home, Node dir, MAP_CONFIG_DIR, MAP_PROJECTS_DIR, port
+mkdir -p ~/MAP/config/data ~/MAP/workspace && git init ~/MAP/config/data/workspace
+cp deploy/map.docker.toml ~/MAP/config/map.toml
+#   set the two folders' paths, api_token (openssl rand -hex 32), the PATH in [workspace.env], allowed_hosts
 docker compose up -d --build
 docker compose logs -f map                  # open http://127.0.0.1:4400 and paste the token once
 ```
@@ -214,13 +239,20 @@ docker compose logs -f map                  # open http://127.0.0.1:4400 and pas
 - Claude Code in the container uses `CLAUDE_CONFIG_DIR=~/.claude`, so its settings file is `~/.claude/.claude.json`
   (the host rewrites `~/.claude.json` by renaming over it, which a single-file mount cannot follow). Set
   `"hasCompletedOnboarding": true` in that file once, or the first interactive session stops at the setup screens.
-  MAP marks `/data/workspace` and each project's folder trusted in that same file (see [Folder trust](#folder-trust)),
-  so the "trust this folder?" question does not stop the workers.
-- Projects are folders under `MAP_PROJECTS_DIR`, mounted at the same path, so a project's path is the same in the
-  container and on the host; set `[projects] root` to it so "Clone from git" puts new projects there. State lives in
-  `MAP_DIR/data` (database, run files, corpus repos, and MAP's git key and gitconfig under `data/map/git`); config in
-  `MAP_DIR/map.toml`. Git needs no `~/.ssh` mount: create MAP's key under Settings → Git & SSH and add it to
-  GitHub or GitLab (see [Git access](#git-access)).
+  MAP marks the default workspace and each project's folder trusted in that same file (see
+  [Folder trust](#folder-trust)), so the "trust this folder?" question does not stop the workers.
+- **Two folders, each mounted at the same path as on the host.** `MAP_CONFIG_DIR` is the config folder: `map.toml`
+  (read-only on top), `templates/`, `agents/` and `data/` (database, run files, corpus repos, the default workspace,
+  and MAP's git key and gitconfig under `data/git`). `MAP_PROJECTS_DIR` is the project folder: set `[projects] path`
+  to the same path, and projects can be created only in its sub-folders (see [Project folder](#project-folder)).
+  Same paths mean a project's folder reads the same in the container, on the host and in the dashboard. To mount the
+  project folder elsewhere in the container, use `[projects] roots = [{ name, path = "<container path>", host_path =
+  "<host path>" }]` instead, and the dashboard shows both paths. Every folder agents should reach needs a mount.
+  Git needs no `~/.ssh` mount: create MAP's key under Settings → Git & SSH and add it to GitHub or GitLab (see
+  [Git access](#git-access)).
+- **Upgrading from `MAP_DIR`.** Older setups mounted `MAP_DIR/data` at `/data`. Set `MAP_CONFIG_DIR` to that
+  `MAP_DIR`, and in its `map.toml` change `data_dir = "/data/map"` to `"<MAP_DIR>/data/map"` and `workspace.dir` to
+  `"<MAP_DIR>/data/workspace"`, so the existing database is used.
 - On macOS, use `deploy/install.sh` instead: a Linux container cannot run the Mac's agent CLIs.
 - Agent sessions are tmux sessions inside the container, so `docker compose restart` ends them (the watcher marks
   them exited and the orchestrator retries their tasks).
@@ -347,7 +379,7 @@ the Projects screen and a project's Git panel).
 - **Docker.** The key lives in `MAP_DIR/data`, so it works in the container without mounting `~/.ssh`.
 - **Clone from git.** The wizard's third source: a repo URL (`git@host:owner/repo.git`, `ssh://`, `https://`,
   `git://`, `file://`; never an option or an `ext::`/`fd::` transport), an optional branch, and the folder, by default
-  `<[projects] root>/<repo name>` (missing or empty). It shows `git ls-remote` first (default branch, branches, or why
+  `<project folder>/<repo name>` (missing or empty, inside the project folder). It shows `git ls-remote` first (default branch, branches, or why
   the host refused, with a hint to add MAP's key), then runs `git clone` (a normal working clone, not bare). The
   project is then an ordinary folder project (`kind = "local"`), with the URL kept as `source.remote`.
 - **Sync.** A project's page has a Git panel (and its card a one-line status): branch, upstream, origin, ahead/behind,
@@ -356,6 +388,43 @@ the Projects screen and a project's Git panel).
   `-u origin <branch>`) and **Connect a remote** (sets or replaces `origin`, after `git init -b main` when the folder
   is not a repo yet). Each shows its commands and output and logs a `project.git.*` event. Pull, push and remote
   changes are refused while a task of the project is running; fetch and status are not.
+
+## Project folder
+
+Projects can be created only in sub-folders of one folder, the project folder, whether MAP runs as a service or in
+Docker (`backend/src/roots.rs`):
+
+```toml
+[projects]
+path = "/root/project/MAP/workspace"   # `root` is the older name; default ~/project
+```
+
+- **What it restricts:** the dashboard's folder picking and project creation. Every way a project gets a folder (an
+  existing one, a new empty one, a clone target) is checked on the server: the folder's real path (for a folder that
+  does not exist yet, the real path of its nearest existing ancestor plus the rest) must be inside the project folder's
+  real path. `..` is refused, a symlink that leads out of it is refused, and the project folder itself cannot be a
+  project, only its sub-folders. A new folder may be several levels down (`group/team/app`); the missing levels are
+  created. The error names the allowed folder. The wizard's inspect makes the same check as you pick.
+- **What it does not restrict:** what an agent CLI can read or run once started. That is the CLI's own permissions
+  and sandbox (`--dangerously-skip-permissions` gives it the whole account), or in Docker the container's mounts.
+- **The picker.** The wizard's folder step (Existing, New folder, Clone into) browses only inside it: a breadcrumb,
+  the sub-folders (a `git` badge, "project X" when a MAP project uses or contains one, which disables picking it),
+  **Select this folder**, and for new and clone **New folder here** with a name (one path segment, no slashes).
+  Dot-folders show on request. "Type a path instead" takes a typed path, checked against the project folder too.
+- **Existing projects** whose folder is outside it (made before it was set) keep working; their page says "outside
+  the configured project folder", and a project cannot be created there again.
+- **Checks at start:** a missing project folder is a warning (create it to pick folders in it), not an error. A
+  project folder inside MAP's data dir is an error; the data dir inside the project folder is a warning, and the data
+  dir is never listed or accepted. The default workspace lives in the data folder, so it never shows up as a project.
+- **Several folders (advanced).** Instead of `path`, `roots = [{ name = "Projects", path = "~/project" }, { name =
+  "Clients", path = "/projects", host_path = "/home/me/clients", allow_root_itself = false }]` with `default_root =
+  "<name>"` for clones (default: the first). Names must be unique, paths absolute (after `~`) and not nested in each
+  other. `host_path` is display only: the same folder on the host, when a container mounts it at another path. The
+  picker then shows a chip per root.
+- **API** (owner token only; an agent's project token cannot call them): `GET /api/fs/roots` and
+  `GET /api/fs/browse?root=<name>&path=<relative>&hidden=true`, which returns folders only (never file contents, only a
+  file count), sorted, at most 500 (`truncated`), with symlinks listed only when they lead to a folder inside the same
+  root; an absolute path, `..` or a symlink out of the root is a 400.
 
 ## Settings
 
@@ -379,8 +448,10 @@ token is set.
 - **Agent CLIs** (`#settings/agents`): per provider, the binary and where it resolves on the agents' PATH, the
   installed and latest version from the [update check](#what-it-does) with **Check versions** and **Update** (the
   same confirmation and helper session as the bell), and the sign-in state with **Sign in** (the sign-in modal).
-- **Server** (`#settings/server`), read only: the config file, data dir, bind address, `allowed_hosts`, whether
-  `api_token` is set (never its value), projects root, default workspace, static dir, MAP's version, Reflex's binary
+- **Server** (`#settings/server`), read only: first the **config folder** and the **project folder** (whether it
+  exists, its host path in Docker, every root with `roots`) and how to change them (reinstall with `--config-dir` /
+  `--projects-dir` / `--home`, or edit `map.toml` and restart); then the config file, data dir, bind address,
+  `allowed_hosts`, whether `api_token` is set (never its value), default workspace, static dir, MAP's version, Reflex's binary
   and version, and how MAP runs: in a container (`/.dockerenv` or `/run/.containerenv`), as a systemd service
   (`INVOCATION_ID`), a launchd agent (`XPC_SERVICE_NAME`) or by hand. `map.toml` is not editable from the dashboard:
   edit it and restart (`docker compose restart map`, `systemctl --user restart map`, or
@@ -577,8 +648,10 @@ All routes are under `/api`. When `server.api_token` is set, send `Authorization
 | GET | `/templates` | Templates with their files and placeholders (built in, then `[templates] dirs`) |
 | POST | `/projects/{slug}/init/plan` | `{"template"}`: per file `create`, `skip` (exists) or `append` (missing lines); writes nothing |
 | POST | `/projects/{slug}/init` | `{"template", "description", "provider", "model"?, "set_verify"}`: writes the plan, optionally sets the project's verify to the template's, queues the "Init project" task; returns `plan`, `checks` and `task` |
-| POST | `/projects/inspect` | `{"kind": "local"\|"empty", "location"}`: the folder's git branch, branches, commits and top-level entries, or whether a new folder can go there; `{"kind": "clone", "location": <url>, "branch"?}`: `git ls-remote` (default branch, branches, `hint` on an auth failure, suggested `folder`) |
-| GET | `/git/access` | MAP's public key and fingerprint (or `null`), git identity, known hosts, gitconfig path and includes, projects root, the SSH method (`settings`) and `system_ssh` (`~/.ssh`: which files exist, `*.pub` names and fingerprints, ssh-agent socket, container) |
+| POST | `/projects/inspect` | `{"kind": "local"\|"empty", "location"}`: the folder's git branch, branches, commits and top-level entries, or whether a new folder can go there, after the same checks as creating (inside the project folder, `root` names it); `{"kind": "clone", "location": <url>, "branch"?}`: `git ls-remote` (default branch, branches, `hint` on an auth failure, suggested `folder`) |
+| GET | `/fs/roots` | The project folder (or each of `[projects] roots`): `name`, `path`, `host_path`, `exists`, `allow_root_itself`, `is_default` |
+| GET | `/fs/browse?root=&path=&hidden=` | Sub-folders of a folder inside a root: `path` (relative), `parent`, `abs_path`, `host_path`, `in_project`, `entries` (`name`, `kind`, `is_git`, `is_project`, `contains_project`, `has_children`, `hidden`), `truncated`, `files` (a count); 400 for an absolute path, `..` or a symlink out |
+| GET | `/git/access` | MAP's public key and fingerprint (or `null`), git identity, known hosts, gitconfig path and includes, the project folder, the SSH method (`settings`) and `system_ssh` (`~/.ssh`: which files exist, `*.pub` names and fingerprints, ssh-agent socket, container) |
 | PUT | `/git/settings` | `{"ssh": "map_key" \| "system"}`: the SSH method, saved in `<data_dir>/git/settings.json`; the gitconfig is regenerated |
 | DELETE | `/git/known-hosts/{host}` | Forget a host learned on first use (`git.example.com`, `[host]:2222`); 409 for a pinned host, 404 when unknown; returns the known hosts left |
 | GET | `/settings` | The Settings screen's read-only facts: server settings from `map.toml` (`api_token_set`, never the token), run mode and restart command, each agent CLI's binary path, `gh` / `glab` on PATH and whether `GH_TOKEN`, `GITHUB_TOKEN`, `GITLAB_TOKEN`, `GITLAB_HOST` are set (never their values) |
@@ -651,7 +724,11 @@ Reflex on a local port), and the store, all against an in-memory terminal. Git a
 data dir (skipped without `ssh-keygen`) and clone, fetch, pull and push only against local bare repos over `file://`;
 nothing contacts GitHub or GitLab. Settings tests check the SSH method in `settings.json` and a gitconfig without
 `sshCommand`, that a pinned known host cannot be removed and a learned one can, that `/api/settings` never carries
-the API token or a variable's value, and the container check against marker files in a temporary folder.
+the API token or a variable's value, and the container check against marker files in a temporary folder. Project
+folder tests cover `path`/`root`/`roots` parsing and validation, inside/outside checks (symlink escapes, `..`, the
+folder itself, new folders under missing sub-folders), the picker's listing (folders only, dot-folders, git and
+project badges, the cap, traversal refused), creation refused outside it for every source, and an older project
+outside it still loading with the warning.
 
 ## Roadmap
 

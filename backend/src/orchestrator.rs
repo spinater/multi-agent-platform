@@ -557,7 +557,7 @@ mod tests {
     async fn setup(extra: &str) -> (Arc<Hub>, Arc<FakeTerminal>, tempfile::TempDir) {
         let dir = tempfile::tempdir().unwrap();
         let text = format!(
-            "[workspace]\ndir = \"{0}\"\n[server]\ndata_dir = \"{0}/data\"\n[orchestrator]\nprovider_order = [\"claude\"]\n{extra}\n[providers.claude]\nbinary = \"/bin/sh\"\n",
+            "[projects]\npath = \"{0}\"\n[workspace]\ndir = \"{0}\"\n[server]\ndata_dir = \"{0}/data\"\n[orchestrator]\nprovider_order = [\"claude\"]\n{extra}\n[providers.claude]\nbinary = \"/bin/sh\"\n",
             dir.path().display()
         );
         let config = Config::parse(&text, Path::new("/")).unwrap();
@@ -791,7 +791,7 @@ mod tests {
     async fn gate_setup(gates: ReflexGates, providers: Vec<ProjectProvider>) -> (Arc<Hub>, tempfile::TempDir, String) {
         let dir = tempfile::tempdir().unwrap();
         let text = format!(
-            "[workspace]\ndir = \"{0}\"\n[server]\ndata_dir = \"{0}/data\"\n[orchestrator]\nprovider_order = [\"claude\"]\n[orchestrator.audit]\nenabled = true\nchain = [\"claude\"]\n\
+            "[projects]\npath = \"{0}\"\n[workspace]\ndir = \"{0}\"\n[server]\ndata_dir = \"{0}/data\"\n[orchestrator]\nprovider_order = [\"claude\"]\n[orchestrator.audit]\nenabled = true\nchain = [\"claude\"]\n\
              [reflex]\nbinary = \"/nonexistent/reflex\"\n[providers.claude]\nbinary = \"/bin/sh\"\nheadless = [\"/bin/echo\", \"VERDICT: PASS\"]\n[providers.codex]\nbinary = \"/bin/sh\"\n",
             dir.path().display()
         );

@@ -3,31 +3,64 @@
 # Builds the server and dashboard from this checkout, adds a pinned Reflex unless one is on PATH, writes a config
 # once (never overwrites it) and starts the service. The agent CLIs (claude, codex, agy) are the ones on your PATH.
 #
-#   deploy/install.sh [--port 4400] [--bind 127.0.0.1] [--prefix DIR] [--config FILE] [--no-service]
-#   deploy/install.sh --uninstall      # stops and removes the service; keeps the config and data
+#   deploy/install.sh [--home DIR] [--config-dir DIR] [--projects-dir DIR] [--port 4400] [--bind 127.0.0.1]
+#                     [--prefix DIR] [--config FILE] [--no-service]
+#   deploy/install.sh --uninstall      # stops and removes the service and the app; keeps config, data, projects
+#
+# Layout (--home DIR, default ~/MAP):  DIR/app        the binary, dashboard and Reflex (replaced on every install)
+#                                      DIR/config     map.toml, templates/, agents/, data/ (database, runs, corpus
+#                                                     repos, git key, the default workspace, logs)
+#                                      DIR/workspace  the project folder: projects can only be its sub-folders
 set -euo pipefail
 
 PORT=4400
 BIND=127.0.0.1
-PREFIX="${XDG_DATA_HOME:-$HOME/.local/share}/map"
-CONFIG="${XDG_CONFIG_HOME:-$HOME/.config}/map/map.toml"
+HOME_DIR=""
+PREFIX=""
+CONFIG=""
+CONFIG_DIR=""
+PROJECTS_DIR=""
 SERVICE=1
 UNINSTALL=0
 LABEL=com.multi-agent-platform.map
 REFLEX_VERSION=v0.2.4
+LEGACY_CONFIG="${XDG_CONFIG_HOME:-$HOME/.config}/map/map.toml"
+LEGACY_PREFIX="${XDG_DATA_HOME:-$HOME/.local/share}/map"
+
+abs() { case "$1" in /*) printf '%s' "$1" ;; "~"*) printf '%s' "$HOME${1#\~}" ;; *) printf '%s/%s' "$PWD" "$1" ;; esac; }
 
 while [ $# -gt 0 ]; do
   case "$1" in
     --port) PORT="$2"; shift 2 ;;
     --bind) BIND="$2"; shift 2 ;;
-    --prefix) PREFIX="$2"; shift 2 ;;
-    --config) CONFIG="$2"; shift 2 ;;
+    --home) HOME_DIR="$(abs "$2")"; shift 2 ;;
+    --config-dir) CONFIG_DIR="$(abs "$2")"; shift 2 ;;
+    --projects-dir) PROJECTS_DIR="$(abs "$2")"; shift 2 ;;
+    --prefix) PREFIX="$(abs "$2")"; shift 2 ;;
+    --config) CONFIG="$(abs "$2")"; shift 2 ;;
     --no-service) SERVICE=0; shift ;;
     --uninstall) UNINSTALL=1; shift ;;
-    -h|--help) sed -n '2,8p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,13p' "$0"; exit 0 ;;
     *) echo "unknown option $1" >&2; exit 2 ;;
   esac
 done
+
+# Where everything goes. --home sets all three; --config-dir / --projects-dir / --prefix override one each. With no
+# flags, an install made before this layout (~/.config/map/map.toml) keeps its config and prefix.
+if [ -z "$HOME_DIR" ] && [ -z "$CONFIG_DIR" ] && [ -z "$CONFIG" ] && [ -f "$LEGACY_CONFIG" ]; then
+  CONFIG="$LEGACY_CONFIG"
+  PREFIX="${PREFIX:-$LEGACY_PREFIX}"
+fi
+HOME_DIR="${HOME_DIR:-$HOME/MAP}"
+PREFIX="${PREFIX:-$HOME_DIR/app}"
+if [ -n "$CONFIG" ]; then
+  CONFIG_DIR="$(dirname "$CONFIG")"
+else
+  CONFIG_DIR="${CONFIG_DIR:-$HOME_DIR/config}"
+  CONFIG="$CONFIG_DIR/map.toml"
+fi
+PROJECTS_DIR="${PROJECTS_DIR:-$HOME_DIR/workspace}"
+DATA_DIR="$CONFIG_DIR/data"
 
 OS="$(uname -s)"
 ARCH="$(uname -m)"
@@ -55,8 +88,10 @@ stop_service() {
 
 if [ "$UNINSTALL" = 1 ]; then
   stop_service
+  # Only the app: config, data and projects stay (an older prefix may hold data/ and workspace/, which are kept).
   rm -rf "$PREFIX/bin" "$PREFIX/dashboard"
-  say "service removed; config $CONFIG and data $PREFIX/data are kept"
+  rmdir "$PREFIX" 2>/dev/null || true
+  say "service and app removed; config $CONFIG_DIR, data $DATA_DIR and projects $PROJECTS_DIR are kept"
   exit 0
 fi
 
@@ -70,7 +105,7 @@ say "building the server"
 say "building the dashboard"
 (cd "$REPO/frontend" && bun install --frozen-lockfile && bun run build)
 
-mkdir -p "$PREFIX/bin" "$PREFIX/data" "$PREFIX/workspace"
+mkdir -p "$PREFIX/bin" "$CONFIG_DIR/templates" "$CONFIG_DIR/agents" "$PROJECTS_DIR"
 install -m 755 "$REPO/backend/target/release/map" "$PREFIX/bin/map"
 rm -rf "$PREFIX/dashboard" && cp -R "$REPO/frontend/out" "$PREFIX/dashboard"
 
@@ -95,15 +130,21 @@ if [ -z "$REFLEX" ]; then
   REFLEX="$PREFIX/bin/reflex"
 fi
 
-# The workspace for tasks without a project must be a git repo.
-[ -d "$PREFIX/workspace/.git" ] || git init -q "$PREFIX/workspace"
-
 if [ -f "$CONFIG" ]; then
   say "keeping the existing config $CONFIG"
+  if ! grep -Eq '^[[:space:]]*(path|root|roots)[[:space:]]*=' "$CONFIG"; then
+    echo "    it sets no project folder, so projects can only be made under ~/project. To use $PROJECTS_DIR, add:"
+    printf '      [projects]\n      path = "%s"\n' "$PROJECTS_DIR"
+    echo "    to $CONFIG (one [projects] table only) and restart MAP."
+  fi
 else
-  mkdir -p "$(dirname "$CONFIG")"
+  mkdir -p "$DATA_DIR/workspace"
+  # The workspace for tasks without a project must be a git repo. It lives in data/, so it is never a project.
+  [ -d "$DATA_DIR/workspace/.git" ] || git init -q "$DATA_DIR/workspace"
   gemini_binary=gemini
   command -v gemini >/dev/null || ! command -v agy >/dev/null || gemini_binary=agy
+  init_agent="# init_agent = \"$CONFIG_DIR/agents/init-agent.md\""
+  [ -f "$CONFIG_DIR/agents/init-agent.md" ] && init_agent="init_agent = \"$CONFIG_DIR/agents/init-agent.md\""
   (umask 077 && cat >"$CONFIG" <<EOF
 # Written by deploy/install.sh. Every setting is documented in map.example.toml.
 [server]
@@ -111,13 +152,13 @@ bind = "$BIND:$PORT"
 # The dashboard asks for this once per browser. Keep it secret.
 api_token = "$(openssl rand -hex 32)"
 static_dir = "$PREFIX/dashboard"
-data_dir = "$PREFIX/data"
+data_dir = "$DATA_DIR"
 # Public host names that reach this server (e.g. a Cloudflare tunnel), so their Host header is accepted.
 # allowed_hosts = ["agents.example.com"]
 
 [workspace]
 # Where tasks and sessions without a project run. Projects use their own folders.
-dir = "$PREFIX/workspace"
+dir = "$DATA_DIR/workspace"
 session_prefix = "map-"
 
 [workspace.env]
@@ -138,6 +179,17 @@ binary = "$gemini_binary"
 
 [reflex]
 binary = "$REFLEX"
+
+[projects]
+# The project folder: projects can only be created in its sub-folders, and the dashboard's folder picker browses
+# nothing else. Change it here (or reinstall with --projects-dir) and restart MAP.
+path = "$PROJECTS_DIR"
+
+[templates]
+# Your own project templates (one folder with a template.toml each), next to the built-in ones.
+dirs = ["$CONFIG_DIR/templates"]
+# Instructions that replace the built-in init agent's (written when $CONFIG_DIR/agents/init-agent.md exists).
+$init_agent
 EOF
   )
   say "wrote $CONFIG"
@@ -145,7 +197,18 @@ fi
 
 "$PREFIX/bin/map" check -c "$CONFIG" || true
 
+LOG_DIR="$DATA_DIR"
+[ -d "$LOG_DIR" ] || LOG_DIR="$PREFIX/data"
+layout() {
+  say "layout"
+  echo "    app       $PREFIX            (map, dashboard, reflex: replaced on every install)"
+  echo "    config    $CONFIG_DIR        (map.toml, templates/, agents/)"
+  echo "    data      $DATA_DIR          (database, runs, corpus repos, git key, default workspace)"
+  echo "    projects  $PROJECTS_DIR      (the project folder: projects are its sub-folders)"
+}
+
 if [ "$SERVICE" = 0 ]; then
+  layout
   say "installed; run it with: $PREFIX/bin/map serve -c $CONFIG"
   exit 0
 fi
@@ -178,7 +241,7 @@ EOF
       echo "    to keep it running after you log out: sudo loginctl enable-linger $USER"
     fi ;;
   Darwin)
-    mkdir -p "$(dirname "$PLIST")" "$PREFIX/data"
+    mkdir -p "$(dirname "$PLIST")" "$LOG_DIR"
     cat >"$PLIST" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -192,17 +255,18 @@ EOF
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><dict><key>SuccessfulExit</key><false/></dict>
   <key>AbandonProcessGroup</key><true/>
-  <key>StandardOutPath</key><string>$PREFIX/data/map.log</string>
-  <key>StandardErrorPath</key><string>$PREFIX/data/map.log</string>
+  <key>StandardOutPath</key><string>$LOG_DIR/map.log</string>
+  <key>StandardErrorPath</key><string>$LOG_DIR/map.log</string>
 </dict>
 </plist>
 EOF
     launchctl bootstrap "gui/$(id -u)" "$PLIST"
-    say "service $LABEL started (log: $PREFIX/data/map.log)" ;;
+    say "service $LABEL started (log: $LOG_DIR/map.log)" ;;
 esac
 
 for _ in $(seq 1 30); do
   curl -s -o /dev/null "http://127.0.0.1:$PORT/api/health" && break
   sleep 1
 done
+layout
 say "open http://127.0.0.1:$PORT and paste the api_token from $CONFIG"

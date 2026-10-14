@@ -21,6 +21,10 @@ files: Array<string>, commits: number | null,
  */
 hint: string | null, 
 /**
- * For a git URL: the suggested folder, `<projects.root>/<repo name>`.
+ * For a git URL: the suggested folder, `<project folder>/<repo name>`.
  */
-folder: string | null, };
+folder: string | null, 
+/**
+ * For a folder: the project folder (root) it is inside, by name.
+ */
+root: string | null, };

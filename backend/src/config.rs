@@ -38,6 +38,10 @@ pub struct Config {
     /// The file this config was loaded from (absolute); `None` for a config parsed from text.
     #[serde(skip)]
     pub path: Option<PathBuf>,
+    /// Problems found while loading that do not stop MAP (e.g. a project root that does not exist yet); `serve`
+    /// and `check` log them.
+    #[serde(skip)]
+    pub warnings: Vec<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -393,19 +397,145 @@ impl Default for TemplatesConfig {
     }
 }
 
-/// Where projects cloned from a git repo go, and how long MAP waits for git on the network.
+/// The project folder (`path`): every project's folder must be a sub-folder of it, the dashboard browses only inside
+/// it, and "Clone from git" suggests `<path>/<repo name>`. Also how long MAP waits for git on the network.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct ProjectsConfig {
-    /// "Clone from git" suggests `<root>/<repo name>` as the new project's folder. `~/` is `$HOME`.
-    pub root: PathBuf,
+    /// The project folder. `~/` is `$HOME`; a relative path resolves against the config's folder. `root` is its older
+    /// name. Default `~/project`.
+    #[serde(alias = "root")]
+    path: Option<PathBuf>,
+    /// Advanced, instead of `path`: several named project folders (`roots.rs`). Each project's folder must be inside
+    /// one of them. After `Config::parse` the list is never empty (`path` becomes a single root); read it with
+    /// [`ProjectsConfig::roots`].
+    roots: Option<Vec<ProjectRoot>>,
+    /// With `roots`: the one "Clone from git" suggests `<root>/<repo name>` in, by name. Unset: the first.
+    pub default_root: Option<String>,
     /// Timeout for git commands MAP runs over the network (clone, ls-remote, fetch, pull, push).
     pub git_timeout_secs: u64,
+    #[serde(skip)]
+    default_index: usize,
+}
+
+/// One allowed parent of project folders (`roots = [{ name, path }]` or `[[projects.roots]]`).
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProjectRoot {
+    /// Shown on the dashboard's root chips and used in `GET /api/fs/browse?root=<name>`.
+    pub name: String,
+    /// The folder as MAP sees it (inside the container, in Docker). Absolute, or `~/…`.
+    pub path: PathBuf,
+    /// Display only: the same folder as seen on the host, when MAP runs in a container that mounts it elsewhere.
+    #[serde(default)]
+    pub host_path: Option<PathBuf>,
+    /// The root folder itself may be a project's folder; by default only its sub-folders may.
+    #[serde(default)]
+    pub allow_root_itself: bool,
 }
 
 impl Default for ProjectsConfig {
     fn default() -> Self {
-        Self { root: "~/project".into(), git_timeout_secs: 300 }
+        Self { path: None, roots: None, default_root: None, git_timeout_secs: 300, default_index: 0 }
+    }
+}
+
+impl ProjectsConfig {
+    /// The allowed roots, in `map.toml`'s order (never empty once parsed).
+    pub fn roots(&self) -> &[ProjectRoot] {
+        self.roots.as_deref().unwrap_or_default()
+    }
+
+    /// The root "Clone from git" suggests a folder in (`default_root`, else the first).
+    pub fn default_root(&self) -> &ProjectRoot {
+        &self.roots()[self.default_index]
+    }
+
+    /// Resolves `path` (or `roots`) and checks them against each other and the data dir. Problems that should not
+    /// stop MAP (a project folder that does not exist yet, the data dir inside it) become `warnings`.
+    fn resolve(&mut self, base: &Path, data_dir: &Path, warnings: &mut Vec<String>) -> Result<()> {
+        let roots = match (self.roots.take(), self.path.take()) {
+            (Some(_), Some(_)) => bail!("[projects]: set `path` (one project folder) or `roots` (several), not both"),
+            (Some(roots), None) => {
+                if roots.is_empty() {
+                    bail!("projects.roots needs at least one folder");
+                }
+                let mut out = Vec::with_capacity(roots.len());
+                for mut r in roots {
+                    r.name = r.name.trim().to_string();
+                    if r.name.is_empty() || r.name.chars().count() > 40 || r.name.chars().any(char::is_control) {
+                        bail!("projects.roots: every root needs a name of 1–40 characters (got `{}`)", r.name);
+                    }
+                    let path = expand_home(&r.path);
+                    if !path.is_absolute() {
+                        bail!("projects.roots `{}`: path `{}` must be absolute (or ~/…)", r.name, r.path.display());
+                    }
+                    r.path = path;
+                    r.host_path = r.host_path.filter(|h| !h.as_os_str().is_empty());
+                    if let Some(h) = &r.host_path
+                        && !h.is_absolute()
+                    {
+                        bail!("projects.roots `{}`: host_path `{}` must be absolute", r.name, h.display());
+                    }
+                    out.push(r);
+                }
+                out
+            }
+            (None, root) => {
+                // One project folder. Relative paths resolve against the config's folder, as `root` always did.
+                if self.default_root.is_some() {
+                    bail!("projects.default_root only applies to `roots`");
+                }
+                let path = expand_home(&root.unwrap_or_else(|| "~/project".into()));
+                let path = if path.is_absolute() { path } else { base.join(path) };
+                let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).filter(|n| !n.is_empty()).unwrap_or_else(|| "root".into());
+                vec![ProjectRoot { name, path, host_path: None, allow_root_itself: false }]
+            }
+        };
+        let data = crate::roots::normalize(data_dir);
+        let data_real = data_dir.canonicalize().ok();
+        for (i, r) in roots.iter().enumerate() {
+            if r.path.components().any(|c| c == std::path::Component::ParentDir) {
+                bail!("projects.roots `{}`: path `{}` must not contain `..`", r.name, r.path.display());
+            }
+            let path = crate::roots::normalize(&r.path);
+            for other in &roots[..i] {
+                if other.name.eq_ignore_ascii_case(&r.name) {
+                    bail!("projects.roots: the name `{}` is used twice", r.name);
+                }
+                let o = crate::roots::normalize(&other.path);
+                if path.starts_with(&o) || o.starts_with(&path) {
+                    bail!("projects.roots `{}` ({}) and `{}` ({}) overlap: list each folder once", other.name, o.display(), r.name, path.display());
+                }
+            }
+            let real = r.path.canonicalize().ok();
+            let both = |f: fn(&Path, &Path) -> bool| f(&path, &data) || matches!((&real, &data_real), (Some(p), Some(d)) if f(p, d));
+            if both(|p, d| p.starts_with(d)) {
+                bail!("projects.roots `{}` ({}) is MAP's data dir or inside it ({})", r.name, path.display(), data.display());
+            }
+            if both(|p, d| d.starts_with(p)) {
+                warnings.push(format!(
+                    "project folder `{}` ({}) contains MAP's data dir {}: that folder is never listed or accepted as a project folder",
+                    r.name,
+                    path.display(),
+                    data.display()
+                ));
+            }
+            match &real {
+                Some(p) if p.is_dir() => {}
+                Some(_) => warnings.push(format!("project folder `{}` ({}) is not a folder: nothing can be picked in it", r.name, path.display())),
+                None => warnings.push(format!("project folder `{}` ({}) does not exist yet: create it to pick folders in it", r.name, path.display())),
+            }
+        }
+        self.default_index = match self.default_root.as_deref().map(str::trim).filter(|n| !n.is_empty()) {
+            Some(name) => roots.iter().position(|r| r.name == name).with_context(|| {
+                format!("projects.default_root `{name}` is not one of the roots ({})", roots.iter().map(|r| r.name.as_str()).collect::<Vec<_>>().join(", "))
+            })?,
+            None => 0,
+        };
+        self.default_root = Some(roots[self.default_index].name.clone());
+        self.roots = Some(roots);
+        Ok(())
     }
 }
 
@@ -831,7 +961,9 @@ impl Config {
             *path = home(path);
         }
 
-        config.projects.root = home(&config.projects.root);
+        let mut warnings = vec![];
+        config.projects.resolve(base, &config.server.data_dir, &mut warnings)?;
+        config.warnings = warnings;
         config.projects.git_timeout_secs = config.projects.git_timeout_secs.clamp(5, 3600);
 
         let usage = &mut config.usage;
@@ -937,15 +1069,62 @@ mod tests {
         assert_eq!(c.templates.dirs, vec![home.join(".config/map/templates")]);
     }
 
+    fn projects_parse(projects: &str) -> Result<Config> {
+        Config::parse(&format!("[workspace]\ndir = \"/r\"\n[server]\ndata_dir = \"/var/map/data\"\n[projects]\n{projects}\n"), Path::new("/etc/map"))
+    }
+
     #[test]
-    fn projects_root_expands_home() {
+    fn project_folder_path_root_and_back_compat() {
         let home = PathBuf::from(std::env::var_os("HOME").unwrap());
-        let c = Config::parse("[workspace]\ndir = \"/r\"\n", Path::new("/")).unwrap();
-        assert_eq!((c.projects.root, c.projects.git_timeout_secs), (home.join("project"), 300));
-        let c = Config::parse("[workspace]\ndir = \"/r\"\n[projects]\nroot = \"/srv/code\"\ngit_timeout_secs = 1\n", Path::new("/")).unwrap();
-        assert_eq!((c.projects.root, c.projects.git_timeout_secs), (PathBuf::from("/srv/code"), 5));
+        // Nothing set: ~/project, one root named after its last component.
+        let c = projects_parse("").unwrap();
+        let root = c.projects.default_root();
+        assert_eq!((root.name.as_str(), &root.path, root.allow_root_itself, c.projects.git_timeout_secs), ("project", &home.join("project"), false, 300));
+        // `path`, and the older `root` as the same key; relative paths resolve against the config's folder.
+        let c = projects_parse(r#"path = "~/MAP/workspace""#).unwrap();
+        assert_eq!((c.projects.roots().len(), &c.projects.default_root().path, c.projects.default_root().name.as_str()), (1, &home.join("MAP/workspace"), "workspace"));
+        let c = projects_parse("root = \"/srv/code\"\ngit_timeout_secs = 1").unwrap();
+        assert_eq!((&c.projects.default_root().path, c.projects.git_timeout_secs), (&PathBuf::from("/srv/code"), 5));
+        assert_eq!(projects_parse(r#"path = "code""#).unwrap().projects.default_root().path, PathBuf::from("/etc/map/code"));
+        assert!(projects_parse("path = \"/a\"\nroot = \"/b\"").is_err(), "path and root are one key");
+        // A missing folder is a warning, not an error.
+        let c = projects_parse(r#"path = "/nonexistent/map-projects""#).unwrap();
+        assert!(c.warnings.iter().any(|w| w.contains("does not exist yet")), "{:?}", c.warnings);
         let docker = Config::parse(include_str!("../../deploy/map.docker.toml"), Path::new("/config")).unwrap();
-        assert!(docker.projects.root.is_absolute());
+        assert!(docker.projects.default_root().path.is_absolute());
+    }
+
+    #[test]
+    fn project_roots_are_validated() {
+        let c = projects_parse(
+            r#"roots = [{ name = "Projects", path = "/srv/p" }, { name = "Docker", path = "/projects", host_path = "/home/me/project", allow_root_itself = true }]
+default_root = "Docker""#,
+        )
+        .unwrap();
+        assert_eq!(c.projects.roots().len(), 2);
+        let d = c.projects.default_root();
+        assert_eq!((d.name.as_str(), d.host_path.as_deref(), d.allow_root_itself), ("Docker", Some(Path::new("/home/me/project")), true));
+        assert_eq!(projects_parse(r#"roots = [{ name = "A", path = "/a" }]"#).unwrap().projects.default_root().name, "A", "the first by default");
+        for bad in [
+            "roots = []",
+            r#"roots = [{ name = " ", path = "/a" }]"#,
+            r#"roots = [{ name = "A", path = "rel" }]"#,
+            r#"roots = [{ name = "A", path = "/a/../b" }]"#,
+            r#"roots = [{ name = "A", path = "/a" }, { name = "a", path = "/b" }]"#,
+            r#"roots = [{ name = "A", path = "/a" }, { name = "B", path = "/a/b" }]"#,
+            r#"roots = [{ name = "A", path = "/a", host_path = "rel" }]"#,
+            r#"roots = [{ name = "A", path = "/var/map/data/p" }]"#,
+            r#"roots = [{ name = "A", path = "/var/map/data" }]"#,
+            "roots = [{ name = \"A\", path = \"/a\" }]\ndefault_root = \"B\"",
+            "roots = [{ name = \"A\", path = \"/a\" }]\npath = \"/b\"",
+            "path = \"/a\"\ndefault_root = \"a\"",
+            r#"roots = [{ name = "A", path = "/a", extra = 1 }]"#,
+        ] {
+            assert!(projects_parse(bad).is_err(), "{bad}");
+        }
+        // MAP's data dir inside the project folder: allowed, with a warning (it is never listed or accepted).
+        let c = projects_parse(r#"path = "/var/map""#).unwrap();
+        assert!(c.warnings.iter().any(|w| w.contains("contains MAP's data dir")), "{:?}", c.warnings);
     }
 
     #[test]

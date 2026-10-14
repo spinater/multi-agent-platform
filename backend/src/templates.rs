@@ -688,7 +688,7 @@ mod tests {
     async fn hub_with(server: &str, extra: &str) -> (Arc<Hub>, tempfile::TempDir) {
         let dir = tempfile::tempdir().unwrap();
         let text = format!(
-            "[workspace]\ndir = \"{0}\"\n[server]\ndata_dir = \"{0}/data\"\n{server}\n[orchestrator]\nprovider_order = [\"claude\"]\nverify = [\"global-check\"]\n[orchestrator.audit]\nchain = [\"claude\"]\n[reflex]\nbinary = \"/nonexistent/reflex\"\n[providers.claude]\nbinary = \"/bin/sh\"\ncredentials = []\n[providers.codex]\nbinary = \"/nonexistent/codex\"\n[templates]\ndirs = [\"{0}/templates\"]\n{extra}\n",
+            "[projects]\npath = \"{0}\"\n[workspace]\ndir = \"{0}\"\n[server]\ndata_dir = \"{0}/data\"\n{server}\n[orchestrator]\nprovider_order = [\"claude\"]\nverify = [\"global-check\"]\n[orchestrator.audit]\nchain = [\"claude\"]\n[reflex]\nbinary = \"/nonexistent/reflex\"\n[providers.claude]\nbinary = \"/bin/sh\"\ncredentials = []\n[providers.codex]\nbinary = \"/nonexistent/codex\"\n[templates]\ndirs = [\"{0}/templates\"]\n{extra}\n",
             dir.path().display()
         );
         let config = Config::parse(&text, Path::new("/")).unwrap();

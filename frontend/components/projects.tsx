@@ -217,6 +217,11 @@ function Overview({ info }: { info: ProjectInfo }) {
           <dt className="text-muted">agents work in</dt>
           <dd className="break-all">{info.workspace}</dd>
         </dl>
+        {info.outside_roots && (
+          <p className="rounded-lg border border-warn/40 bg-warn/10 px-3 py-2 font-mono text-[11.5px] leading-normal text-warn">
+            ! outside the configured project folder ([projects] path in map.toml). Agents still work here, but a project could not be created in this folder now.
+          </p>
+        )}
         <p className="font-mono text-[11px] text-muted">The platform never copies the code or hosts it in a git repo of its own; agents change this folder directly.</p>
         <FolderTrustRows slug={p.slug} />
         <Inset className="gap-1 overflow-x-auto">

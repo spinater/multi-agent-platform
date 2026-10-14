@@ -415,7 +415,7 @@ mod tests {
             std::fs::create_dir_all(dir.path().join(sub)).unwrap();
         }
         let text = format!(
-            "[workspace]\ndir = \"{d}/ws\"\n{workspace}\n[workspace.env]\nCLAUDE_CONFIG_DIR = \"{d}/claude\"\nCODEX_HOME = \"{d}/codex\"\n[server]\ndata_dir = \"{d}/data\"\n[reflex]\nbinary = \"/nonexistent/reflex\"\n[providers.claude]\nbinary = \"/bin/sh\"\n[providers.codex]\nbinary = \"/bin/sh\"\n"
+            "[projects]\npath = \"{d}\"\n[workspace]\ndir = \"{d}/ws\"\n{workspace}\n[workspace.env]\nCLAUDE_CONFIG_DIR = \"{d}/claude\"\nCODEX_HOME = \"{d}/codex\"\n[server]\ndata_dir = \"{d}/data\"\n[reflex]\nbinary = \"/nonexistent/reflex\"\n[providers.claude]\nbinary = \"/bin/sh\"\n[providers.codex]\nbinary = \"/bin/sh\"\n"
         );
         let term = Arc::new(FakeTerminal::default());
         let hub = Hub::new(Config::parse(&text, Path::new("/")).unwrap(), Store::memory().await.unwrap(), term.clone());
