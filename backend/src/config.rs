@@ -21,6 +21,8 @@ pub struct Config {
     #[serde(default)]
     pub skills: SkillsConfig,
     #[serde(default)]
+    pub agents: AgentsConfig,
+    #[serde(default)]
     pub usage: UsageConfig,
     #[serde(default)]
     pub updates: UpdatesConfig,
@@ -215,6 +217,36 @@ impl Default for SkillsConfig {
             codex_user_dirs: vec!["~/.codex/skills".into()],
             claude_settings: "~/.claude/settings.json".into(),
             claude_transcripts: "~/.claude/projects".into(),
+        }
+    }
+}
+
+/// Where the Agents screen finds and writes custom sub-agents, per CLI. MAP writes `<name>.md` (Claude, agy) or
+/// `<name>.toml` (Codex) in the first folder of a list, and never outside these folders. `~` expands to `$HOME`;
+/// `*_project_dirs` are relative to each workspace.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct AgentsConfig {
+    /// Claude Code: Markdown with a YAML header, searched recursively.
+    pub claude_project_dirs: Vec<PathBuf>,
+    /// Codex: one TOML file per agent.
+    pub codex_project_dirs: Vec<PathBuf>,
+    /// Antigravity (`agy`, the `gemini` provider): `<name>.md` or `<name>/agent.md`.
+    pub gemini_project_dirs: Vec<PathBuf>,
+    pub claude_user_dirs: Vec<PathBuf>,
+    pub codex_user_dirs: Vec<PathBuf>,
+    pub gemini_user_dirs: Vec<PathBuf>,
+}
+
+impl Default for AgentsConfig {
+    fn default() -> Self {
+        Self {
+            claude_project_dirs: vec![".claude/agents".into()],
+            codex_project_dirs: vec![".codex/agents".into()],
+            gemini_project_dirs: vec![".agents/agents".into()],
+            claude_user_dirs: vec!["~/.claude/agents".into()],
+            codex_user_dirs: vec!["~/.codex/agents".into()],
+            gemini_user_dirs: vec!["~/.gemini/config/agents".into()],
         }
     }
 }
@@ -600,6 +632,14 @@ impl Config {
         if let Some(dir) = skills.claude_project_dirs.iter().chain(&skills.codex_project_dirs).find(|d| d.is_absolute() || d.components().any(|c| c == std::path::Component::ParentDir)) {
             bail!("skills project dir `{}` must be relative to the workspace and stay inside it", dir.display());
         }
+        let agents = &mut config.agents;
+        for dir in agents.claude_user_dirs.iter_mut().chain(agents.codex_user_dirs.iter_mut()).chain(agents.gemini_user_dirs.iter_mut()) {
+            *dir = home(dir);
+        }
+        let project_dirs = [&agents.claude_project_dirs, &agents.codex_project_dirs, &agents.gemini_project_dirs];
+        if let Some(dir) = project_dirs.iter().flat_map(|d| d.iter()).find(|d| d.is_absolute() || d.as_os_str().is_empty() || d.components().any(|c| c == std::path::Component::ParentDir)) {
+            bail!("agents project dir `{}` must be relative to the workspace and stay inside it", dir.display());
+        }
         if config.reflex.binary.contains('/') {
             config.reflex.binary = resolve(Path::new(&config.reflex.binary)).to_string_lossy().into_owned();
         }
@@ -694,6 +734,12 @@ mod tests {
         assert_eq!(c.skills.claude_user_dirs, vec![home.join("sk"), PathBuf::from("/etc/map/rel")]);
         assert_eq!(c.skills.claude_transcripts, home.join(".claude/projects"));
         assert!(Config::parse("[workspace]\ndir = \"/r\"\n[skills]\nclaude_project_dirs = [\"../x\"]\n", Path::new("/")).is_err());
+        // Agents: the same rules, with defaults for every CLI.
+        let c = Config::parse("[workspace]\ndir = \"/r\"\n", Path::new("/")).unwrap();
+        assert_eq!(c.agents.gemini_user_dirs, vec![home.join(".gemini/config/agents")]);
+        assert_eq!(c.agents.codex_project_dirs, vec![PathBuf::from(".codex/agents")]);
+        assert!(Config::parse("[workspace]\ndir = \"/r\"\n[agents]\ngemini_project_dirs = [\"/abs\"]\n", Path::new("/")).is_err());
+        assert!(Config::parse("[workspace]\ndir = \"/r\"\n[agents]\nclaude_project_dirs = [\"a/../../b\"]\n", Path::new("/")).is_err());
     }
 
     #[test]

@@ -7,6 +7,7 @@ import { setToken } from "@/lib/api";
 
 import { AppProvider, useApp } from "./app-context";
 import { AuthModal } from "./auth-modal";
+import { AgentsScreen } from "./screens/agents";
 import { CommandScreen } from "./screens/command";
 import { DecisionsScreen } from "./screens/decisions";
 import { ProjectsScreen } from "./screens/projects";
@@ -65,6 +66,8 @@ function Router() {
       return <ProjectsScreen />;
     case "skills":
       return <SkillsScreen />;
+    case "agents":
+      return <AgentsScreen />;
     case "decisions":
       return <DecisionsScreen />;
     case "reflex":

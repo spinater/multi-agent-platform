@@ -42,15 +42,41 @@ pub struct Frontmatter {
     pub body: String,
 }
 
-enum Raw {
+pub enum Raw {
     Scalar(String),
     List(Vec<String>),
+}
+
+/// One top-level key of a frontmatter header: its value, and its lines as written (so a rewrite of the file can keep
+/// the keys it does not manage).
+pub struct Field {
+    pub key: String,
+    pub value: Raw,
+    pub raw: String,
 }
 
 fn unquote(s: &str) -> String {
     let s = s.trim();
     if s.len() >= 2 && s.starts_with('"') && s.ends_with('"') {
-        return s[1..s.len() - 1].replace("\\\"", "\"").replace("\\n", " ");
+        // `\n` reads as a space: the screens show these values on one line.
+        let (mut out, mut chars) = (String::new(), s[1..s.len() - 1].chars());
+        while let Some(c) = chars.next() {
+            if c != '\\' {
+                out.push(c);
+                continue;
+            }
+            match chars.next() {
+                Some('n') => out.push(' '),
+                Some('t') => out.push('\t'),
+                Some(e @ ('"' | '\\' | '/')) => out.push(e),
+                Some(e) => {
+                    out.push('\\');
+                    out.push(e);
+                }
+                None => out.push('\\'),
+            }
+        }
+        return out;
     }
     if s.len() >= 2 && s.starts_with('\'') && s.ends_with('\'') {
         return s[1..s.len() - 1].replace("''", "'");
@@ -59,7 +85,7 @@ fn unquote(s: &str) -> String {
 }
 
 /// Splits on commas and whitespace outside parentheses: `Read, Bash(git add *) Grep` → three tools.
-fn split_tools(s: &str) -> Vec<String> {
+pub fn split_tools(s: &str) -> Vec<String> {
     let (mut out, mut cur, mut depth) = (vec![], String::new(), 0i32);
     for c in s.chars() {
         match c {
@@ -106,20 +132,19 @@ fn split_inline_list(s: &str) -> Vec<String> {
     out.into_iter().filter(|s| !s.is_empty()).collect()
 }
 
-pub fn parse_frontmatter(text: &str) -> Frontmatter {
+/// The header's top-level fields in order, and the body after it; `None` when the text has no closed `---` header.
+pub fn header_fields(text: &str) -> Option<(Vec<Field>, String)> {
     let text = text.trim_start_matches('\u{feff}');
     let lines: Vec<&str> = text.lines().collect();
     let close = if lines.first().map(|l| l.trim_end()) == Some("---") { lines.iter().skip(1).position(|l| matches!(l.trim_end(), "---" | "...")) } else { None };
-    let Some(close) = close.map(|i| i + 1) else {
-        return Frontmatter { body: text.to_string(), ..Default::default() };
-    };
+    let close = close? + 1;
     let header = &lines[1..close];
     let body = lines[close + 1..].join("\n");
 
-    let mut fields: HashMap<String, Raw> = HashMap::new();
+    let mut fields = vec![];
     let mut i = 0;
     while i < header.len() {
-        let line = header[i];
+        let (line, start) = (header[i], i);
         i += 1;
         if line.starts_with([' ', '\t', '#']) || line.trim().is_empty() {
             continue;
@@ -132,6 +157,7 @@ pub fn parse_frontmatter(text: &str) -> Frontmatter {
             cont.push(header[i].trim());
             i += 1;
         }
+        let raw = header[start..i].join("\n").trim_end().to_string();
         let cont: Vec<&str> = cont.into_iter().filter(|l| !l.is_empty()).collect();
         let value = if rest.starts_with('[') {
             Raw::List(split_inline_list(rest))
@@ -144,8 +170,17 @@ pub fn parse_frontmatter(text: &str) -> Frontmatter {
         } else {
             Raw::Scalar(unquote(&format!("{rest} {}", cont.join(" "))))
         };
-        fields.insert(key, value);
+        fields.push(Field { key, value, raw });
     }
+    Some((fields, body))
+}
+
+pub fn parse_frontmatter(text: &str) -> Frontmatter {
+    let Some((list, body)) = header_fields(text) else {
+        return Frontmatter { body: text.trim_start_matches('\u{feff}').to_string(), ..Default::default() };
+    };
+    // A key given twice: the last one wins.
+    let fields: HashMap<String, Raw> = list.into_iter().map(|f| (f.key, f.value)).collect();
     let scalar = |k: &str| match fields.get(k) {
         Some(Raw::Scalar(s)) if !s.trim().is_empty() => Some(s.trim().to_string()),
         Some(Raw::List(items)) if !items.is_empty() => Some(items.join(", ")),

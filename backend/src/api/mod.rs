@@ -1,5 +1,6 @@
 //! HTTP API under `/api` and the dashboard's static files.
 
+mod agents;
 mod git;
 mod projects;
 mod skills;
@@ -82,6 +83,9 @@ pub fn router(hub: Arc<Hub>) -> Router {
         .route("/skills", get(skills::overview))
         .route("/skills/enabled", axum::routing::patch(skills::set_enabled))
         .route("/skills/file", get(skills::file))
+        // ---- agents: custom sub-agents for Claude, Codex and agy, per workspace and user-wide (agents.rs)
+        .route("/agents", get(agents::overview).put(agents::save))
+        .route("/agents/{name}", get(agents::detail).delete(agents::delete))
         // ---- project settings and provider sign-in
         .route("/projects/defaults", get(projects::defaults))
         .route("/projects/inspect", post(projects::inspect))

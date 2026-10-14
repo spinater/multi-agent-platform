@@ -661,6 +661,184 @@ pub struct SkillFile {
     pub truncated: bool,
 }
 
+// ---- agents (custom sub-agents, backend/src/agents.rs)
+
+/// The CLIs whose sub-agent files MAP reads and writes: Claude Code, Codex, and Antigravity (`agy`, the `gemini`
+/// provider).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum AgentProvider {
+    Claude,
+    Codex,
+    Gemini,
+}
+
+/// A project's own agents (inside its folder) or the user's (in the home folder, for every project).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum AgentScope {
+    #[default]
+    Project,
+    User,
+}
+
+/// What an agent may do, mapped onto each CLI's own tools (Claude `Read`, agy `view_file`, Codex's shell switch…).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum Capability {
+    Read,
+    Search,
+    Edit,
+    Shell,
+    Web,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum Effort {
+    Low,
+    Medium,
+    High,
+    Xhigh,
+    Max,
+}
+
+/// The model per CLI; `None` inherits the session's. Claude: an alias (`opus`, `sonnet`, `haiku`, `fable`,
+/// `inherit`) or a full id; Codex: any model name; agy: `inherit`, `flash` or `pro`.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct AgentModels {
+    pub claude: Option<String>,
+    pub codex: Option<String>,
+    pub gemini: Option<String>,
+}
+
+/// One agent in MAP's own terms, rendered into each target CLI's file format.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct AgentDef {
+    /// `[a-z0-9_-]`, 1 to 64 characters, starting with a letter or digit. The CLIs find agents by this name.
+    pub name: String,
+    /// When to use it: the parent agent reads this to decide on delegating.
+    pub description: String,
+    /// The system prompt (Claude, agy: the file's body; Codex: `developer_instructions`).
+    pub instructions: String,
+    /// `None`: every tool the CLI has (no `tools` key). Some: only these.
+    pub tools: Option<Vec<Capability>>,
+    #[serde(default)]
+    pub models: AgentModels,
+    pub effort: Option<Effort>,
+    /// The CLIs to write a file for; saving removes the files of the others.
+    pub targets: Vec<AgentProvider>,
+}
+
+/// Something a CLI's format cannot express exactly, or a field a save will not keep.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct AgentNote {
+    pub provider: AgentProvider,
+    pub text: String,
+}
+
+/// One agent file as the scanner read it.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct AgentFile {
+    pub provider: AgentProvider,
+    /// Relative to the workspace for project agents, `~/…` for user agents.
+    pub path: String,
+    pub model: Option<String>,
+    /// The tool names as written in the file. Codex has no tool list: `shell_tool = false` when its shell is off.
+    pub tools: Vec<String>,
+    /// No `tools` key: the agent gets every tool.
+    pub all_tools: bool,
+    pub effort: Option<String>,
+    /// Why the CLI may not load it (a missing description, unreadable TOML…).
+    pub error: Option<String>,
+}
+
+/// One agent name in one scope, with the file each CLI has for it: the row of the compatibility matrix.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct AgentRow {
+    pub name: String,
+    pub scope: AgentScope,
+    pub description: String,
+    /// In provider order; two files of one CLI with the same name are both listed (the CLI loads one).
+    pub files: Vec<AgentFile>,
+    /// What each present CLI's file loses against the others, and what a save from MAP would change.
+    pub notes: Vec<AgentNote>,
+}
+
+/// A file that names no agent (no header, unreadable, or no `name`), so it fits no row.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct AgentFileError {
+    pub provider: AgentProvider,
+    pub scope: AgentScope,
+    pub path: String,
+    pub error: String,
+}
+
+/// A folder the scanner reads, and where saving writes first.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct AgentDir {
+    pub provider: AgentProvider,
+    pub scope: AgentScope,
+    pub path: String,
+    pub exists: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct AgentsOverview {
+    /// The project slug; `None` is `workspace.dir`.
+    pub project: Option<String>,
+    pub workspace: String,
+    pub rows: Vec<AgentRow>,
+    pub errors: Vec<AgentFileError>,
+    pub dirs: Vec<AgentDir>,
+    pub scanned_at: DateTime<Utc>,
+}
+
+/// An agent read back into MAP's terms, from its Claude file if it has one, else its agy file, else its Codex file.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct AgentDetail {
+    pub scope: AgentScope,
+    pub def: AgentDef,
+    /// The file `def` was read from.
+    pub source: AgentProvider,
+    pub files: Vec<AgentFile>,
+    pub notes: Vec<AgentNote>,
+}
+
+/// One file a save writes (`content`) or removes (`content: None`).
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct AgentChange {
+    pub provider: AgentProvider,
+    pub path: String,
+    pub content: Option<String>,
+    /// The file is there now: a write replaces it.
+    pub exists: bool,
+}
+
+/// What saving a definition would do, or did.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct AgentPlan {
+    pub changes: Vec<AgentChange>,
+    pub notes: Vec<AgentNote>,
+    /// Why it cannot be saved as it is (preview only; a save fails with this message instead).
+    pub error: Option<String>,
+}
+
 // ---- command centre
 
 /// The task pipeline from `[orchestrator]` in `map.toml`, for the command centre's PIPELINE column and its
