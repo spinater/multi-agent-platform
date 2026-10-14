@@ -27,7 +27,8 @@ nothing is tied to one repository, session name or provider.
   [Reflex](https://reflex.gist.rs) decision engine.
   - **Folder.** Tasks and sessions of a project run in its folder, in place: an existing folder (a git repo or not),
     or a new empty one MAP creates. MAP never copies, clones, hosts or pushes a project's code, and adds no files to
-    it; deleting a project leaves the folder alone. Two projects cannot share a folder or nest.
+    it unless you init it with a template (see [Init a project](#init-a-project)); deleting a project leaves the
+    folder alone. Two projects cannot share a folder or nest.
   - **Corpus.** A bare git repo of the platform's own, served at `/git/<slug>/corpus.git`: clone, push, or edit
     files from the dashboard.
   - **Decide before calling an LLM.** `POST /api/projects/<slug>/decide` asks Reflex first (local, no model, a few
@@ -95,6 +96,7 @@ nothing is tied to one repository, session name or provider.
 | `backend/src/hub.rs` | Launching and closing sessions; the single place that writes state and broadcasts it |
 | `backend/src/terminal/` | `Terminal` trait; `tmux.rs` in production, `fake.rs` in tests |
 | `backend/src/projects.rs` | Creating projects on a folder (existing or new) and deleting them; folder and corpus path rules |
+| `backend/src/templates.rs` | Project templates (built-in and `[templates] dirs`), the create/skip/append plan, laying one down, the init agent's task |
 | `backend/src/project_settings.rs` | Per-project providers, verify, audit and pause, as the orchestrator asks for them |
 | `backend/src/login.rs` | Provider sign-in state from credential files, the helper login session, URL and code parsing |
 | `backend/src/repo.rs` | The corpus repo written with git plumbing, corpus export, a read-only look at a project's folder |
@@ -210,7 +212,7 @@ all projects, read-only):
   column lists projects with "Open →", and cards offer only "Open in <project> →".
 
 Deep links: `#command/tasks`, `#command/tasks/<id>`, `#command/tasks/new`, `#command/sessions/<name>`,
-`#command/sessions/new`, `#projects/<slug>`. Every layout number lives in `TUNING` in
+`#command/sessions/new`, `#projects/<slug>`, `#projects/init/<slug>`. Every layout number lives in `TUNING` in
 `frontend/components/graph/layouts.ts`.
 
 ### Skills (`#skills`, `#skills/<name>`)
@@ -243,6 +245,31 @@ works with the last 24 h per lane, a set-up checklist that ticks itself (install
 playground), a playground with feedback, calibration on a log-scale scatter with a draggable threshold, and the
 decision log. Confidence is always shown on a log axis (1e-5 … 1e-3, widened by whole decades when a corpus scores
 outside it), never as a percentage.
+
+## Init a project
+
+"Init" on a project (`#projects/init/<slug>`, also offered right after the wizard creates one) lays a development
+process into its folder and has an init agent fill in the project-specific parts.
+
+- **Template.** A folder with a `template.toml` (`name`, `title`, `description`, `fill`: files with `MAP:FILL`
+  placeholders, `verify`: suggested verify commands, `append`, `rename`, `agents`) and the files to lay down.
+  `team-process` is built in (`backend/templates/team-process/`): `CLAUDE.md` with the process (task cards, closing a
+  card, the gate, reviewers by the cost of being wrong, questions with scenarios, docs, status file) and placeholders
+  for what the project is, read-before-touching, invariants, stack and commands, deploy and the review path list;
+  `AGENTS.md`/`GEMINI.md` pointing back to it; `tasks/{todo,todo-human,done}/` with the card template in
+  `tasks/README.md`; `.docs/{knowledge/domain,knowledge/ops,design,roadmap,runbook}/`; `scripts/verify.sh` (ALL GREEN
+  or RED, loud skips) and `scripts/task-move.sh`; `/.scratch/` and `/.env` for `.gitignore`; and five agents
+  (code-reviewer, security-reviewer, architect, qa-tester, sa-requirements), written once and rendered as
+  `.claude/agents/*.md`, `.codex/agents/*.toml` and `.agents/agents/*.md`. More templates come from `[templates] dirs`.
+- **Never overwrites.** The plan shows each file as create, skip (it exists) or append (only the missing lines of
+  `.gitignore`). Files are opened create-new, and nothing is written through a symlink.
+- **Init agent.** One definition for the whole platform (`backend/templates/init-agent.md`, or `[templates]
+  init_agent`), run with the provider and model you pick. It is queued as the task "Init project" in the project,
+  pinned to that provider, so it gets the protocol footer, the verify commands (the template's, when you tick "use
+  the template's verify commands"), the audit and retries like any task. Its prompt carries your description, the
+  files laid down and the placeholders left. It fills every placeholder, makes `scripts/verify.sh` run the stack's
+  real checks, sets up a skeleton only in a folder that was empty and only when the description asks for one, writes
+  the first cards in `tasks/todo/` from 001, never rewrites existing files, and does not commit: you review first.
 
 ## Writing tasks
 
@@ -305,6 +332,9 @@ All routes are under `/api`. When `server.api_token` is set, send `Authorization
 | GET/POST | `/projects` | List, or create (`name`, `slug`, `description`, `fallback`, `model`, `settings`); returns the project and `checks` |
 | GET/PATCH/DELETE | `/projects/{slug}` | Info (settings, Reflex status, decision counts), change (`threshold`, `fallback`, `model`, `questions`, `settings`, `paused`…), delete |
 | GET | `/projects/defaults` | The `map.toml` values projects inherit (provider order, verify, audit, max_parallel, post_done) |
+| GET | `/templates` | Templates with their files and placeholders (built in, then `[templates] dirs`) |
+| POST | `/projects/{slug}/init/plan` | `{"template"}`: per file `create`, `skip` (exists) or `append` (missing lines); writes nothing |
+| POST | `/projects/{slug}/init` | `{"template", "description", "provider", "model"?, "set_verify"}`: writes the plan, optionally sets the project's verify to the template's, queues the "Init project" task; returns `plan`, `checks` and `task` |
 | POST | `/projects/inspect` | `{"kind": "local"\|"empty", "location"}`: the folder's git branch, branches, commits and top-level entries, or whether a new folder can go there |
 | GET/POST | `/providers/{name}/login` | Sign-in state (parsed URL, one-time code, credential check), or start the helper login session |
 | GET | `/projects/{slug}/repos/corpus` | Files and recent commits |

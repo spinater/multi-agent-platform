@@ -22,6 +22,8 @@ pub struct Config {
     pub skills: SkillsConfig,
     #[serde(default)]
     pub usage: UsageConfig,
+    #[serde(default)]
+    pub templates: TemplatesConfig,
     /// Overrides merged onto the built-in `claude`, `codex` and `gemini` specs; new names add providers.
     #[serde(default, rename = "providers")]
     provider_overrides: BTreeMap<String, ProviderOverride>,
@@ -264,6 +266,23 @@ impl Default for UsageProviderConfig {
     }
 }
 
+/// Project templates (`backend/src/templates.rs`): folders with a `template.toml`, next to the built-in ones, and
+/// the init agent's instructions. Paths may start with `~/`.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct TemplatesConfig {
+    /// Each folder's subfolders that hold a `template.toml` are templates. Missing folders are ignored.
+    pub dirs: Vec<PathBuf>,
+    /// The init agent's instructions; unset: the ones built into the binary (`backend/templates/init-agent.md`).
+    pub init_agent: Option<PathBuf>,
+}
+
+impl Default for TemplatesConfig {
+    fn default() -> Self {
+        Self { dirs: vec!["~/.config/map/templates".into()], init_agent: None }
+    }
+}
+
 /// `~` or `~/…` becomes `$HOME/…`; other paths are unchanged.
 pub fn expand_home(p: &Path) -> PathBuf {
     let Ok(rest) = p.strip_prefix("~") else { return p.to_path_buf() };
@@ -501,6 +520,14 @@ impl Config {
             config.reflex.binary = resolve(Path::new(&config.reflex.binary)).to_string_lossy().into_owned();
         }
 
+        let templates = &mut config.templates;
+        for dir in &mut templates.dirs {
+            *dir = home(dir);
+        }
+        if let Some(path) = &mut templates.init_agent {
+            *path = home(path);
+        }
+
         let usage = &mut config.usage;
         for p in [&mut usage.claude_credentials, &mut usage.claude_projects, &mut usage.codex_sessions, &mut usage.codex_auth] {
             *p = resolve(&expand_home(p));
@@ -553,6 +580,17 @@ mod tests {
         assert_eq!(c.reflex.port_base, 7400);
         assert_eq!(c.skills.context_files["codex"], "AGENTS.md");
         assert_eq!(c.usage.skip_pct, 90.0);
+        assert_eq!(c.templates.dirs.len(), 1);
+    }
+
+    #[test]
+    fn template_paths_expand_home() {
+        let home = PathBuf::from(std::env::var_os("HOME").unwrap());
+        let c = Config::parse("[workspace]\ndir = \"/r\"\n[templates]\ndirs = [\"~/t\", \"rel\"]\ninit_agent = \"agent.md\"\n", Path::new("/etc/map")).unwrap();
+        assert_eq!(c.templates.dirs, vec![home.join("t"), PathBuf::from("/etc/map/rel")]);
+        assert_eq!(c.templates.init_agent, Some(PathBuf::from("/etc/map/agent.md")));
+        let c = Config::parse("[workspace]\ndir = \"/r\"\n", Path::new("/")).unwrap();
+        assert_eq!(c.templates.dirs, vec![home.join(".config/map/templates")]);
     }
 
     #[test]
