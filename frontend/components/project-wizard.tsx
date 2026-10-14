@@ -10,6 +10,7 @@ import type { SourceInspection } from "@/lib/generated/SourceInspection";
 import type { SourceKind } from "@/lib/generated/SourceKind";
 
 import { useApp } from "./app-context";
+import { GitAccessDialog, useGitAccess } from "./git-access";
 import {
   Btn,
   Check,
@@ -30,7 +31,7 @@ import {
 } from "./project-ui";
 
 const STEPS: [string, string][] = [
-  ["Folder", "existing · new"],
+  ["Folder", "existing · new · clone"],
   ["Identity", "name · prefix"],
   ["Providers", "order · parallel"],
   ["Checks", "verify · audit"],
@@ -49,7 +50,9 @@ export function slugify(name: string): string {
 
 const base = (p: string) => p.trim().replace(/\/+$/, "").split("/").pop() ?? "";
 
-type Source = { kind: SourceKind; location: string };
+type Source = { kind: SourceKind; location: string; url: string; branch: string };
+
+const failedInspection: SourceInspection = { ok: false, error: null, default_branch: null, branches: [], files: [], commits: null, hint: null, folder: null };
 
 /** The 5-step "New project" wizard (Projects.dc.html). A project is a folder on this machine that agents work in
  * directly, an existing one or a new empty one; the platform never copies or hosts the code. The settings are stored
@@ -58,7 +61,14 @@ export function ProjectWizard({ onClose, onCreated, initialStep = 0 }: { onClose
   const { providers, server, openAuth } = useApp();
   const defaults = useDefaults();
   const [step, setStep] = useState(initialStep);
-  const [source, setSource] = useState<Source>({ kind: "local", location: "" });
+  const [source, setSource] = useState<Source>({ kind: "local", location: "", url: "", branch: "" });
+  const [folderTouched, setFolderTouched] = useState(false);
+  const [remoteInspection, setRemoteInspection] = useState<SourceInspection | null>(null);
+  const [remoteChecking, setRemoteChecking] = useState(false);
+  const [gitDialog, setGitDialog] = useState(false);
+  // Bumped when the Git access dialog closes, so the repo is looked at again with a new key.
+  const [recheck, setRecheck] = useState(0);
+  const gitAccess = useGitAccess();
   const [name, setName] = useState("");
   const [nameTouched, setNameTouched] = useState(false);
   const [slug, setSlug] = useState("");
@@ -75,42 +85,69 @@ export function ProjectWizard({ onClose, onCreated, initialStep = 0 }: { onClose
   const patch = (p: Partial<SettingsForm>) => rows && setForm({ ...rows, ...p });
 
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    // Escape closes the Git access dialog first, when it is open on top.
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && !gitDialog && onClose();
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
+  }, [onClose, gitDialog]);
 
-  // Look at the folder as it is typed (git branch, commits, top-level files; or that a new one is free).
-  const location = source.location.trim();
+  // A repo to clone: `git ls-remote` as the URL is typed (default branch, branches, or why the host refused).
+  const cloning = source.kind === "clone";
+  const url = source.url.trim();
+  const branch = source.branch.trim();
+  useEffect(() => {
+    if (!cloning || !url) return;
+    let stale = false;
+    const t = window.setTimeout(() => {
+      setRemoteChecking(true);
+      api
+        .inspectSource({ kind: "clone", location: url, branch: branch || undefined })
+        .then((r) => !stale && setRemoteInspection(r))
+        .catch((e) => !stale && setRemoteInspection({ ...failedInspection, error: errText(e) }))
+        .finally(() => !stale && setRemoteChecking(false));
+    }, 700);
+    return () => {
+      stale = true;
+      window.clearTimeout(t);
+    };
+  }, [cloning, url, branch, recheck]);
+  const remoteSeen = cloning && url ? remoteInspection : null;
+
+  // Look at the folder as it is typed (git branch, commits, top-level files; or that a new one is free). A clone
+  // goes into `<projects root>/<repo name>` unless another folder is typed.
+  const location = (cloning && !folderTouched ? (remoteSeen?.folder ?? "") : source.location).trim();
   const ready = /^(\/|~\/)./.test(location);
+  const folderKind: SourceKind = cloning ? "empty" : source.kind;
   useEffect(() => {
     if (!ready) return;
     let stale = false;
     const t = window.setTimeout(() => {
       setInspecting(true);
       api
-        .inspectSource({ kind: source.kind, location })
+        .inspectSource({ kind: folderKind, location })
         .then((r) => !stale && setInspection(r))
-        .catch((e) => !stale && setInspection({ ok: false, error: errText(e), default_branch: null, branches: [], files: [], commits: null }))
+        .catch((e) => !stale && setInspection({ ...failedInspection, error: errText(e) }))
         .finally(() => !stale && setInspecting(false));
     }, 600);
     return () => {
       stale = true;
       window.clearTimeout(t);
     };
-  }, [ready, source.kind, location]);
+  }, [ready, folderKind, location]);
   const seen = ready ? inspection : null;
 
-  const shownName = nameTouched ? name : base(source.location);
+  const shownName = nameTouched ? name : base(location);
   const shownSlug = slug || slugify(shownName);
   const prefix = server?.session_prefix ?? defaults?.session_prefix ?? "map-";
-  const sourceValue = { kind: source.kind, location: location || null, branch: null };
+  const sourceValue = cloning
+    ? { kind: source.kind, location: location || null, branch: branch || null, remote: url || null }
+    : { kind: source.kind, location: location || null, branch: null, remote: null };
   const settings = rows ? settingsFromForm(rows, defaults, sourceValue) : null;
   const toml = settings ? tomlLines({ name: shownName, slug: shownSlug, description, fallback, model: "" }, settings, defaults) : [];
 
   const canNext =
     step === 0
-      ? ready && seen?.ok === true
+      ? ready && seen?.ok === true && (!cloning || remoteSeen?.ok === true)
       : step === 1
         ? shownName.trim().length > 0 && /^[a-z0-9][a-z0-9-]{0,38}[a-z0-9]$/.test(shownSlug)
         : step === 2
@@ -182,27 +219,76 @@ export function ProjectWizard({ onClose, onCreated, initialStep = 0 }: { onClose
               <>
                 <Heading title="Which folder do agents work in?">
                   A folder on this machine. Agents work in it directly: the platform never copies the code, never hosts it in a git repo of its own and
-                  adds no files to it.
+                  adds no files to it. It can clone a repo into a new folder for you, with its own SSH key.
                 </Heading>
-                <Segmented<SourceKind>
-                  value={source.kind}
-                  options={[
-                    ["local", "Folder on this machine"],
-                    ["empty", "New folder"],
-                  ]}
-                  onChange={(kind) => {
-                    setSource({ ...source, kind });
-                    setInspection(null);
-                  }}
-                />
-                <Field label={source.kind === "local" ? "Folder" : "New folder"} hint="An absolute path, or ~/…, on the machine the platform runs on.">
-                  <TextInput value={source.location} onChange={(e) => setSource({ ...source, location: e.target.value })} placeholder="~/project/my-app" autoFocus />
+                <div className="flex max-w-full overflow-x-auto">
+                  <Segmented<SourceKind>
+                    value={source.kind}
+                    options={[
+                      ["local", "Existing"],
+                      ["empty", "New folder"],
+                      ["clone", "Clone from git"],
+                    ]}
+                    onChange={(kind) => {
+                      setSource({ ...source, kind });
+                      setInspection(null);
+                    }}
+                  />
+                </div>
+                {cloning && (
+                  <>
+                    <div className="grid gap-[18px] sm:grid-cols-[minmax(0,1fr)_170px]">
+                      <Field label="Repo URL" hint="An ssh URL uses MAP's key; https works for public repos only (MAP takes no tokens).">
+                        <TextInput value={source.url} onChange={(e) => setSource({ ...source, url: e.target.value })} placeholder="git@github.com:you/app.git" autoFocus />
+                      </Field>
+                      <Field label="Branch" hint="Empty: the default.">
+                        <TextInput value={source.branch} onChange={(e) => setSource({ ...source, branch: e.target.value })} placeholder={remoteSeen?.default_branch ?? "main"} />
+                      </Field>
+                    </div>
+                    {url && (
+                      <Inset>
+                        <span className="break-all text-muted">{remoteChecking ? `git ls-remote ${url}…` : `git ls-remote ${url}`}</span>
+                        {remoteSeen?.ok && (
+                          <span className="text-ok">
+                            ✓ reachable · default branch {remoteSeen.default_branch ?? "(none: an empty repo)"} · {remoteSeen.branches.length} branch
+                            {remoteSeen.branches.length === 1 ? "" : "es"}
+                            {remoteSeen.branches.length > 0 && remoteSeen.branches.length <= 8 && `: ${remoteSeen.branches.join(", ")}`}
+                          </span>
+                        )}
+                        {remoteSeen?.error && <span className="break-words whitespace-pre-wrap text-bad">✗ {remoteSeen.error}</span>}
+                        {remoteSeen?.hint && <span className="text-warn">! {remoteSeen.hint}</span>}
+                      </Inset>
+                    )}
+                    <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 font-mono text-[11px] text-muted">
+                      <span className="break-all">
+                        {gitAccess.access?.key ? `MAP's key ${gitAccess.access.key.fingerprint}` : gitAccess.access ? "MAP has no SSH key yet: private repos over ssh need one" : "MAP's key…"}
+                      </span>
+                      <button type="button" onClick={() => setGitDialog(true)} className="text-link hover:text-link-hover">
+                        Git access →
+                      </button>
+                    </div>
+                  </>
+                )}
+                <Field
+                  label={source.kind === "local" ? "Folder" : cloning ? "Clone into" : "New folder"}
+                  hint={cloning ? "A new or empty folder; by default the repo's name under [projects] root." : "An absolute path, or ~/…, on the machine the platform runs on."}
+                >
+                  <TextInput
+                    value={cloning && !folderTouched ? location : source.location}
+                    onChange={(e) => {
+                      setSource({ ...source, location: e.target.value });
+                      setFolderTouched(true);
+                    }}
+                    placeholder={cloning ? "~/project/app" : "~/project/my-app"}
+                    autoFocus={!cloning}
+                  />
                 </Field>
                 {ready && (
                   <Inset>
                     <span className="text-muted">{inspecting ? `looking at ${location}…` : location}</span>
                     {seen?.error && <span className="text-bad">✗ {seen.error}</span>}
                     {seen?.ok && source.kind === "empty" && <span className="text-ok">✓ free: the folder will be created empty</span>}
+                    {seen?.ok && cloning && <span className="text-ok">✓ free: git clone makes it a normal folder project, used in place</span>}
                     {seen?.ok && source.kind === "local" && (
                       <>
                         {seen.default_branch ? (
@@ -321,6 +407,17 @@ export function ProjectWizard({ onClose, onCreated, initialStep = 0 }: { onClose
           </div>
         </div>
       </div>
+      {gitDialog && (
+        <div onClick={(e) => e.stopPropagation()}>
+          <GitAccessDialog
+            onClose={() => {
+              setGitDialog(false);
+              gitAccess.reload();
+              setRecheck((r) => r + 1);
+            }}
+          />
+        </div>
+      )}
     </div>
   );
 }

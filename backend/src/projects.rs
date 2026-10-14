@@ -1,5 +1,5 @@
-//! Creating, changing and removing projects. A project is two bare repos (code and corpus), the workspace agents
-//! use, and a Reflex engine; this module keeps the four in step.
+//! Creating, changing and removing projects. A project is a folder on this machine (existing, new, or cloned from a
+//! git repo), its corpus repo and a Reflex engine; this module keeps the three in step.
 
 use std::collections::BTreeSet;
 
@@ -125,15 +125,16 @@ pub(crate) fn corpus_seed() -> Vec<(String, Option<String>)> {
 #[cfg(test)]
 pub async fn create(hub: &Hub, req: NewProject) -> Result<Project> {
     let folder = hub.config.server.data_dir.with_file_name("folders").join(slugify(&req.name));
-    let source = crate::model::ProjectSource { kind: SourceKind::Empty, location: Some(folder.display().to_string()), branch: None };
+    let source = crate::model::ProjectSource { kind: SourceKind::Empty, location: Some(folder.display().to_string()), ..Default::default() };
     create_with(hub, req, ProjectSettings { source, ..Default::default() }).await.map(|(p, _)| p)
 }
 
 /// Checks the project's folder and returns it as an absolute path: an existing folder for `local`, a missing or
-/// empty one for `empty` (created by the caller). Folders that are the platform's own or another project's are refused.
+/// empty one for `empty` and `clone` (created or cloned into by the caller). Folders that are the platform's own or
+/// another project's are refused.
 async fn project_folder(hub: &Hub, kind: SourceKind, location: Option<&str>, slug: &str) -> Result<std::path::PathBuf> {
     if kind == SourceKind::Git {
-        bail!("the platform works on folders on this machine and never clones code: clone the repo yourself, then add its folder");
+        bail!("the platform no longer clones into its own data folder: use \"clone\" to clone the repo into a folder on this machine");
     }
     let path = crate::login::expand_home(location.unwrap_or_default().trim());
     let path = match kind {
@@ -167,8 +168,9 @@ fn check(checks: &mut Vec<CheckLine>, level: Level, text: impl Into<String>) {
     checks.push(CheckLine { level, text: text.into() });
 }
 
-/// Creates a project on its folder (existing, used in place, or new and empty), its corpus repo and its Reflex, and
-/// reports each step as a check line. The folder is never copied or written to.
+/// Creates a project on its folder (existing, used in place; new and empty; or a new clone of a git repo, made with
+/// MAP's gitconfig), its corpus repo and its Reflex, and reports each step as a check line. An existing folder is
+/// never copied or written to. A cloned project is stored as `local`, with the URL kept as `source.remote`.
 pub async fn create_with(hub: &Hub, req: NewProject, settings: ProjectSettings) -> Result<(Project, Vec<CheckLine>)> {
     let mut settings = project_settings::normalize(settings);
     project_settings::validate(hub, &settings)?;
@@ -198,15 +200,30 @@ pub async fn create_with(hub: &Hub, req: NewProject, settings: ProjectSettings) 
     };
     let folder = project_folder(hub, settings.source.kind, settings.source.location.as_deref(), &slug).await?;
     settings.source.location = Some(folder.display().to_string());
-    settings.source.branch = None;
+    let clone_branch = settings.source.branch.take();
+    if settings.source.kind != SourceKind::Clone && settings.source.kind != SourceKind::Local {
+        settings.source.remote = None;
+    }
     let mut checks = vec![];
     let mut created_folder = false;
+    let mut cloned = false;
     let setup = async {
         let corpus = hub.corpus_repo(&slug);
         if settings.source.kind == SourceKind::Empty {
             created_folder = !folder.exists();
             std::fs::create_dir_all(&folder).with_context(|| format!("creating {}", folder.display()))?;
             check(&mut checks, Level::Success, format!("folder created · {}", folder.display()));
+        } else if settings.source.kind == SourceKind::Clone {
+            let url = settings.source.remote.clone().context("a clone needs the repo's URL")?;
+            created_folder = !folder.exists();
+            let timeout = std::time::Duration::from_secs(hub.config.projects.git_timeout_secs);
+            let has_key = hub.git_files().key().is_file();
+            crate::project_git::clone(&hub.gitconfig(), &url, clone_branch.as_deref(), &folder, timeout, has_key).await?;
+            cloned = true;
+            let found = repo::inspect_folder(&folder).await;
+            let commits = found.commits.map(|n| format!(" · {n} commit{}", if n == 1 { "" } else { "s" })).unwrap_or_default();
+            check(&mut checks, Level::Success, format!("cloned {url} into {} · branch {}{commits}", folder.display(), found.default_branch.as_deref().unwrap_or("(none)")));
+            settings.source.kind = SourceKind::Local;
         } else {
             let found = repo::inspect_folder(&folder).await;
             let git = match (&found.default_branch, found.commits) {
@@ -228,9 +245,15 @@ pub async fn create_with(hub: &Hub, req: NewProject, settings: ProjectSettings) 
         hub.put_project(&Project { settings: settings.clone(), ..project.clone() }).await
     };
     if let Err(err) = setup.await {
-        // Only the platform's own files: the project's folder is removed only when it was created here and is still empty.
+        // Only the platform's own files: the project's folder is removed only when it was created here and is still
+        // empty, or when this call cloned into it (it was missing or empty before).
         let _ = std::fs::remove_dir_all(hub.project_dir(&slug));
-        if created_folder {
+        if cloned {
+            let _ = std::fs::remove_dir_all(&folder);
+            if !created_folder {
+                let _ = std::fs::create_dir(&folder);
+            }
+        } else if created_folder {
             let _ = std::fs::remove_dir(&folder);
         }
         let _ = hub.store.delete_project(&slug).await;

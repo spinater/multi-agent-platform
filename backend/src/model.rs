@@ -215,7 +215,7 @@ pub enum ServerMessage {
     },
     Orchestrator { status: OrchestratorStatus },
     /// A project was created or changed, its Reflex engine changed state, or it recorded a decision.
-    Project { project: ProjectInfo },
+    Project { project: Box<ProjectInfo> },
     ProjectRemoved { slug: String },
     /// The client fell behind and missed messages; reload `/api/overview`.
     Resync,
@@ -402,7 +402,7 @@ pub struct RepoFile {
     pub size: u64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[ts(export)]
 pub struct Commit {
     pub sha: String,
@@ -863,8 +863,8 @@ pub struct PipelineInfo {
 
 // ---- project settings
 
-/// The folder a project's agents work in. The platform works on folders on this machine in place: it never copies,
-/// clones or hosts a project's code.
+/// The folder a project's agents work in. The platform works on folders on this machine in place: it never copies
+/// or hosts a project's code. It may run git in that folder for you (clone, fetch, pull, push).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
 #[serde(rename_all = "snake_case")]
 #[ts(export)]
@@ -876,18 +876,27 @@ pub enum SourceKind {
     Git,
     /// A folder already on this machine, used as it is.
     Local,
+    /// Only when creating: `remote` is cloned (`git clone`, not bare) into a new or empty folder at `location`, which
+    /// is then stored as a `local` project with `remote` kept.
+    Clone,
 }
 
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, TS)]
 #[ts(export)]
 pub struct ProjectSource {
     pub kind: SourceKind,
-    /// The project's folder on this machine (`empty`, `local`), or the URL a legacy `git` project was cloned from.
+    /// The project's folder on this machine (`empty`, `local`, `clone`), or the URL a legacy `git` project was cloned
+    /// from.
     #[serde(default)]
     pub location: Option<String>,
-    /// The branch a legacy `git` project was cloned from; unused for folders.
+    /// For `clone`, the branch to check out (empty: the remote's default). The branch a legacy `git` project was
+    /// cloned from. Unused for folders: their own checkout is what counts.
     #[serde(default)]
     pub branch: Option<String>,
+    /// The repo the folder was cloned from, or last connected as `origin` from the dashboard. Informational: the
+    /// folder's own `origin` is what git uses.
+    #[serde(default)]
+    pub remote: Option<String>,
 }
 
 /// One provider a project's tasks may use, in order of preference.
@@ -1012,6 +1021,12 @@ pub struct SourceInspection {
     pub files: Vec<String>,
     #[ts(type = "number | null")]
     pub commits: Option<u64>,
+    /// For a git URL: what to do about an error (e.g. add MAP's public key to the host).
+    #[serde(default)]
+    pub hint: Option<String>,
+    /// For a git URL: the suggested folder, `<projects.root>/<repo name>`.
+    #[serde(default)]
+    pub folder: Option<String>,
 }
 
 /// How a provider signs in, from its spec in `map.toml`. Never carries a secret.
@@ -1499,4 +1514,103 @@ pub struct InitStarted {
     pub plan: InitPlan,
     pub checks: Vec<CheckLine>,
     pub task: Task,
+}
+
+// ---- git access: MAP's SSH key, git identity and gitconfig (git_access.rs), and a project folder's sync state
+
+/// MAP's own SSH key (`<data_dir>/git/id_ed25519`). Only the public half ever leaves the server.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct GitKey {
+    /// The `.pub` line, `ssh-ed25519 AAAA… map@host`: what you paste into GitHub or GitLab.
+    pub public_key: String,
+    /// `SHA256:…`, as GitHub and GitLab show it next to a key.
+    pub fingerprint: String,
+    pub created_at: DateTime<Utc>,
+    pub comment: String,
+}
+
+/// The author name and email MAP's gitconfig sets for agents and MAP's own commits in project folders. Not secret.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct GitIdentity {
+    pub name: String,
+    pub email: String,
+}
+
+/// One host key in MAP's `known_hosts`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct KnownHost {
+    /// `github.com`, or `[host]:port`.
+    pub host: String,
+    /// `ED25519`, `ECDSA`, `RSA`.
+    pub key_type: String,
+    pub fingerprint: String,
+    /// Shipped with MAP from the host's published keys; otherwise recorded on first use.
+    pub pinned: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct GitAccess {
+    pub key: Option<GitKey>,
+    pub identity: GitIdentity,
+    pub known_hosts: Vec<KnownHost>,
+    /// MAP's gitconfig, exported as `GIT_CONFIG_GLOBAL` to agents and used for MAP's own git commands.
+    pub gitconfig_path: String,
+    /// The user's own global git config files it includes (they win over MAP's defaults).
+    pub includes: Vec<String>,
+    /// `[projects] root`: where "Clone from git" puts new folders by default.
+    pub projects_root: String,
+    /// `ssh-keygen` and `ssh` were found on PATH.
+    pub ssh_available: bool,
+}
+
+/// `POST /api/git/test`: `ssh -T` to a host with MAP's key.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct GitTestResult {
+    /// The host greeted the key (GitHub: "successfully authenticated", GitLab: "Welcome to GitLab").
+    pub ok: bool,
+    pub host: String,
+    pub command: String,
+    pub output: String,
+    /// The host's keys as now recorded in MAP's `known_hosts`.
+    pub host_keys: Vec<KnownHost>,
+}
+
+/// A project folder's git state (`GET /api/projects/{slug}/git`).
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct GitStatus {
+    /// The folder itself is the top of a git work tree (a repo further up does not count).
+    pub is_repo: bool,
+    /// The branch checked out; `None` when detached or not a repo.
+    pub branch: Option<String>,
+    /// `origin/main`: the branch's upstream.
+    pub upstream: Option<String>,
+    /// `origin`'s URL, with any password in it masked.
+    pub remote_url: Option<String>,
+    /// Commits on the branch not on its upstream; `None` without an upstream.
+    pub ahead: Option<u32>,
+    pub behind: Option<u32>,
+    /// Changed, staged and untracked files.
+    pub dirty: u32,
+    /// When `origin` was last fetched (`FETCH_HEAD`).
+    pub last_fetch: Option<DateTime<Utc>>,
+    pub last_commit: Option<Commit>,
+    /// Why pull, push and connecting a remote are refused right now (a task of the project is running).
+    pub busy: Option<String>,
+}
+
+/// What a fetch, pull, push or remote change did.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct GitOpResult {
+    pub ok: bool,
+    /// The git commands run, one per line.
+    pub command: String,
+    pub output: String,
+    pub status: GitStatus,
 }

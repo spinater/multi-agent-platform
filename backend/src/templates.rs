@@ -696,7 +696,7 @@ mod tests {
     }
 
     async fn project(hub: &Hub, folder: &Path) -> String {
-        let settings = ProjectSettings { source: ProjectSource { kind: SourceKind::Local, location: Some(folder.display().to_string()), branch: None }, ..Default::default() };
+        let settings = ProjectSettings { source: ProjectSource { kind: SourceKind::Local, location: Some(folder.display().to_string()), ..Default::default() }, ..Default::default() };
         let new = NewProject { name: "App".into(), slug: None, description: String::new(), fallback: Some("none".into()), model: None };
         create_with(hub, new, settings).await.unwrap().0.slug
     }

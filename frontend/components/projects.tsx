@@ -10,6 +10,7 @@ import type { ProviderInfo } from "@/lib/generated/ProviderInfo";
 import type { RepoListing } from "@/lib/generated/RepoListing";
 
 import { useApp } from "./app-context";
+import { ProjectGit } from "./git-access";
 import {
   Btn,
   Check,
@@ -164,6 +165,8 @@ function Overview({ info }: { info: ProjectInfo }) {
         </Inset>
         <p className="font-mono text-[11px] text-muted">With server.api_token set, git asks for a password: use the token.</p>
       </Box>
+
+      <ProjectGit info={info} />
 
       <Box title="Activity" note={`${f.live} live sessions`}>
         <TaskBar f={f} />

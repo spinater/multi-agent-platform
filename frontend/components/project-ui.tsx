@@ -505,7 +505,10 @@ export function tomlLines(
   sec("[project.source]");
   kv("kind", q(s.source.kind));
   if (s.source.location) kv("location", q(s.source.location));
-  if (s.source.kind === "empty") c("a new, empty folder; agents work in it directly");
+  if (s.source.remote) kv("remote", q(s.source.remote));
+  if (s.source.kind === "clone" && s.source.branch) kv("branch", q(s.source.branch));
+  if (s.source.kind === "clone") c("git clone into a new folder with MAP's gitconfig, then stored as a local folder used in place");
+  else if (s.source.kind === "empty") c("a new, empty folder; agents work in it directly");
   else if (s.source.kind === "local") c("an existing folder, used in place; the platform never copies or hosts the code");
   blank();
   sec("[project.orchestrator]");

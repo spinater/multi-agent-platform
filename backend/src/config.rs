@@ -28,6 +28,8 @@ pub struct Config {
     pub updates: UpdatesConfig,
     #[serde(default)]
     pub templates: TemplatesConfig,
+    #[serde(default)]
+    pub projects: ProjectsConfig,
     /// Overrides merged onto the built-in `claude`, `codex` and `gemini` specs; new names add providers.
     #[serde(default, rename = "providers")]
     provider_overrides: BTreeMap<String, ProviderOverride>,
@@ -379,6 +381,22 @@ impl Default for TemplatesConfig {
     }
 }
 
+/// Where projects cloned from a git repo go, and how long MAP waits for git on the network.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct ProjectsConfig {
+    /// "Clone from git" suggests `<root>/<repo name>` as the new project's folder. `~/` is `$HOME`.
+    pub root: PathBuf,
+    /// Timeout for git commands MAP runs over the network (clone, ls-remote, fetch, pull, push).
+    pub git_timeout_secs: u64,
+}
+
+impl Default for ProjectsConfig {
+    fn default() -> Self {
+        Self { root: "~/project".into(), git_timeout_secs: 300 }
+    }
+}
+
 /// `~` or `~/…` becomes `$HOME/…`; other paths are unchanged.
 pub fn expand_home(p: &Path) -> PathBuf {
     let Ok(rest) = p.strip_prefix("~") else { return p.to_path_buf() };
@@ -696,6 +714,9 @@ impl Config {
             *path = home(path);
         }
 
+        config.projects.root = home(&config.projects.root);
+        config.projects.git_timeout_secs = config.projects.git_timeout_secs.clamp(5, 3600);
+
         let usage = &mut config.usage;
         for p in [&mut usage.claude_credentials, &mut usage.claude_projects, &mut usage.codex_sessions, &mut usage.codex_auth] {
             *p = resolve(&expand_home(p));
@@ -797,6 +818,17 @@ mod tests {
         assert_eq!(c.templates.init_agent, Some(PathBuf::from("/etc/map/agent.md")));
         let c = Config::parse("[workspace]\ndir = \"/r\"\n", Path::new("/")).unwrap();
         assert_eq!(c.templates.dirs, vec![home.join(".config/map/templates")]);
+    }
+
+    #[test]
+    fn projects_root_expands_home() {
+        let home = PathBuf::from(std::env::var_os("HOME").unwrap());
+        let c = Config::parse("[workspace]\ndir = \"/r\"\n", Path::new("/")).unwrap();
+        assert_eq!((c.projects.root, c.projects.git_timeout_secs), (home.join("project"), 300));
+        let c = Config::parse("[workspace]\ndir = \"/r\"\n[projects]\nroot = \"/srv/code\"\ngit_timeout_secs = 1\n", Path::new("/")).unwrap();
+        assert_eq!((c.projects.root, c.projects.git_timeout_secs), (PathBuf::from("/srv/code"), 5));
+        let docker = Config::parse(include_str!("../../deploy/map.docker.toml"), Path::new("/config")).unwrap();
+        assert!(docker.projects.root.is_absolute());
     }
 
     #[test]

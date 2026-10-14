@@ -286,7 +286,7 @@ mod tests {
     }
 
     async fn project(hub: &Hub, dir: &Path, name: &str, gates: ReflexGates) -> (String, Vec<CheckLine>) {
-        let source = ProjectSource { kind: SourceKind::Empty, location: Some(dir.join(name).display().to_string()), branch: None };
+        let source = ProjectSource { kind: SourceKind::Empty, location: Some(dir.join(name).display().to_string()), branch: None, remote: None };
         let new = NewProject { name: name.into(), slug: None, description: String::new(), fallback: Some("none".into()), model: None };
         let (p, checks) = create_with(hub, new, ProjectSettings { source, reflex_gates: gates, ..Default::default() }).await.unwrap();
         (p.slug, checks)

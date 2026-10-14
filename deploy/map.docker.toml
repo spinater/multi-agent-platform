@@ -36,3 +36,10 @@ binary = "agy"
 
 [reflex]
 binary = "/usr/local/bin/reflex"
+
+[projects]
+# "Clone from git" puts new projects here: set it to MAP_PROJECTS_DIR from .env (mounted at the same path).
+root = "/home/you/project"
+# MAP's SSH key, known_hosts and gitconfig live in /data/map/git (MAP_DIR/data on the host), so cloning, pulling and
+# pushing work without mounting ~/.ssh. Create the key under Projects → Git access and add its public half to
+# GitHub or GitLab.

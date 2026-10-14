@@ -15,4 +15,12 @@ branches: Array<string>,
 /**
  * What is at the top of the folder (`Cargo.toml`, `package.json`, `CLAUDE.md`, …).
  */
-files: Array<string>, commits: number | null, };
+files: Array<string>, commits: number | null, 
+/**
+ * For a git URL: what to do about an error (e.g. add MAP's public key to the host).
+ */
+hint: string | null, 
+/**
+ * For a git URL: the suggested folder, `<projects.root>/<repo name>`.
+ */
+folder: string | null, };

@@ -1,4 +1,4 @@
-# One image: the Rust server, the exported dashboard, tmux, git and a pinned Reflex.
+# One image: the Rust server, the exported dashboard, tmux, git, ssh (for MAP's own git key) and a pinned Reflex.
 # The agent CLIs (claude, codex, agy) and their sign-ins stay on the host and are mounted at the same paths
 # (see docker-compose.yml), so the container and the host share one login per account.
 
@@ -22,7 +22,7 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
 FROM ubuntu:26.04
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends bash ca-certificates curl git less procps tini tmux \
+    && apt-get install -y --no-install-recommends bash ca-certificates curl git less openssh-client procps tini tmux \
     && rm -rf /var/lib/apt/lists/*
 
 # Reflex (https://reflex.gist.rs), pinned and checked against the release's SHA256SUMS.

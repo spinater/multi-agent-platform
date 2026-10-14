@@ -3,10 +3,17 @@ import type { SourceKind } from "./SourceKind";
 
 export type ProjectSource = { kind: SourceKind, 
 /**
- * The project's folder on this machine (`empty`, `local`), or the URL a legacy `git` project was cloned from.
+ * The project's folder on this machine (`empty`, `local`, `clone`), or the URL a legacy `git` project was cloned
+ * from.
  */
 location: string | null, 
 /**
- * The branch a legacy `git` project was cloned from; unused for folders.
+ * For `clone`, the branch to check out (empty: the remote's default). The branch a legacy `git` project was
+ * cloned from. Unused for folders: their own checkout is what counts.
  */
-branch: string | null, };
+branch: string | null, 
+/**
+ * The repo the folder was cloned from, or last connected as `origin` from the dashboard. Informational: the
+ * folder's own `origin` is what git uses.
+ */
+remote: string | null, };
