@@ -117,8 +117,19 @@ export function PromptBar({ session, toast }: { session: Session; toast: (text: 
   );
 }
 
-/** The whole terminal of a session in a modal: follows the bottom unless you scroll up. */
-export function ConsoleModal({ session, readOnly, onClose, toast }: { session: Session; readOnly: boolean; onClose: () => void; toast: (text: string, tone?: "ok" | "warn" | "bad") => void }) {
+/** A session's terminal and, while it is live, the prompt bar: follows the bottom unless you scroll up. */
+export function ConsoleView({
+  session,
+  readOnly,
+  toast,
+  className = "h-[min(60vh,560px)]",
+}: {
+  session: Session;
+  readOnly: boolean;
+  toast: (text: string, tone?: "ok" | "warn" | "bad") => void;
+  /** The pane's height. */
+  className?: string;
+}) {
   const live = session.state !== "exited";
   const pane = usePane(session.name, live, 1000);
   const [follow, setFollow] = useState(true);
@@ -126,6 +137,26 @@ export function ConsoleModal({ session, readOnly, onClose, toast }: { session: S
   useEffect(() => {
     if (follow && box.current) box.current.scrollTop = box.current.scrollHeight;
   }, [pane, follow]);
+  return (
+    <div className="flex min-w-0 flex-col gap-3">
+      <pre
+        ref={box}
+        onScroll={(e) => {
+          const el = e.currentTarget;
+          setFollow(el.scrollHeight - el.scrollTop - el.clientHeight < 24);
+        }}
+        className={`${className} overflow-auto rounded-lg border border-line bg-term-bg p-3 font-mono text-[12px] leading-[1.45] whitespace-pre text-term-text`}
+      >
+        {pane || (live ? "(starting…)" : "(empty pane)")}
+      </pre>
+      {live && !readOnly && <PromptBar session={session} toast={toast} />}
+    </div>
+  );
+}
+
+/** The whole terminal of a session in a modal. */
+export function ConsoleModal({ session, readOnly, onClose, toast }: { session: Session; readOnly: boolean; onClose: () => void; toast: (text: string, tone?: "ok" | "warn" | "bad") => void }) {
+  const live = session.state !== "exited";
   return (
     <Modal onClose={onClose} label={`Console ${session.name}`} width={920}>
       <div className="flex items-center justify-between gap-2.5 border-b border-line px-[18px] py-3.5">
@@ -140,18 +171,8 @@ export function ConsoleModal({ session, readOnly, onClose, toast }: { session: S
           ×
         </button>
       </div>
-      <div className="flex flex-col gap-3 p-[18px]">
-        <pre
-          ref={box}
-          onScroll={(e) => {
-            const el = e.currentTarget;
-            setFollow(el.scrollHeight - el.scrollTop - el.clientHeight < 24);
-          }}
-          className="h-[min(60vh,560px)] overflow-auto rounded-lg border border-line bg-term-bg p-3 font-mono text-[12px] leading-[1.45] whitespace-pre text-term-text"
-        >
-          {pane || "(empty pane)"}
-        </pre>
-        {live && !readOnly && <PromptBar session={session} toast={toast} />}
+      <div className="p-[18px]">
+        <ConsoleView session={session} readOnly={readOnly} toast={toast} />
       </div>
     </Modal>
   );

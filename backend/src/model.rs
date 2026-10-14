@@ -224,6 +224,8 @@ pub enum ServerMessage {
     /// A new update check (every `updates.interval_secs`, after `POST /api/updates/refresh`, or when an update
     /// session ends), or an update session started.
     Updates { report: UpdatesReport },
+    /// A plan was submitted, edited, approved, rejected or superseded.
+    Plan { plan: Box<Plan> },
 }
 
 // ---- projects and decisions
@@ -1613,4 +1615,160 @@ pub struct GitOpResult {
     pub command: String,
     pub output: String,
     pub status: GitStatus,
+}
+
+// ---- plans: a requirement broken into tasks by the planner agent, approved by the owner (plans.rs)
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum PlanStatus {
+    /// Waiting for the owner: approve, reject or edit it. Nothing runs yet.
+    Draft,
+    /// Its tasks were created (`PlanTask::task_id`).
+    Approved,
+    Rejected,
+    /// A newer revision replaced it before it was decided.
+    Superseded,
+}
+
+impl PlanStatus {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            PlanStatus::Draft => "draft",
+            PlanStatus::Approved => "approved",
+            PlanStatus::Rejected => "rejected",
+            PlanStatus::Superseded => "superseded",
+        }
+    }
+}
+
+/// One task of a plan.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct PlanTask {
+    /// The planner's own id ("t1"), unique in the plan: 1–32 letters, digits, `_` or `-`.
+    pub key: String,
+    pub title: String,
+    /// The worker's whole prompt: goal, scope and non-goals, files, acceptance criteria, how to verify.
+    pub prompt: String,
+    /// Keys of tasks of the same plan that must be done first.
+    pub depends_on: Vec<String>,
+    /// Pin the task to a provider (and model); `None` lets the orchestrator pick.
+    pub provider: Option<String>,
+    pub model: Option<String>,
+    /// The task approving the plan created; `None` before.
+    #[ts(type = "number | null")]
+    pub task_id: Option<i64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct Plan {
+    #[ts(type = "number")]
+    pub id: i64,
+    /// The project's slug; `None` is the default workspace.
+    pub project: Option<String>,
+    pub title: String,
+    /// The requirement as the planner restated it, and anything the owner should know before approving.
+    pub summary: String,
+    pub status: PlanStatus,
+    /// 1 for a first draft; a revision of another plan is that one's revision + 1.
+    #[ts(type = "number")]
+    pub revision: i64,
+    /// The plan this one revises.
+    #[ts(type = "number | null")]
+    pub replaces: Option<i64>,
+    /// The planner session that submitted it.
+    pub session: Option<String>,
+    /// Why the owner rejected it.
+    pub reason: Option<String>,
+    /// In the order submitted.
+    pub tasks: Vec<PlanTask>,
+    pub created_at: DateTime<Utc>,
+    /// When it was approved, rejected or superseded.
+    pub decided_at: Option<DateTime<Utc>>,
+}
+
+/// A task as the planner submits it, or as the owner edits it (`PATCH /api/plans/{id}`).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct PlanTaskInput {
+    pub key: String,
+    pub title: String,
+    pub prompt: String,
+    #[serde(default)]
+    #[ts(optional)]
+    pub depends_on: Option<Vec<String>>,
+    #[serde(default)]
+    #[ts(optional)]
+    pub provider: Option<String>,
+    #[serde(default)]
+    #[ts(optional)]
+    pub model: Option<String>,
+}
+
+/// `POST /api/projects/{slug}/plans` (or `/api/workspace/plans`): a new draft.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct PlanSubmit {
+    pub title: String,
+    #[serde(default)]
+    #[ts(optional)]
+    pub summary: Option<String>,
+    pub tasks: Vec<PlanTaskInput>,
+    /// A plan of the same project this one revises: a draft becomes `superseded`.
+    #[serde(default)]
+    #[ts(optional, type = "number")]
+    pub replaces: Option<i64>,
+    /// The submitting session (`$MAP_SESSION`); defaults to the project's planner session.
+    #[serde(default)]
+    #[ts(optional)]
+    pub session: Option<String>,
+}
+
+/// `PATCH /api/plans/{id}`: change a draft before approving it. `tasks` replaces the whole list.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct PlanEdit {
+    #[serde(default)]
+    #[ts(optional)]
+    pub title: Option<String>,
+    #[serde(default)]
+    #[ts(optional)]
+    pub summary: Option<String>,
+    #[serde(default)]
+    #[ts(optional)]
+    pub tasks: Option<Vec<PlanTaskInput>>,
+}
+
+/// `POST /api/plans/{id}/approve`: the plan, now approved, and the tasks it created in dependency order.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct PlanApproved {
+    pub plan: Plan,
+    pub tasks: Vec<Task>,
+}
+
+/// The planner agent of a project (or of the default workspace): its session and where its instructions come from.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct PlannerInfo {
+    /// `<session_prefix>plan-<slug>`, or `<session_prefix>plan` for the default workspace.
+    pub session_name: String,
+    /// The session, live or exited, when there is one.
+    pub session: Option<Session>,
+    /// `built-in` or the path of `templates.planner_agent`.
+    pub instructions_source: String,
+    /// The provider "Talk to the planner" uses when none is picked; `None` when none is available.
+    pub default_provider: Option<String>,
+}
+
+/// `GET /api/planner/instructions`: the planner's instructions as MAP sends them, read-only.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct PlannerInstructions {
+    /// `built-in` or the path of `templates.planner_agent`.
+    pub source: String,
+    pub content: String,
 }

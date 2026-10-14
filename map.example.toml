@@ -171,6 +171,10 @@ timeout_secs = 600
 # dirs = ["~/.config/map/templates"]
 # The init agent's instructions (Markdown); unset: the ones built into MAP (backend/templates/init-agent.md).
 # init_agent = "~/.config/map/init-agent.md"
+# The planner agent's instructions (Markdown): the requirements agent every project (and the default workspace) has.
+# "Talk to the planner" starts it in <session_prefix>plan-<slug> with these as its first prompt; it turns what you
+# ask for into a draft plan of tasks that waits for your approval. Unset: backend/templates/planner-agent.md.
+# planner_agent = "~/.config/map/planner-agent.md"
 
 # Projects are folders on this machine. "Clone from git" in the new-project wizard runs `git clone` into
 # <root>/<repo name> by default (any other new or empty folder can be typed instead). MAP's own git commands in

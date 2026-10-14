@@ -3,6 +3,7 @@
 mod agents;
 mod git;
 mod git_access;
+mod plans;
 mod projects;
 mod skills;
 mod templates;
@@ -121,6 +122,16 @@ pub fn router(hub: Arc<Hub>) -> Router {
         .route("/templates", get(templates::list))
         .route("/projects/{slug}/init/plan", post(templates::plan))
         .route("/projects/{slug}/init", post(templates::init))
+        // ---- requirements → plan → tasks: the planner's drafts, the owner's approval (plans.rs)
+        .route("/projects/{slug}/plans", get(plans::project_list).post(plans::project_submit))
+        .route("/workspace/plans", get(plans::workspace_list).post(plans::workspace_submit))
+        .route("/plans", get(plans::list))
+        .route("/plans/{id}", get(plans::get).patch(plans::edit))
+        .route("/plans/{id}/approve", post(plans::approve))
+        .route("/plans/{id}/reject", post(plans::reject))
+        .route("/projects/{slug}/planner", get(plans::project_planner).post(plans::project_start))
+        .route("/workspace/planner", get(plans::workspace_planner).post(plans::workspace_start))
+        .route("/planner/instructions", get(plans::instructions))
         .route("/ws", get(ws::handler))
         .layer(middleware::from_fn_with_state(hub.clone(), require_token))
         .with_state(hub.clone());
@@ -164,16 +175,25 @@ pub(crate) fn same(a: &str, b: &str) -> bool {
 }
 
 /// The project whose token may call `method path`: asking and correcting its decisions, reading its decision log,
-/// and reading or writing its corpus. Everything else needs the API token.
+/// reading or writing its corpus, and submitting and listing its plans (never approving them). Everything else
+/// needs the API token.
 pub(crate) fn project_scope<'a>(method: &axum::http::Method, path: &'a str) -> Option<&'a str> {
     use axum::http::Method;
     let rest = path.strip_prefix("/api").unwrap_or(path).strip_prefix("/projects/")?;
     let (slug, tail) = rest.split_once('/')?;
     let ok = matches!(
         (method, tail),
-        (&Method::POST, "decide" | "feedback") | (&Method::GET, "decisions" | "decisions/summary" | "repos/corpus" | "repos/corpus/file") | (&Method::PUT, "repos/corpus/file")
+        (&Method::POST, "decide" | "feedback" | "plans")
+            | (&Method::GET, "decisions" | "decisions/summary" | "repos/corpus" | "repos/corpus/file" | "plans")
+            | (&Method::PUT, "repos/corpus/file")
     );
     (ok && !slug.is_empty()).then_some(slug)
+}
+
+/// What the default workspace's planner token may call: submitting and listing the default workspace's plans.
+pub(crate) fn workspace_scope(method: &axum::http::Method, path: &str) -> bool {
+    use axum::http::Method;
+    path.strip_prefix("/api").unwrap_or(path) == "/workspace/plans" && matches!(*method, Method::GET | Method::POST)
 }
 
 async fn require_token(State(hub): State<Arc<Hub>>, headers: HeaderMap, request: Request, next: Next) -> Response {
@@ -194,6 +214,12 @@ async fn require_token(State(hub): State<Arc<Hub>>, headers: HeaderMap, request:
     let path = request.extensions().get::<axum::extract::OriginalUri>().map_or_else(|| request.uri().path().to_string(), |u| u.path().to_string());
     if let (Some(token), Some(slug)) = (bearer, project_scope(request.method(), &path))
         && hub.project_token(slug).is_some_and(|t| same(token, &t))
+    {
+        return next.run(request).await;
+    }
+    if let Some(token) = bearer
+        && workspace_scope(request.method(), &path)
+        && hub.workspace_token().is_some_and(|t| same(token, &t))
     {
         return next.run(request).await;
     }
@@ -526,6 +552,20 @@ mod tests {
         assert_eq!(project_scope(&Method::GET, "/projects/support/repos/corpus/file"), Some("support"));
         assert_eq!(project_scope(&Method::PUT, "/projects/support/repos/corpus/file"), Some("support"));
         assert_eq!(project_scope(&Method::GET, "/projects/support/decisions"), Some("support"));
+        assert_eq!(project_scope(&Method::POST, "/api/projects/support/plans"), Some("support"));
+        assert_eq!(project_scope(&Method::GET, "/api/projects/support/plans"), Some("support"));
+        for (method, path) in [
+            (Method::POST, "/api/projects/support/planner"),
+            (Method::PATCH, "/api/projects/support/plans"),
+            (Method::POST, "/api/plans/1/approve"),
+            (Method::GET, "/api/plans"),
+        ] {
+            assert_eq!(project_scope(&method, path), None, "{method} {path}");
+        }
+        assert!(workspace_scope(&Method::POST, "/api/workspace/plans") && workspace_scope(&Method::GET, "/api/workspace/plans"));
+        for (method, path) in [(Method::DELETE, "/api/workspace/plans"), (Method::POST, "/api/workspace/planner"), (Method::GET, "/api/plans"), (Method::POST, "/api/projects/support/plans")] {
+            assert!(!workspace_scope(&method, path), "{method} {path}");
+        }
         for (method, path) in [
             (Method::GET, "/projects/support"),
             (Method::PATCH, "/projects/support"),

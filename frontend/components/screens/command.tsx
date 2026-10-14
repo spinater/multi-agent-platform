@@ -1,13 +1,14 @@
 "use client";
 
 import clsx from "clsx";
-import { Hexagon, Maximize2, Minimize2, Scan, Search } from "lucide-react";
+import { Hexagon, Maximize2, MessageSquareText, Minimize2, Scan, Search } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 
 import { api } from "@/lib/api";
 import type { Event } from "@/lib/generated/Event";
 import { formatHash } from "@/lib/nav";
 import type { Connection } from "@/lib/use-dashboard";
+import { usePlans } from "@/lib/use-plans";
 
 import { useApp } from "../app-context";
 import { useCommand } from "../command-data";
@@ -18,7 +19,9 @@ import { CommandCanvas, type CanvasControls } from "../graph/brain";
 import type { NodeType } from "../graph/model";
 import type { View } from "../graph/layouts";
 import { LeftColumn, RightColumn } from "../rails";
+import { RequirementsPanel } from "../requirements";
 import { NewSessionModal } from "../sessions";
+import { Modal as ShellModal } from "../shell/page";
 import { TopBar, workspaceName } from "../shell/top-bar";
 import { NewTaskModal } from "../tasks";
 
@@ -56,12 +59,13 @@ function nodeFromArg(arg: string | null): string | null {
   return null;
 }
 
-type Modal = { kind: "task" } | { kind: "session"; provider?: string } | { kind: "console"; name: string };
+type Modal = { kind: "task" } | { kind: "session"; provider?: string } | { kind: "console"; name: string } | { kind: "requirements" };
 
-/** `tasks/new` and `sessions/new` open the matching form. */
+/** `tasks/new` and `sessions/new` open the matching form, `requirements` the planner and its plans. */
 function modalFromArg(arg: string | null): Modal | null {
   if (arg === "tasks/new") return { kind: "task" };
   if (arg === "sessions/new") return { kind: "session" };
+  if (arg === "requirements") return { kind: "requirements" };
   return null;
 }
 
@@ -197,6 +201,7 @@ export function CommandScreen() {
     }
   };
 
+  const drafts = (usePlans().plans ?? []).filter((p) => p.status === "draft" && (p.project ?? null) === project).length;
   const [connWord, connTone] = CONNECTION[connection];
   const projectLabel = project === null ? workspaceName(server?.workspace_dir) : (current?.project.name ?? project);
   const live = cmd.sessions.filter((s) => s.state !== "exited").length;
@@ -245,6 +250,16 @@ export function CommandScreen() {
               </button>
             ))}
           </div>
+          {!all && (
+            <button
+              onClick={() => setModal({ kind: "requirements" })}
+              title="Talk to this project's planner agent; approve the plans it drafts"
+              className="flex h-[26px] cursor-pointer items-center gap-1.5 self-center rounded-[7px] border border-accent bg-accent-tint px-2.5 font-mono text-[11px] font-semibold whitespace-nowrap text-accent-soft hover:bg-accent/20"
+            >
+              <MessageSquareText className="size-3" /> Requirements
+              {drafts > 0 && <span className="rounded bg-accent px-1 text-[10px] leading-4 text-accent-text">{drafts}</span>}
+            </button>
+          )}
         </div>
         <span className="font-mono text-[10.5px] leading-[1.4] tracking-[0.04em] text-muted">{statsLine}</span>
       </div>
@@ -433,6 +448,22 @@ export function CommandScreen() {
         />
       )}
       {consoleSession && <ConsoleModal session={consoleSession} readOnly={all} onClose={() => setModal(null)} toast={toast} />}
+      {modal?.kind === "requirements" && !all && (
+        <ShellModal onClose={() => setModal(null)} label="Requirements" width={1240}>
+          <div className="flex items-center justify-between gap-2.5 border-b border-line px-[18px] py-3.5">
+            <span className="flex min-w-0 items-center gap-2 font-mono text-[11px] font-semibold tracking-[0.14em] uppercase">
+              <MessageSquareText className="size-3 text-accent" />
+              <span className="truncate">Requirements · {projectLabel}</span>
+            </span>
+            <button onClick={() => setModal(null)} className="size-[26px] flex-none cursor-pointer rounded-md border border-line-2 text-nav" aria-label="Close">
+              ×
+            </button>
+          </div>
+          <div className="p-[18px]">
+            <RequirementsPanel project={project} />
+          </div>
+        </ShellModal>
+      )}
     </div>
   );
 }

@@ -10,6 +10,7 @@ mod hub;
 mod login;
 mod model;
 mod orchestrator;
+mod plans;
 mod project_git;
 mod project_settings;
 mod projects;

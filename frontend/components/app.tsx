@@ -4,6 +4,7 @@ import clsx from "clsx";
 import { useEffect, useState } from "react";
 
 import { setToken } from "@/lib/api";
+import { onNewDraft, usePlans } from "@/lib/use-plans";
 
 import { AppProvider, useApp } from "./app-context";
 import { AuthModal } from "./auth-modal";
@@ -58,6 +59,21 @@ function Toasts() {
   );
 }
 
+/** A toast when a planner submits a draft plan, on whichever screen is open. */
+function PlanNotifier() {
+  const { toast, projects } = useApp();
+  usePlans();
+  useEffect(
+    () =>
+      onNewDraft((p) => {
+        const where = p.project === null ? "default workspace" : (projects.find((x) => x.project.slug === p.project)?.project.name ?? p.project);
+        toast(`Plan #${p.id} from the ${where} planner · ${p.tasks.length} tasks waiting for your approval (Requirements)`);
+      }),
+    [toast, projects],
+  );
+  return null;
+}
+
 function Router() {
   const { route, connection } = useApp();
   if (connection === "unauthorized") return <TokenGate />;
@@ -98,6 +114,7 @@ export function App() {
       <Router />
       <AuthModal />
       <UpdateNotifier />
+      <PlanNotifier />
       <Toasts />
     </AppProvider>
   );

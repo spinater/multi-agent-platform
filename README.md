@@ -117,6 +117,7 @@ nothing is tied to one repository, session name or provider.
 | `backend/src/terminal/` | `Terminal` trait; `tmux.rs` in production, `fake.rs` in tests |
 | `backend/src/projects.rs` | Creating projects on a folder (existing or new) and deleting them; folder and corpus path rules |
 | `backend/src/templates.rs` | Project templates (built-in and `[templates] dirs`), the create/skip/append plan, laying one down, the init agent's task |
+| `backend/src/plans.rs` | The planner session, plan validation, drafts, revisions, approval into tasks |
 | `backend/src/project_settings.rs` | Per-project providers, verify, audit and pause, as the orchestrator asks for them |
 | `backend/src/login.rs` | Provider sign-in state from credential files, the helper login session, URL and code parsing |
 | `backend/src/repo.rs` | The corpus repo written with git plumbing, corpus export, a read-only look at a project's folder |
@@ -378,6 +379,40 @@ process into its folder and has an init agent fill in the project-specific parts
   extends them rather than adding copies) and its rules. Unticked, the prompt says nothing about the corpus, and
   the check lines say `corpus: left as is`.
 
+## Requirements → plan → tasks
+
+Every project, and the default workspace, has a built-in **planner** agent (`backend/src/plans.rs`): you tell it
+what you want, the way you would tell an engineer, and it turns that into tasks for the orchestrator, but only after
+you approve them.
+
+- **Talk to it.** "Requirements" on a project's page, or the Requirements button in the command centre
+  (`#command/requirements`), starts (or reopens) an ordinary interactive session `<session_prefix>plan-<slug>`
+  (`<session_prefix>plan` for the default workspace) in the project's folder, on the provider you pick (by default
+  the project's first installed provider that is not signed out). Its console is shown inline; type to it there or
+  `tmux attach`. The session has the supervisor role and no task, so the orchestrator never treats it as a worker;
+  the watcher and the human protection apply as to any session.
+- **Instructions.** One definition for the platform, `backend/templates/planner-agent.md` (or `[templates]
+  planner_agent`), sent as the session's first prompt (by `prompt_mode`, like any launch) followed by "This session":
+  the project, its folder, whether it keeps `tasks/` cards (and the next card number), the providers and models it
+  may pin, the orchestrator's state and the plans so far. The planner talks in your language, reads the project
+  first, asks only questions that change the plan (each option with a one-line scenario), restates the requirement,
+  and proposes small, verifiable tasks with self-contained prompts (goal, scope and non-goals, files, acceptance
+  criteria, how to verify), dependencies and an optional provider/model. It never writes code and never starts
+  tasks. In a project with `tasks/README.md` (the team-process template) it also writes the cards and puts each
+  card's path in its task's prompt. The Agents screen lists it as a built-in row with its instructions, read-only.
+- **Draft.** The planner POSTs the plan with curl to `$MAP_PLANS_URL` with `$MAP_PROJECT_TOKEN`. MAP checks it
+  (unique keys, dependencies on keys of the plan, no cycles, a title and a prompt per task, known providers and
+  models, at most 50 tasks) and stores it as a `draft`; the dashboard shows a toast. Sending `replaces: <id>` makes
+  a new revision: an older draft becomes `superseded`.
+- **Approval gate.** Nothing runs until you approve. In the Requirements panel you read each task's prompt, edit its
+  title, prompt or dependencies, then **Approve** (creates the tasks in dependency order, mapping the plan's keys
+  to task ids, in the plan's project; a second approval is refused) or **Reject** with a reason the planner can
+  read. The orchestrator then runs the tasks like any others, when it is running and the project is not paused.
+- **Tokens.** A project's token opens only its own `GET`/`POST /projects/<slug>/plans`; the default workspace's
+  planner gets a token of its own that opens only `/workspace/plans`. Approving, rejecting, editing and starting the
+  planner need the API token. Events: `planner.started`, `plan.created`, `plan.updated`, `plan.superseded`,
+  `plan.approved`, `plan.rejected`; every change is pushed as a `plan` WebSocket message.
+
 ## Writing tasks
 
 A task is a title and a prompt. The orchestrator appends a protocol footer that tells the worker:
@@ -531,6 +566,13 @@ All routes are under `/api`. When `server.api_token` is set, send `Authorization
 | GET | `/updates` | The latest update check: installed and latest version, errors, update command and whether it is blocked, per provider |
 | POST | `/updates/refresh` | `{}`: check every provider now and return the report |
 | POST | `/providers/{name}/update` | `{}`: run the provider's `update` command in `<prefix>update-<name>` (409 while one runs or when the CLI is read-only); returns the session |
+| GET/POST | `/projects/{slug}/plans`, `/workspace/plans` | The project's (default workspace's) plans, newest first; or submit a draft (`title`, `summary`, `tasks: [{key, title, prompt, depends_on, provider?, model?}]`, `replaces?`, `session?`). The planner's token works here |
+| GET | `/plans?project=` | Plans; `project` absent = all, empty = default workspace |
+| GET/PATCH | `/plans/{id}` | A plan; edit a draft (`title`, `summary`, `tasks` replaces the list) |
+| POST | `/plans/{id}/approve` | `{}`: create the draft's tasks in dependency order; returns the plan and the tasks (409 when not a draft) |
+| POST | `/plans/{id}/reject` | `{"reason"?}` |
+| GET/POST | `/projects/{slug}/planner`, `/workspace/planner` | The planner's session and default provider; or start it (`{"provider"?, "model"?}`; returns the running one if live) |
+| GET | `/planner/instructions` | The planner's instructions and their source (built in or `[templates] planner_agent`) |
 | GET | `/ws` | Pushes `ServerMessage` JSON (see `frontend/lib/generated/ServerMessage.ts`) |
 
 Git: `git clone http://127.0.0.1:4400/git/<slug>/corpus.git`. With `api_token` set, git asks for a password: use the
