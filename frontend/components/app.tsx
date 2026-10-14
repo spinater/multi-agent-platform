@@ -14,6 +14,7 @@ import { ReflexScreen } from "./screens/reflex";
 import { SkillsScreen } from "./screens/skills";
 import { UsageScreen } from "./screens/usage";
 import { Button, Input } from "./ui";
+import { UpdateNotifier } from "./updates-bell";
 
 function TokenGate() {
   const [value, setValue] = useState("");
@@ -93,6 +94,7 @@ export function App() {
     <AppProvider now={now}>
       <Router />
       <AuthModal />
+      <UpdateNotifier />
       <Toasts />
     </AppProvider>
   );

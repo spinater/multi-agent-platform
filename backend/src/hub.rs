@@ -34,6 +34,8 @@ pub struct Hub {
     pub http: reqwest::Client,
     /// The latest plan-usage report (`usage.rs`); also feeds the skip line in [`Hub::cooldown_until`].
     pub usage: crate::usage::UsageState,
+    /// The latest update check of the agent CLIs (`updates.rs`).
+    pub updates: crate::updates::UpdatesState,
 }
 
 pub struct LaunchRequest {
@@ -57,6 +59,7 @@ impl Hub {
         let (tx, _) = broadcast::channel(512);
         let running = config.orchestrator.autostart;
         let usage = crate::usage::UsageState::new(&config);
+        let updates = crate::updates::UpdatesState::new(&config);
         Arc::new(Self {
             config,
             store,
@@ -68,6 +71,7 @@ impl Hub {
             reflex: reflex::Manager::default(),
             http: reqwest::Client::new(),
             usage,
+            updates,
         })
     }
 
@@ -273,18 +277,26 @@ impl Hub {
         self.send(ServerMessage::Usage { report });
     }
 
+    pub fn announce_updates(&self, report: crate::model::UpdatesReport) {
+        self.send(ServerMessage::Updates { report });
+    }
+
     pub fn spec(&self, provider: &str) -> Result<&ProviderSpec> {
         self.config.providers.get(provider).with_context(|| format!("unknown provider `{provider}`"))
     }
 
     /// The provider's binary is on the workspace PATH (or the absolute path exists).
     pub fn provider_available(&self, provider: &str) -> bool {
-        let Ok(spec) = self.spec(provider) else { return false };
-        if spec.binary.contains('/') {
-            return Path::new(&spec.binary).exists();
+        self.spec(provider).is_ok_and(|spec| self.binary_path(&spec.binary).is_some())
+    }
+
+    /// Where `binary` is: the path itself when it has a `/`, else the first match on the workspace PATH.
+    pub fn binary_path(&self, binary: &str) -> Option<PathBuf> {
+        if binary.contains('/') {
+            return Path::new(binary).exists().then(|| PathBuf::from(binary));
         }
         let path = self.config.workspace.env.get("PATH").cloned().or_else(|| std::env::var("PATH").ok()).unwrap_or_default();
-        std::env::split_paths(&path).any(|dir| dir.join(&spec.binary).is_file())
+        std::env::split_paths(&path).map(|dir| dir.join(binary)).find(|p| p.is_file())
     }
 
     pub fn server_info(&self) -> ServerInfo {

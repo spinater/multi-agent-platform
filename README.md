@@ -68,6 +68,15 @@ nothing is tied to one repository, session name or provider.
     straight to the fallback, with the reason in the answer.
   - **More than 8 domains** pauses Reflex. Archiving moves domains to `_archive/` in the corpus repo (one commit),
     which Reflex never loads; the dashboard's Reflex screen offers to archive the smallest.
+- **Updates.** A bell in the top bar counts the agent CLIs with a newer release (`[updates]` in `map.toml`, checked
+  every `interval_secs`, 6 hours by default). Each provider's `version` command (`claude --version`…, run with the
+  workspace env, no stdin and a timeout) is compared with the version its `latest` source publishes (Claude's release
+  channel from `autoUpdatesChannel`, npm for Codex, agy's update manifest for `{os}_{arch}`), fetched without
+  credentials. A new release is announced once (an `update.available` event and a toast); the versions also show on
+  the Usage screen. **Update** shows the exact command, then runs the provider's `update` command in a helper session
+  `<session_prefix>update-<provider>` whose console you can watch; the version is checked again when it ends. It is
+  refused while one runs, and when the CLI lives where this user cannot write (the Docker deploy mounts the CLIs
+  read-only: update them on the host). Providers without these fields show "unknown".
 - **History.** Sessions, tasks and events live in SQLite. Every run keeps its prompt, launch script, result file and
   final pane under `.map/runs/<session>/`.
 
@@ -100,6 +109,7 @@ nothing is tied to one repository, session name or provider.
 | `backend/src/repo.rs` | The corpus repo written with git plumbing, corpus export, a read-only look at a project's folder |
 | `backend/src/reflex.rs` | One Reflex process per project: export the corpus, start, health-check, restart |
 | `backend/src/usage.rs` | Plan-usage readers (Claude endpoint, Codex logs), token scans, pace, the skip line |
+| `backend/src/updates.rs` | CLI update checks (version command vs. latest source), update helper sessions |
 | `backend/src/decide.rs` | The decision gate (Reflex, threshold, fallback), answer parsing, threshold fitting |
 | `backend/src/api/git.rs` | Git smart HTTP through `git http-backend`; a corpus push restarts Reflex |
 | `backend/src/api/` | REST and WebSocket, token, Host and Origin checks |
@@ -176,7 +186,8 @@ docker compose logs -f map                  # open http://127.0.0.1:4400 and pas
 
 - Mounted from the host: `~/.claude`, `~/.codex`, `~/.gemini` (read-write: sign-ins, history, transcripts for Usage
   and Skills) and the CLIs in `~/.local/bin`, `~/.local/share/claude` and the Node install (read-only). Adjust
-  `docker-compose.yml` if yours live elsewhere.
+  `docker-compose.yml` if yours live elsewhere. Because the CLIs are read-only there, the update bell still shows
+  new releases but its Update button is disabled: update them on the host.
 - Claude Code in the container uses `CLAUDE_CONFIG_DIR=~/.claude`, so its settings file is `~/.claude/.claude.json`
   (the host rewrites `~/.claude.json` by renaming over it, which a single-file mount cannot follow). Set
   `"hasCompletedOnboarding": true` in that file once, or the first interactive session stops at the setup screens.
@@ -330,6 +341,9 @@ All routes are under `/api`. When `server.api_token` is set, send `Authorization
 | GET | `/skills/file?project=&path=<id>` | A SKILL.md, only for ids the scanner itself returned |
 | GET | `/usage` | The latest usage report: windows, pace, tokens today, by project, skip state per provider |
 | POST | `/usage/refresh` | `{}`: read every provider now and return the report |
+| GET | `/updates` | The latest update check: installed and latest version, errors, update command and whether it is blocked, per provider |
+| POST | `/updates/refresh` | `{}`: check every provider now and return the report |
+| POST | `/providers/{name}/update` | `{}`: run the provider's `update` command in `<prefix>update-<name>` (409 while one runs or when the CLI is read-only); returns the session |
 | GET | `/ws` | Pushes `ServerMessage` JSON (see `frontend/lib/generated/ServerMessage.ts`) |
 
 Git: `git clone http://127.0.0.1:4400/git/<slug>/corpus.git`. With `api_token` set, git asks for a password: use the

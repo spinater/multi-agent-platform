@@ -65,7 +65,7 @@ pub fn reader_for(config: &Config, provider: &str) -> Option<Reader> {
 }
 
 /// Configured providers, `provider_order` first.
-fn ordered_providers(config: &Config) -> Vec<String> {
+pub(crate) fn ordered_providers(config: &Config) -> Vec<String> {
     let mut out: Vec<String> = config.orchestrator.provider_order.iter().filter(|p| config.providers.contains_key(*p)).cloned().collect();
     for name in config.providers.keys() {
         if !out.contains(name) {

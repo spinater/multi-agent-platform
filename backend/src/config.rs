@@ -22,6 +22,8 @@ pub struct Config {
     pub skills: SkillsConfig,
     #[serde(default)]
     pub usage: UsageConfig,
+    #[serde(default)]
+    pub updates: UpdatesConfig,
     /// Overrides merged onto the built-in `claude`, `codex` and `gemini` specs; new names add providers.
     #[serde(default, rename = "providers")]
     provider_overrides: BTreeMap<String, ProviderOverride>,
@@ -264,6 +266,24 @@ impl Default for UsageProviderConfig {
     }
 }
 
+/// Update checks for the agent CLIs (`backend/src/updates.rs`): each provider's `version` command against the
+/// version its `latest` source publishes.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct UpdatesConfig {
+    pub enabled: bool,
+    /// At least 300.
+    pub interval_secs: u64,
+    /// Limit for each version command and each request for the latest version.
+    pub timeout_secs: u64,
+}
+
+impl Default for UpdatesConfig {
+    fn default() -> Self {
+        Self { enabled: true, interval_secs: 21600, timeout_secs: 15 }
+    }
+}
+
 /// `~` or `~/…` becomes `$HOME/…`; other paths are unchanged.
 pub fn expand_home(p: &Path) -> PathBuf {
     let Ok(rest) = p.strip_prefix("~") else { return p.to_path_buf() };
@@ -310,6 +330,39 @@ pub struct ProviderSpec {
     pub credentials: Vec<String>,
     /// The environment variable that holds an API key instead of a sign-in.
     pub api_key_env: Option<String>,
+    /// Prints the installed version (`{binary}` substituted); empty: the version is unknown.
+    pub version: Vec<String>,
+    /// Where the newest release's version is published; `None`: unknown.
+    pub latest: Option<LatestSource>,
+    /// Updates the CLI, run in a helper tmux session `<session_prefix>update-<name>`; empty: not from the dashboard.
+    pub update: Vec<String>,
+}
+
+/// A URL that answers with the newest version, as plain text or inside JSON. Fetched without credentials.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LatestSource {
+    /// `{os}` (linux, darwin, windows), `{arch}` (amd64, arm64) and `{channel}` are substituted. `""` in an
+    /// override clears the source.
+    pub url: String,
+    /// Dotted path to the version in a JSON body (`version`, `dist-tags.latest`); absent: the body is the version.
+    #[serde(default)]
+    pub json: Option<String>,
+    /// Where `{channel}` comes from.
+    #[serde(default)]
+    pub channel: Option<ChannelSource>,
+}
+
+/// A release channel read from one key of the CLI's own JSON settings file (only that key is used).
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ChannelSource {
+    /// `~/` is the home directory.
+    pub file: String,
+    /// Dotted path inside the file.
+    pub key: String,
+    /// When the file or the key is missing.
+    pub default: String,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -331,6 +384,9 @@ struct ProviderOverride {
     login_warning: Option<String>,
     credentials: Option<Vec<String>>,
     api_key_env: Option<String>,
+    version: Option<Vec<String>>,
+    latest: Option<LatestSource>,
+    update: Option<Vec<String>>,
 }
 
 /// An optional override: missing keeps the built-in value, `""` clears it.
@@ -367,6 +423,14 @@ pub fn builtin_providers() -> BTreeMap<String, ProviderSpec> {
             login_warning: None,
             credentials: strings(&["~/.claude/.credentials.json"]),
             api_key_env: Some("ANTHROPIC_API_KEY".into()),
+            version: strings(&["{binary}", "--version"]),
+            // The channel Claude Code itself follows (`autoUpdatesChannel`: `latest` or `stable`).
+            latest: Some(LatestSource {
+                url: "https://downloads.claude.ai/claude-code-releases/{channel}".into(),
+                json: None,
+                channel: Some(ChannelSource { file: "~/.claude/settings.json".into(), key: "autoUpdatesChannel".into(), default: "latest".into() }),
+            }),
+            update: strings(&["{binary}", "update"]),
         },
     );
     map.insert(
@@ -389,6 +453,9 @@ pub fn builtin_providers() -> BTreeMap<String, ProviderSpec> {
             login_warning: Some("codex login signs out the current account as soon as it starts, before you approve the new one.".into()),
             credentials: strings(&["~/.codex/auth.json"]),
             api_key_env: Some("OPENAI_API_KEY".into()),
+            version: strings(&["{binary}", "--version"]),
+            latest: Some(LatestSource { url: "https://registry.npmjs.org/@openai/codex/latest".into(), json: Some("version".into()), channel: None }),
+            update: strings(&["{binary}", "update"]),
         },
     );
     map.insert(
@@ -411,6 +478,13 @@ pub fn builtin_providers() -> BTreeMap<String, ProviderSpec> {
             login_warning: None,
             credentials: strings(&["~/.gemini/jetski-standalone-oauth-token"]),
             api_key_env: Some("GEMINI_API_KEY".into()),
+            version: strings(&["{binary}", "--version"]),
+            latest: Some(LatestSource {
+                url: "https://antigravity-cli-auto-updater-974169037036.us-central1.run.app/manifests/{os}_{arch}.json".into(),
+                json: Some("version".into()),
+                channel: None,
+            }),
+            update: strings(&["{binary}", "update"]),
         },
     );
     map
@@ -442,6 +516,9 @@ impl ProviderOverride {
                     login_warning: None,
                     credentials: vec![],
                     api_key_env: None,
+                    version: vec![],
+                    latest: None,
+                    update: vec![],
                 }
             }
         };
@@ -462,6 +539,13 @@ impl ProviderOverride {
             login_warning: optional(self.login_warning, base.login_warning),
             credentials: self.credentials.unwrap_or(base.credentials),
             api_key_env: optional(self.api_key_env, base.api_key_env),
+            version: self.version.unwrap_or(base.version),
+            latest: match self.latest {
+                Some(l) if l.url.is_empty() => None,
+                Some(l) => Some(l),
+                None => base.latest,
+            },
+            update: self.update.unwrap_or(base.update),
         })
     }
 }
@@ -517,6 +601,16 @@ impl Config {
                 && !matches!(r.as_str(), "claude" | "codex" | "none")
             {
                 bail!("usage.providers.{name}.reader must be `claude`, `codex` or `none`");
+            }
+        }
+
+        config.updates.interval_secs = config.updates.interval_secs.max(300);
+        config.updates.timeout_secs = config.updates.timeout_secs.clamp(1, 300);
+        for (name, spec) in &config.providers {
+            if let Some(l) = &spec.latest
+                && !(l.url.starts_with("https://") || l.url.starts_with("http://"))
+            {
+                bail!("providers.{name}.latest.url must start with https:// or http://");
             }
         }
 
@@ -608,6 +702,28 @@ mod tests {
         assert_eq!(c.providers["codex"].login, vec!["{binary}", "login"]);
         assert!(c.providers["codex"].login_warning.is_some());
         assert_eq!(c.providers["claude"].api_key_env.as_deref(), Some("ANTHROPIC_API_KEY"));
+    }
+
+    #[test]
+    fn update_settings_default_override_and_clear() {
+        let c = Config::parse("[workspace]\ndir = \"/r\"\n", Path::new("/")).unwrap();
+        assert_eq!(c.providers["codex"].version, vec!["{binary}", "--version"]);
+        assert_eq!(c.providers["codex"].latest.as_ref().unwrap().json.as_deref(), Some("version"));
+        assert!(c.providers["gemini"].latest.as_ref().unwrap().url.contains("{os}_{arch}"));
+        assert_eq!(c.providers["claude"].update, vec!["{binary}", "update"]);
+        assert_eq!((c.updates.enabled, c.updates.interval_secs), (true, 21600));
+        let c = Config::parse(
+            "[workspace]\ndir = \"/r\"\n[updates]\ninterval_secs = 5\n[providers.claude]\nlatest = { url = \"\" }\nupdate = []\n[providers.codex]\nlatest = { url = \"https://example.com/v.txt\" }\n[providers.aider]\nbinary = \"aider\"\ninteractive = [\"{binary}\"]\n",
+            Path::new("/"),
+        )
+        .unwrap();
+        assert_eq!(c.updates.interval_secs, 300);
+        assert_eq!(c.providers["claude"].latest, None);
+        assert!(c.providers["claude"].update.is_empty());
+        assert_eq!(c.providers["codex"].latest.as_ref().unwrap().json, None);
+        assert!(c.providers["aider"].version.is_empty() && c.providers["aider"].latest.is_none());
+        let bad = "[workspace]\ndir = \"/r\"\n[providers.codex]\nlatest = { url = \"file:///etc/passwd\" }\n";
+        assert!(Config::parse(bad, Path::new("/")).is_err());
     }
 
     #[test]

@@ -6,6 +6,7 @@ import { projectColor, providerColor } from "@/lib/colors";
 import type { ProjectShare } from "@/lib/generated/ProjectShare";
 import type { ProviderUsage } from "@/lib/generated/ProviderUsage";
 import type { UsageWindow } from "@/lib/generated/UsageWindow";
+import { updateOf, useUpdates } from "@/lib/use-updates";
 import { badgeOf, clockAt, dur, fmtTokens, meterColor, providerName, readUsageNow, useUsage, worstOf } from "@/lib/use-usage";
 
 import { useApp } from "../app-context";
@@ -114,6 +115,7 @@ function ProviderCard({ p, skip, now, order }: { p: ProviderUsage; skip: number;
   const total = p.by_project.reduce((n, s) => n + s.tokens, 0);
   const t = p.tokens_today;
   const age = p.read_at ? now - new Date(p.read_at).getTime() : null;
+  const update = updateOf(useUpdates().report, p.provider);
   return (
     <div className="flex min-w-0 flex-col gap-4 rounded-[14px] border border-line bg-surface p-[18px]" style={border ? { borderColor: border } : undefined}>
       <div className="flex items-start gap-2.5">
@@ -126,6 +128,12 @@ function ProviderCard({ p, skip, now, order }: { p: ProviderUsage; skip: number;
             {p.plan ?? "plan unknown"} · {p.status === "no_reader" ? "no local usage source" : `read via ${p.source}`}
             {p.status === "snapshot" || p.status === "signed_out" ? (age !== null ? ` · snapshot ${dur(age, false)} old` : "") : ""}
           </span>
+          {update?.installed && (
+            <span className={`${mono} text-[11px] leading-[1.3] text-muted`} title={update.version_command.join(" ")}>
+              CLI {update.installed}
+              {update.available ? <span className="text-warn"> · {update.latest} available (bell in the top bar)</span> : update.latest ? " · up to date" : ""}
+            </span>
+          )}
         </div>
         <StatusBadge text={badge.text} tone={badge.tone} />
       </div>

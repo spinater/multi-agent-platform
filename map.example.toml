@@ -62,6 +62,16 @@ timeout_secs = 600
 #   credentials   files the CLI keeps its sign-in in (~/ is $HOME); only whether they exist and parse is checked,
 #                 their contents are never read out. Empty: the dashboard shows the sign-in state as unknown.
 #   api_key_env   variable that holds an API key instead; set it in [workspace.env] (the dashboard never takes keys)
+#
+# Updates (the bell in the top bar, [updates] below):
+#   version       prints the installed version ({binary} substituted); the first x.y.z in its output counts.
+#                 [] turns the check off: the dashboard shows the version as unknown.
+#   latest        where the newest version is published, fetched without credentials:
+#                 { url = "...", json = "dotted.path" }. Without json the body is the version. The url may use
+#                 {os} (linux, darwin, windows), {arch} (amd64, arm64) and {channel}, read from one key of a JSON file:
+#                 channel = { file = "~/...json", key = "...", default = "..." }. latest = { url = "" } clears it.
+#   update        run in a helper tmux session `<session_prefix>update-<name>` when you press Update; [] hides it.
+#                 Refused when the CLI is installed where this user cannot write (the Docker deploy's read-only mounts).
 
 [providers.claude]
 # Unattended workers need this, or they stop at every permission prompt (the watcher shows them as waiting).
@@ -71,6 +81,10 @@ timeout_secs = 600
 # login = ["{binary}", "auth", "login"]
 # credentials = ["~/.claude/.credentials.json"]
 # api_key_env = "ANTHROPIC_API_KEY"
+# version = ["{binary}", "--version"]
+# The channel Claude Code itself follows (autoUpdatesChannel: latest or stable).
+# latest = { url = "https://downloads.claude.ai/claude-code-releases/{channel}", channel = { file = "~/.claude/settings.json", key = "autoUpdatesChannel", default = "latest" } }
+# update = ["{binary}", "update"]
 
 [providers.codex]
 # extra_args = ["--dangerously-bypass-approvals-and-sandbox"]
@@ -79,6 +93,10 @@ timeout_secs = 600
 # login = ["{binary}", "login", "--device-auth"]
 # credentials = ["~/.codex/auth.json"]
 # api_key_env = "OPENAI_API_KEY"
+# version = ["{binary}", "--version"]
+# latest = { url = "https://registry.npmjs.org/@openai/codex/latest", json = "version" }
+# Installed with npm: `codex update` updates through npm (or use ["npm", "i", "-g", "@openai/codex@latest"]).
+# update = ["{binary}", "update"]
 
 [providers.gemini]
 # binary = "agy"
@@ -88,6 +106,10 @@ timeout_secs = 600
 # login_send = "/login"
 # credentials = ["~/.gemini/jetski-standalone-oauth-token"]
 # api_key_env = "GEMINI_API_KEY"
+# version = ["{binary}", "--version"]
+# latest = { url = "https://antigravity-cli-auto-updater-974169037036.us-central1.run.app/manifests/{os}_{arch}.json", json = "version" }
+# agy also updates itself in the background; a running session keeps the old version until it restarts.
+# update = ["{binary}", "update"]
 
 # A provider that is not built in needs at least binary and interactive:
 # [providers.aider]
@@ -138,3 +160,12 @@ skip_pct = 90
 # Turn a reader off, or pick one ("claude", "codex", "none") for a provider with another name.
 # [usage.providers.codex]
 # enabled = false
+
+# Update checks for the agent CLIs: each provider's `version` command against its `latest` source (see the provider
+# fields above). Each new release is announced once as an `update.available` event and a toast.
+[updates]
+# enabled = true
+# Every 6 hours (at least 300).
+# interval_secs = 21600
+# Limit for each version command and each request for the latest version.
+# timeout_secs = 15

@@ -4,9 +4,10 @@ import type { OrchestratorStatus } from "./OrchestratorStatus";
 import type { ProjectInfo } from "./ProjectInfo";
 import type { Session } from "./Session";
 import type { Task } from "./Task";
+import type { UpdatesReport } from "./UpdatesReport";
 import type { UsageReport } from "./UsageReport";
 
 /**
  * Messages pushed to dashboard clients over `/api/ws`.
  */
-export type ServerMessage = { "type": "event", event: Event, } | { "type": "session", session: Session, } | { "type": "session_removed", name: string, } | { "type": "task", task: Task, } | { "type": "task_removed", id: number, } | { "type": "orchestrator", status: OrchestratorStatus, } | { "type": "project", project: ProjectInfo, } | { "type": "project_removed", slug: string, } | { "type": "resync" } | { "type": "usage", report: UsageReport, };
+export type ServerMessage = { "type": "event", event: Event, } | { "type": "session", session: Session, } | { "type": "session_removed", name: string, } | { "type": "task", task: Task, } | { "type": "task_removed", id: number, } | { "type": "orchestrator", status: OrchestratorStatus, } | { "type": "project", project: ProjectInfo, } | { "type": "project_removed", slug: string, } | { "type": "resync" } | { "type": "usage", report: UsageReport, } | { "type": "updates", report: UpdatesReport, };

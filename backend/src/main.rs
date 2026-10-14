@@ -15,6 +15,7 @@ mod repo;
 mod skills;
 mod store;
 mod terminal;
+mod updates;
 mod usage;
 mod watcher;
 
@@ -91,6 +92,7 @@ async fn serve(config: Config) -> Result<()> {
     tokio::spawn(watcher::run(hub.clone()));
     tokio::spawn(orchestrator::run(hub.clone()));
     tokio::spawn(usage::run(hub.clone()));
+    tokio::spawn(updates::run(hub.clone()));
     for project in hub.store.projects().await? {
         let hub = hub.clone();
         tokio::spawn(async move {

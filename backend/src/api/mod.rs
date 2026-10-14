@@ -88,6 +88,10 @@ pub fn router(hub: Arc<Hub>) -> Router {
         // ---- usage: plan limits per provider (usage.rs)
         .route("/usage", get(usage))
         .route("/usage/refresh", post(refresh_usage))
+        // ---- updates: installed vs latest version of each provider CLI (updates.rs)
+        .route("/updates", get(updates))
+        .route("/updates/refresh", post(refresh_updates))
+        .route("/providers/{name}/update", post(start_update))
         // ----
         // Reflex screen: calibration cases, decision feedback and summary, corpus archive.
         .route("/projects/{slug}/cases", get(projects::cases).post(projects::add_cases))
@@ -436,6 +440,29 @@ async fn usage(State(hub): State<Arc<Hub>>) -> Json<crate::model::UsageReport> {
 /// other state-changing routes, so a cross-site form cannot trigger it.
 async fn refresh_usage(State(hub): State<Arc<Hub>>, Json(_): Json<Value>) -> Json<crate::model::UsageReport> {
     Json(crate::usage::refresh(&hub).await)
+}
+
+// ---- updates
+
+/// The latest check (every `updates.interval_secs`).
+async fn updates(State(hub): State<Arc<Hub>>) -> Json<crate::model::UpdatesReport> {
+    Json(hub.updates.report())
+}
+
+/// Checks every provider now (a check in the last few seconds is returned as is). Takes `{}` like the other
+/// state-changing routes.
+async fn refresh_updates(State(hub): State<Arc<Hub>>, Json(_): Json<Value>) -> Json<crate::model::UpdatesReport> {
+    Json(crate::updates::refresh(&hub, crate::updates::DEBOUNCE).await)
+}
+
+/// Runs the provider's `update` command in the helper session `<prefix>update-<name>` (409 while one runs, or when
+/// the CLI is installed read-only). The version is checked again when the session ends. Takes `{}`.
+async fn start_update(State(hub): State<Arc<Hub>>, UrlPath(name): UrlPath<String>, Json(_): Json<Value>) -> ApiResult<Session> {
+    match crate::updates::start(&hub, &name).await {
+        Ok(session) => Ok(Json(session)),
+        Err(crate::updates::StartError::Conflict(why)) => Err(ApiError(StatusCode::CONFLICT, why)),
+        Err(crate::updates::StartError::Invalid(err)) => Err(err.into()),
+    }
 }
 
 #[cfg(test)]

@@ -221,6 +221,9 @@ pub enum ServerMessage {
     Resync,
     /// A new usage reading (every `usage.interval_secs`, or after `POST /api/usage/refresh`).
     Usage { report: UsageReport },
+    /// A new update check (every `updates.interval_secs`, after `POST /api/updates/refresh`, or when an update
+    /// session ends), or an update session started.
+    Updates { report: UpdatesReport },
 }
 
 // ---- projects and decisions
@@ -968,6 +971,49 @@ pub struct UsageReport {
     #[ts(type = "number")]
     pub interval_secs: u64,
     pub providers: Vec<ProviderUsage>,
+}
+
+// ---- updates
+
+/// One provider CLI's installed and newest version.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct UpdateInfo {
+    pub provider: String,
+    /// From the provider's `version` command; `None` when it has none, the binary is missing, or it failed.
+    pub installed: Option<String>,
+    /// From the provider's `latest` source; `None` when it has none or the request failed.
+    pub latest: Option<String>,
+    /// `latest` is newer than `installed`.
+    pub available: bool,
+    /// When this provider was last checked; `None` before the first check.
+    pub checked_at: Option<DateTime<Utc>>,
+    /// Why the check failed or is incomplete (missing binary, timeout, unreachable source…).
+    pub error: Option<String>,
+    /// The `version` command as run (`{binary}` substituted); empty: none configured.
+    pub version_command: Vec<String>,
+    /// The `latest` URL as fetched (placeholders substituted); `None`: none configured.
+    pub latest_url: Option<String>,
+    /// The `update` command `POST /api/providers/{name}/update` runs; empty: none configured.
+    pub update_command: Vec<String>,
+    /// Set when an update from here cannot work, e.g. the CLI is installed read-only (the Docker deploy).
+    pub update_blocked: Option<String>,
+    /// The helper session `<session_prefix>update-<provider>` is running.
+    pub updating: bool,
+    /// That helper session's name.
+    pub session: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct UpdatesReport {
+    /// `updates.enabled`: the periodic check runs.
+    pub enabled: bool,
+    #[ts(type = "number")]
+    pub interval_secs: u64,
+    /// When the last full check finished; `None` before the first.
+    pub checked_at: Option<DateTime<Utc>>,
+    pub providers: Vec<UpdateInfo>,
 }
 
 // ---- reflex screen

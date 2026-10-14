@@ -7,6 +7,7 @@ import { useState, type ReactNode } from "react";
 import { SCREEN_LABEL, SCREENS } from "@/lib/nav";
 
 import { useApp } from "../app-context";
+import { UpdatesBell } from "../updates-bell";
 import { UsageMini } from "../usage-mini";
 
 /** The default workspace's display name: the last segment of `workspace.dir`. */
@@ -111,7 +112,7 @@ function Nav() {
 }
 
 /** Sticky bar on every screen: logo, project switcher, nav, then `extra` (e.g. the command centre's status items),
- * the usage pill, the clock and the theme toggle. */
+ * the CLI updates bell, the usage pill, the clock and the theme toggle. */
 export function TopBar({ extra }: { extra?: ReactNode }) {
   const { go, theme, toggleTheme } = useApp();
   return (
@@ -132,6 +133,7 @@ export function TopBar({ extra }: { extra?: ReactNode }) {
         {extra}
       </div>
       <div className="flex items-center gap-3">
+        <UpdatesBell />
         <UsageMini />
         <Clock />
         <button onClick={toggleTheme} className="flex size-7 items-center justify-center rounded-md text-muted hover:bg-white/5 hover:text-text" aria-label="Toggle theme">
