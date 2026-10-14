@@ -34,6 +34,7 @@ import type { ArchiveResult } from "./generated/ArchiveResult";
 import type { DecisionFeedback } from "./generated/DecisionFeedback";
 import type { DecisionSummary } from "./generated/DecisionSummary";
 import type { ReflexCase } from "./generated/ReflexCase";
+import type { SavingsReport } from "./generated/SavingsReport";
 
 const TOKEN_KEY = "map.apiToken";
 
@@ -159,6 +160,8 @@ export const api = {
     request<DecisionFeedback>("POST", `/projects/${slug}/decisions/${id}/feedback`, body),
   /** Moves domains to `_archive/` in the corpus repo (default: the smallest until 8 are left), or back with `restore`. */
   archiveDomains: (slug: string, body: { domains?: string[]; restore?: boolean }) => request<ArchiveResult>("POST", `/projects/${slug}/corpus/archive`, body),
+  /** Tokens Reflex saved against what the fallbacks spent over the last `hours`; `project: null` is every project. */
+  savings: (hours: number, project: string | null) => request<SavingsReport>("GET", `/reflex/savings?hours=${hours}&project=${encodeURIComponent(project ?? "")}`),
   // ---- templates: lay a development process into a project's folder, then queue the init agent
   templates: () => request<TemplateInfo[]>("GET", "/templates"),
   /** What each file would become (create, skip, append); writes nothing. */

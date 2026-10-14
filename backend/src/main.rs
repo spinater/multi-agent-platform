@@ -12,6 +12,7 @@ mod project_settings;
 mod projects;
 mod reflex;
 mod reflex_screen;
+mod savings;
 mod repo;
 mod skills;
 mod store;

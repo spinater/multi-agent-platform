@@ -19,6 +19,9 @@ use crate::{project_settings, reflex, repo};
 // Reflex screen.
 use crate::model::{ArchiveResult, DecisionFeedback, DecisionSummary, ReflexCase};
 use crate::reflex_screen;
+// Reflex savings.
+use crate::model::SavingsReport;
+use crate::savings;
 
 async fn load(hub: &Hub, slug: &str) -> Result<Project, ApiError> {
     hub.store.project(slug).await?.ok_or_else(|| not_found("project"))
@@ -361,4 +364,21 @@ pub struct ArchiveBody {
 pub async fn archive(State(hub): State<Arc<Hub>>, UrlPath(slug): UrlPath<String>, Json(b): Json<ArchiveBody>) -> ApiResult<ArchiveResult> {
     load(&hub, &slug).await?;
     Ok(Json(reflex_screen::archive(&hub, &slug, b.domains, b.restore).await?))
+}
+
+// ---- reflex savings: tokens Reflex saved against what the fallbacks spent (savings.rs)
+
+#[derive(Deserialize)]
+pub struct SavingsQuery {
+    hours: Option<i64>,
+    /// A project's slug; empty or absent: every project.
+    project: Option<String>,
+}
+
+pub async fn savings(State(hub): State<Arc<Hub>>, Query(q): Query<SavingsQuery>) -> ApiResult<SavingsReport> {
+    let project = q.project.filter(|p| !p.is_empty());
+    if let Some(slug) = &project {
+        load(&hub, slug).await?;
+    }
+    Ok(Json(savings::load(&hub, project.as_deref(), q.hours.unwrap_or(24), chrono::Utc::now()).await?))
 }

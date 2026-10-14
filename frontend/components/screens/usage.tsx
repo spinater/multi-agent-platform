@@ -1,10 +1,13 @@
 "use client";
 
 import { RotateCw } from "lucide-react";
+import { useEffect, useState } from "react";
 
+import { api } from "@/lib/api";
 import { projectColor, providerColor } from "@/lib/colors";
 import type { ProjectShare } from "@/lib/generated/ProjectShare";
 import type { ProviderUsage } from "@/lib/generated/ProviderUsage";
+import type { SavingsReport } from "@/lib/generated/SavingsReport";
 import type { UsageWindow } from "@/lib/generated/UsageWindow";
 import { updateOf, useUpdates } from "@/lib/use-updates";
 import { badgeOf, clockAt, dur, fmtTokens, meterColor, providerName, readUsageNow, useUsage, worstOf } from "@/lib/use-usage";
@@ -235,6 +238,42 @@ function Strip({ p, skip }: { p: ProviderUsage; skip: number }) {
   );
 }
 
+/** "Reflex saved ≈N tokens in the last 24 h", linking to the Reflex savings page; nothing until a decision exists. */
+function ReflexSaved() {
+  const { projects, go } = useApp();
+  const asked = projects.reduce((n, p) => n + p.stats.total, 0);
+  const [report, setReport] = useState<SavingsReport | null>(null);
+  useEffect(() => {
+    if (!asked) return;
+    let live = true;
+    api.savings(24, null).then(
+      (r) => live && setReport(r),
+      () => {},
+    );
+    return () => {
+      live = false;
+    };
+  }, [asked]);
+  const t = report?.totals;
+  if (!asked || !t || !t.decisions) return null;
+  return (
+    <button onClick={() => go("reflex", "savings")} className={`${mono} cursor-pointer self-start text-left text-[11px] leading-[1.5] text-muted hover:text-text`}>
+      {t.tokens_saved > 0 ? (
+        <>
+          <span className="text-ok">
+            Reflex saved {t.method === "measured" ? "" : "≈"}
+            {fmtTokens(t.tokens_saved)} tokens
+          </span>{" "}
+          in the last 24 h · {t.llm_calls_avoided} LLM call{t.llm_calls_avoided === 1 ? "" : "s"} avoided
+        </>
+      ) : (
+        <>Reflex answered none of the last 24 h&apos;s {t.decisions} decisions, so it saved no tokens yet</>
+      )}{" "}
+      · <span className="text-link">savings →</span>
+    </button>
+  );
+}
+
 /** Plan limits for each agent account on this machine (design: Usage.dc.html). Shared by all projects. */
 export function UsageScreen() {
   const { now, projects } = useApp();
@@ -263,6 +302,7 @@ export function UsageScreen() {
               Plan limits for each agent account, read from each CLI&apos;s own usage source. The orchestrator stops giving new tasks to a provider once any of
               its windows passes {Math.round(skip)}%.
             </p>
+            <ReflexSaved />
           </div>
           <div className="flex flex-wrap items-center gap-2.5">
             <span className={`${mono} text-[11px] leading-none whitespace-nowrap text-muted`}>{readLabel}</span>

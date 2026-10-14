@@ -148,4 +148,32 @@ export function Bar({ width, color, className }: { width: string; color: string;
   );
 }
 
-export const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
+export type ReflexView = "engine" | "savings";
+
+/** The Reflex screen's two views (`#reflex`, `#reflex/savings`), top right of the page. */
+export function ReflexTabs({ active, onPick }: { active: ReflexView; onPick: (v: ReflexView) => void }) {
+  const tabs: [ReflexView, string][] = [
+    ["engine", "Engine"],
+    ["savings", "Savings"],
+  ];
+  return (
+    <div role="tablist" aria-label="Reflex views" className="flex overflow-hidden rounded-md border border-r-line2">
+      {tabs.map(([v, label]) => (
+        <button
+          key={v}
+          role="tab"
+          aria-selected={active === v}
+          onClick={() => onPick(v)}
+          className={clsx(
+            "h-7 px-3 text-[10.5px] font-semibold tracking-[0.12em] whitespace-nowrap uppercase focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-r-accent",
+            active === v ? "bg-r-accent text-r-accent-ink" : "text-r-muted hover:text-r-text",
+          )}
+        >
+          {label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+export const errText =(e: unknown) => (e instanceof Error ? e.message : String(e));

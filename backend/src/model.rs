@@ -1290,6 +1290,94 @@ pub struct ArchiveResult {
     pub reflex: ReflexStatus,
 }
 
+// ---- Reflex savings: LLM tokens Reflex saved by answering locally (savings.rs)
+
+/// Where a token figure comes from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum TokenMethod {
+    /// Every figure rests on usage the provider reported (the API fallback's `usage`).
+    Measured,
+    /// Every figure is an estimate: about 4 characters per token.
+    Estimated,
+    /// Some of each.
+    Mixed,
+}
+
+/// Decisions and tokens of one project (or of all, in `totals`) over the report's window.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct SavingsRow {
+    /// Empty in `totals` when it covers every project.
+    pub slug: String,
+    pub name: String,
+    #[ts(type = "number")]
+    pub decisions: i64,
+    #[ts(type = "number")]
+    pub reflex: i64,
+    #[ts(type = "number")]
+    pub llm: i64,
+    #[ts(type = "number")]
+    pub abstain: i64,
+    /// Decisions whose state had Thai text, so Reflex was not asked: they could not save anything.
+    #[ts(type = "number")]
+    pub skipped_thai: i64,
+    /// Every reflex-lane answer is a fallback call not made.
+    #[ts(type = "number")]
+    pub llm_calls_avoided: i64,
+    /// What the reflex-lane answers would have cost the fallback.
+    #[ts(type = "number")]
+    pub tokens_saved: i64,
+    /// Input plus output tokens of the llm-lane answers.
+    #[ts(type = "number")]
+    pub tokens_spent: i64,
+    /// `100 × saved / (saved + spent)`; `null` when both are 0.
+    pub saved_pct: Option<f64>,
+    pub method: TokenMethod,
+    /// Mean time to answer per lane, in milliseconds; `null` without decisions in that lane.
+    pub avg_ms_reflex: Option<f64>,
+    pub avg_ms_llm: Option<f64>,
+    /// `reflex × max(0, avg_ms_llm − avg_ms_reflex)`; `null` without llm-lane decisions to compare with.
+    #[ts(type = "number | null")]
+    pub time_saved_ms: Option<i64>,
+}
+
+/// One UTC day of the report.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct SavingsDay {
+    /// `YYYY-MM-DD`, in UTC.
+    pub day: String,
+    #[ts(type = "number")]
+    pub saved: i64,
+    #[ts(type = "number")]
+    pub spent: i64,
+    #[ts(type = "number")]
+    pub reflex: i64,
+    #[ts(type = "number")]
+    pub llm: i64,
+}
+
+/// `GET /api/reflex/savings`: tokens Reflex saved against what the fallbacks spent, since `since`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct SavingsReport {
+    pub since: DateTime<Utc>,
+    #[ts(type = "number")]
+    pub hours: i64,
+    /// How the figures are counted, in a few sentences.
+    pub method_note: String,
+    pub totals: SavingsRow,
+    /// Every project in the report (one when it is filtered), in creation order.
+    pub projects: Vec<SavingsRow>,
+    /// One per UTC day the window touches, oldest first.
+    pub days: Vec<SavingsDay>,
+    /// `[reflex] fallback_overhead_tokens` from `map.toml`: tokens added per call of that fallback.
+    #[ts(type = "Record<string, number>")]
+    pub overhead_tokens: std::collections::BTreeMap<String, u64>,
+}
+
 // ---- templates: a development process laid into a project's folder (templates.rs)
 
 /// Where a template comes from: built into the binary, or a folder in `templates.dirs` of `map.toml`.

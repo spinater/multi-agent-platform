@@ -69,6 +69,11 @@ nothing is tied to one repository, session name or provider.
     straight to the fallback, with the reason in the answer.
   - **More than 8 domains** pauses Reflex. Archiving moves domains to `_archive/` in the corpus repo (one commit),
     which Reflex never loads; the dashboard's Reflex screen offers to archive the smallest.
+  - **Savings** (`#reflex/savings`): LLM tokens Reflex saved against what the fallbacks spent, per day and per
+    project. Every decision records its fallback prompt's length; spent tokens are the API's reported `usage`, else
+    ~4 chars per token (headless CLIs report nothing; `[reflex] fallback_overhead_tokens` adds their own system
+    prompt). A reflex answer is priced at the project's measured tokens per call when 3 or more API calls in 30 days
+    reported usage, else `ceil(prompt chars / 4) + 16`. Thai decisions are counted apart: they never reach Reflex.
 - **Updates.** A bell in the top bar counts the agent CLIs with a newer release (`[updates]` in `map.toml`, checked
   every `interval_secs`, 6 hours by default). Each provider's `version` command (`claude --version`…, run with the
   workspace env, no stdin and a timeout) is compared with the version its `latest` source publishes (Claude's release
@@ -114,6 +119,7 @@ nothing is tied to one repository, session name or provider.
 | `backend/src/updates.rs` | CLI update checks (version command vs. latest source), update helper sessions |
 | `backend/src/skills.rs`, `agents.rs` | The Skills screen's scan; custom sub-agents read and written in each CLI's format |
 | `backend/src/decide.rs` | The decision gate (Reflex, threshold, fallback), answer parsing, threshold fitting |
+| `backend/src/savings.rs` | Tokens Reflex saved vs spent by the fallbacks (pure arithmetic over the decision log) |
 | `backend/src/api/git.rs` | Git smart HTTP through `git http-backend`; a corpus push restarts Reflex |
 | `backend/src/api/` | REST and WebSocket, token, Host and Origin checks |
 | `backend/src/model.rs` | Shared types, exported to TypeScript by ts-rs |
@@ -282,7 +288,8 @@ folders in `[agents]` of `map.toml`):
 The **Reflex** screen (`#reflex`, `frontend/components/reflex/`) is the current project's decision engine: how it
 works with the last 24 h per lane, a set-up checklist that ticks itself (install, corpus, questions, calibration,
 playground), a playground with feedback, calibration on a log-scale scatter with a draggable threshold, and the
-decision log. Confidence is always shown on a log axis (1e-5 … 1e-3, widened by whole decades when a corpus scores
+decision log. Its **Savings** tab (`#reflex/savings`) shows the tokens Reflex saved over 24 h, 7 d or 30 d, for all
+projects or the current one, with a note on how they are counted; the Usage screen links to it. Confidence is always shown on a log axis (1e-5 … 1e-3, widened by whole decades when a corpus scores
 outside it), never as a percentage.
 
 ## Init a project
@@ -389,6 +396,7 @@ All routes are under `/api`. When `server.api_token` is set, send `Authorization
 | POST | `/projects/{slug}/cases/fit` | `{"rho": 0.3, "apply": bool}`: re-score the stored cases (16 or more) and fit the threshold |
 | POST | `/projects/{slug}/corpus/archive` | `{"domains"?: [...], "restore"?: bool}`: move domains to or from `_archive/` (default: the smallest over 8) |
 | POST | `/projects/{slug}/reflex/restart`, GET `…/reflex/log` | Restart Reflex, read its log |
+| GET | `/reflex/savings?hours=24\|168\|720&project=` | Tokens Reflex saved vs spent by the fallbacks: totals, per project, per UTC day, method (measured/estimated/mixed); `project` empty = all |
 | GET | `/tasks/{id}/trace?limit=` | The task's orchestrator decisions (`decision.*` events), newest first |
 | GET | `/decisions/model` | The decision graph (nodes with their rules, edges, event kinds) and the config its rules read |
 | GET | `/decisions/edges?since=&project=` | Times each edge was taken since `since` (default 24 h); `project` empty = default workspace, absent = all |
