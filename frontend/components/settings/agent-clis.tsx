@@ -62,7 +62,7 @@ function AgentLogins({ settings }: { settings: SettingsInfo }) {
       {isolated ? (
         <p className="text-[12.5px] leading-normal text-text-2">
           <span className="font-semibold text-text">Isolated.</span> MAP&apos;s agents use their own accounts and history, kept in{" "}
-          <code className="break-all">{home.dir}</code> (one folder per provider, below). Your own <code>claude</code>, <code>codex</code> and <code>agy</code> in a
+          <code className="break-all">{home.dir}</code> (one folder per provider, below). Your own CLIs (<code>claude</code>, <code>codex</code>, <code>agy</code>, …) in a
           terminal are unaffected, and nothing is copied from them: sign each provider in here once.
         </p>
       ) : (
@@ -145,11 +145,17 @@ function ProviderRow({
         ) : (
           <span className={`font-mono text-[12px] ${TONE[sign.tone]}`}>{sign.text}</span>
         )}
-        {p.login.api_key_env && (
-          <span className="font-mono text-[10.5px] text-muted">
-            or {p.login.api_key_env} in [workspace.env] · {p.login.api_key_set ? <span className="text-ok">set</span> : "not set"}
-          </span>
-        )}
+        {p.login.api_key_env &&
+          (p.login.command ? (
+            <span className="font-mono text-[10.5px] text-muted">
+              or {p.login.api_key_env} in [workspace.env] · {p.login.api_key_set ? <span className="text-ok">set</span> : "not set"}
+            </span>
+          ) : (
+            // A provider signed in by its key alone (openrouter): only whether the key is set, never its value.
+            <span className="font-mono text-[10.5px] text-muted">
+              {p.login.api_key_env} in MAP&apos;s environment or [workspace.env] · {p.login.api_key_set ? <span className="text-ok">set</span> : <span className="text-warn">not set</span>}
+            </span>
+          ))}
       </div>
       <div className="flex flex-wrap items-center gap-1.5 md:justify-end md:pt-3">
         {canSignIn && (

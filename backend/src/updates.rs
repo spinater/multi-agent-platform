@@ -410,35 +410,7 @@ pub async fn check(hub: &Hub, name: &str) -> UpdateInfo {
 
 /// A spec with nothing configured, for a row about a provider that is not in `map.toml`.
 fn empty_spec() -> ProviderSpec {
-    ProviderSpec {
-        binary: String::new(),
-        models: vec![],
-        default_model: String::new(),
-        interactive: vec![],
-        headless: vec![],
-        extra_args: vec![],
-        prompt_mode: crate::config::PromptMode::Send,
-        startup_secs: 0,
-        idle_markers: vec![],
-        working_markers: vec![],
-        auth_markers: vec![],
-        trust_markers: vec![],
-        trust_accept: vec![],
-        trust: None,
-        login: vec![],
-        login_send: None,
-        login_warning: None,
-        credentials: vec![],
-        api_key_env: None,
-        version: vec![],
-        latest: None,
-        update: vec![],
-        home_env: None,
-        default_home: None,
-        home_subdir: None,
-        isolated_dir: None,
-        home_keep: vec![],
-    }
+    ProviderSpec::default()
 }
 
 async fn announce_new(hub: &Hub, infos: &[UpdateInfo]) {

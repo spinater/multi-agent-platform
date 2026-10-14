@@ -358,7 +358,7 @@ function HowCounted({ report }: { report: SavingsReport }) {
     [
       "Spent",
       <>
-        Input plus output tokens of each answer the fallback gave. The Anthropic API reports them; headless CLIs (<code>claude -p</code>, <code>codex exec</code>,{" "}
+        Input plus output tokens of each answer the fallback gave. The API fallback reports them; headless CLIs (<code>claude -p</code>, <code>codex exec</code>,{" "}
         <code>agy -p</code>) report nothing, so theirs are ceil(chars / 4) of the prompt and the reply. Fallback replies that matched no option are counted as
         abstentions, not here.
       </>,

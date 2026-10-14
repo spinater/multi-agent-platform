@@ -31,6 +31,8 @@ pub async fn overview(State(hub): State<Arc<Hub>>, Query(q): Query<AgentQuery>) 
     let project = known_project(&hub, q.project).await?;
     let (cfg, workspace) = (hub.config.agents.clone(), hub.work_dir(project.as_deref()).await);
     let mut overview = tokio::task::spawn_blocking(move || agents::overview(&cfg, &workspace)).await.map_err(anyhow::Error::from)?;
+    // Only CLIs this server has configured.
+    overview.readers.retain(|r| hub.config.providers.contains_key(&r.provider));
     overview.project = project;
     Ok(Json(overview))
 }

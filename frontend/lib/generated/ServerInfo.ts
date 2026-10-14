@@ -19,4 +19,8 @@ reflex_version: string | null,
 /**
  * `workspace.tmux_socket`: the private tmux server (`tmux -L <name>`) agents run on; `None`: tmux's default.
  */
-tmux_socket: string | null, };
+tmux_socket: string | null, 
+/**
+ * What a project fallback of `api` calls, from `[reflex] api_url`: "Anthropic API", "OpenRouter API", …
+ */
+api_fallback: string, };

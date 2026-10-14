@@ -125,7 +125,7 @@ export function Inset({ children, className }: { children: ReactNode; className?
   return <div className={clsx("flex flex-col rounded-lg border border-line bg-inset px-3.5 py-3 font-mono text-[11.5px] leading-[1.6]", className)}>{children}</div>;
 }
 
-const CLI_NAME: Record<string, string> = { claude: "Claude Code", codex: "Codex", gemini: "agy" };
+const CLI_NAME: Record<string, string> = { claude: "Claude Code", codex: "Codex", gemini: "agy", cursor: "Cursor", copilot: "Copilot", openrouter: "OpenRouter" };
 export const cliName = (provider: string) => CLI_NAME[provider] ?? provider;
 
 /** What happens to a project's folder about the CLIs' "trust this folder?" question (`workspace.trust_folders`). */

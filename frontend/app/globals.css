@@ -36,6 +36,9 @@
   --p-claude: #f2a65a;
   --p-codex: #5ea8f2;
   --p-gemini: #b48cf2;
+  --p-cursor: #c9d1d9;
+  --p-copilot: #7ccf5a;
+  --p-openrouter: #f27aa8;
   --p-other: #4fd1b5;
   --area-1: #f2a65a;
   --area-2: #5ea8f2;
@@ -80,6 +83,9 @@
   --p-claude: #c46f12;
   --p-codex: #2f6fb5;
   --p-gemini: #7650c8;
+  --p-cursor: #475569;
+  --p-copilot: #2f7d32;
+  --p-openrouter: #b83b72;
   --p-other: #1f8f78;
   --area-1: #c46f12;
   --area-2: #2f6fb5;
@@ -158,6 +164,9 @@
   --color-p-claude: var(--p-claude);
   --color-p-codex: var(--p-codex);
   --color-p-gemini: var(--p-gemini);
+  --color-p-cursor: var(--p-cursor);
+  --color-p-copilot: var(--p-copilot);
+  --color-p-openrouter: var(--p-openrouter);
   --color-p-other: var(--p-other);
   --color-r-bg: var(--r-bg);
   --color-r-panel: var(--r-panel);

@@ -4,6 +4,7 @@ import type { DecisionSummary } from "@/lib/generated/DecisionSummary";
 import type { Lane } from "@/lib/generated/Lane";
 import type { Question } from "@/lib/generated/Question";
 
+import { useApp } from "../app-context";
 import { LANE_COLOR, type Axis, fallbackName, fmtConf, fmtMs, kindLabel, mix, type Corpus, type Mode, pct } from "./lib";
 import { Bar } from "./ui";
 
@@ -55,12 +56,13 @@ export function Flow({
   summary: DecisionSummary | null;
   axis: Axis;
 }) {
+  const { server } = useApp();
   const total = summary?.total ?? 0;
   const share = (l: Lane) => (total ? (summary?.[l].count ?? 0) / total : 0);
   const avg = (l: Lane) => summary?.[l].avg_ms ?? 0;
   const lanes: { when: string; lane: Lane; note: string }[] = [
     { when: "yes", lane: "reflex", note: summary?.reflex.count ? `free · ~${fmtMs(avg("reflex"))}` : "free" },
-    { when: "no", lane: "llm", note: `${fallbackName(fallback)}${summary?.llm.count ? ` · ~${fmtMs(avg("llm"))}` : ""}` },
+    { when: "no", lane: "llm", note: `${fallbackName(fallback, server?.api_fallback)}${summary?.llm.count ? ` · ~${fmtMs(avg("llm"))}` : ""}` },
     { when: "nobody", lane: "abstain", note: "no answer" },
   ];
   const domains = corpus?.domains.length ?? 0;

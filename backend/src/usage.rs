@@ -6,7 +6,10 @@
 //!   returned.
 //! - **Codex**: the newest `rate_limits` snapshot in `~/.codex/sessions/**/rollout-*.jsonl`, written on Codex's last
 //!   run. It is reported as a snapshot with its age.
-//! - Anything else (`agy`, custom CLIs): no local source exists, so the report says so instead of guessing.
+//! - **OpenRouter**: `GET openrouter.ai/api/v1/key` with the owner's `OPENROUTER_API_KEY`: the key's credit limit
+//!   and the free models' daily cap. The key goes to openrouter.ai only, for that request.
+//! - Anything else (`agy`, Cursor, Copilot, custom CLIs): no local source exists, so the report says so instead of
+//!   guessing.
 
 use std::collections::{HashMap, HashSet};
 use std::fs::File;
@@ -27,6 +30,7 @@ use crate::model::{Level, ProjectShare, ProviderUsage, ShareKind, TokenTotals, U
 use crate::store::Store;
 
 const CLAUDE_USAGE_URL: &str = "https://api.anthropic.com/api/oauth/usage";
+const OPENROUTER_KEY_URL: &str = "https://openrouter.ai/api/v1/key";
 /// "Read now" within this long of the last read returns that read instead of asking the providers again.
 const DEBOUNCE: Duration = Duration::from_secs(10);
 /// Pace needs readings at least this far apart.
@@ -38,11 +42,13 @@ const KEEP_SAMPLES_DAYS: i64 = 8;
 pub enum Reader {
     Claude,
     Codex,
+    /// The OpenRouter API key's own limit.
+    OpenRouter,
     None,
 }
 
-/// The reader for `provider`, or `None` when its reader is turned off. A provider not named `claude`/`codex` gets
-/// one when its binary is, or when `[usage.providers.<name>] reader` says so.
+/// The reader for `provider`, or `None` when its reader is turned off. A provider not named `claude`/`codex`/`openrouter`
+/// gets one when its binary is, or when `[usage.providers.<name>] reader` says so.
 pub fn reader_for(config: &Config, provider: &str) -> Option<Reader> {
     let settings = config.usage.providers.get(provider);
     if settings.is_some_and(|p| !p.enabled) {
@@ -51,6 +57,7 @@ pub fn reader_for(config: &Config, provider: &str) -> Option<Reader> {
     let by = |s: &str| match s {
         "claude" => Reader::Claude,
         "codex" => Reader::Codex,
+        "openrouter" => Reader::OpenRouter,
         _ => Reader::None,
     };
     if let Some(r) = settings.and_then(|p| p.reader.as_deref()) {
@@ -79,6 +86,7 @@ fn source_of(reader: Option<Reader>) -> &'static str {
     match reader {
         Some(Reader::Claude) => "/usage endpoint",
         Some(Reader::Codex) => "codex session logs",
+        Some(Reader::OpenRouter) => "openrouter.ai key endpoint",
         Some(Reader::None) => "no local reader",
         None => "reader off",
     }
@@ -191,6 +199,7 @@ pub async fn refresh(hub: &Arc<Hub>) -> UsageReport {
             Some(Reader::None) => blank(&name, reader, UsageStatus::NoReader),
             Some(Reader::Claude) => read_claude(hub, &name, last, &places, now).await,
             Some(Reader::Codex) => read_codex(hub, &name, last, &places, now).await,
+            Some(Reader::OpenRouter) => read_openrouter(hub, &name, last, now).await,
         };
         apply_pace(&hub.store, &mut p, now).await;
         p.skipped = skip_until(&p.windows, cfg.skip_pct, now, Duration::from_secs(cfg.interval_secs)).is_some();
@@ -929,6 +938,118 @@ async fn read_codex(hub: &Hub, name: &str, _last: Option<&ProviderUsage>, places
     p
 }
 
+// ---- OpenRouter: the API key's own limit (`GET /api/v1/key`)
+
+/// The key's plan and limits from a `GET /api/v1/key` body: its credit limit as a window when it has one (spent
+/// dollars against the limit, resetting daily/weekly/monthly or never), and the free models' daily request cap.
+pub fn parse_openrouter_key(v: &Value) -> (Option<String>, Vec<UsageWindow>) {
+    let d = v.get("data").unwrap_or(v);
+    let num = |k: &str| d.get(k).and_then(Value::as_f64);
+    let usage = num("usage");
+    let free = d.get("is_free_tier").and_then(Value::as_bool) == Some(true);
+    let mut plan = if free { "free tier".to_string() } else { "credits".to_string() };
+    let mut out = vec![];
+    match num("limit").filter(|l| *l > 0.0) {
+        Some(limit) => {
+            let reset = d.get("limit_reset").and_then(Value::as_str).filter(|r| !r.is_empty() && *r != "never");
+            let used = match num("limit_remaining") {
+                Some(left) => (limit - left).max(0.0),
+                None => match reset {
+                    Some("daily") => num("usage_daily").unwrap_or(0.0),
+                    Some("weekly") => num("usage_weekly").unwrap_or(0.0),
+                    Some("monthly") => num("usage_monthly").unwrap_or(0.0),
+                    _ => usage.unwrap_or(0.0),
+                },
+            };
+            let (kind, minutes) = match reset {
+                Some("daily") => ("daily key limit", Some(1440)),
+                Some("weekly") => ("weekly key limit", Some(10080)),
+                Some("monthly") => ("monthly key limit", None),
+                _ => ("key limit", None),
+            };
+            let mut w = window("key_limit", "Key credit limit", "credits", kind, minutes, Some((used / limit * 100.0).clamp(0.0, 100.0)), None);
+            w.used = Some(used);
+            w.cap = Some(limit);
+            w.note = Some(format!("${used:.2} of ${limit:.2}"));
+            out.push(w);
+        }
+        None => {
+            if let Some(u) = usage {
+                plan = format!("{plan} · ${u:.2} used, no key limit");
+            }
+        }
+    }
+    if let Some(f) = d.get("free_model_daily_requests").filter(|f| f.is_object()) {
+        let (used, cap) = (f.get("used").and_then(Value::as_f64), f.get("limit").and_then(Value::as_f64));
+        if let (Some(used), Some(cap)) = (used, cap.filter(|c| *c > 0.0)) {
+            let mut w = window("free_daily", "Free models · today", "free/day", "daily request cap", Some(1440), Some((used / cap * 100.0).clamp(0.0, 100.0)), None);
+            w.used = Some(used);
+            w.cap = Some(cap);
+            out.push(w);
+        }
+    }
+    (Some(plan), out)
+}
+
+/// The OpenRouter key's limits. The key is read from the environment for this one request to openrouter.ai and goes
+/// nowhere else: never logged, stored or returned.
+async fn read_openrouter(hub: &Hub, name: &str, last: Option<&ProviderUsage>, now: DateTime<Utc>) -> ProviderUsage {
+    let mut p = blank(name, Some(Reader::OpenRouter), UsageStatus::Live);
+    let spec = hub.config.providers.get(name);
+    let var = spec.and_then(|s| s.api_key_env.clone()).unwrap_or_else(|| "OPENROUTER_API_KEY".into());
+    let key = hub.config.env_value(&var).or_else(|| {
+        let v = spec?.env.get(&var)?;
+        match crate::config::env_ref(v) {
+            Some(r) => hub.config.env_value(r),
+            None => Some(v.clone()).filter(|v| !v.is_empty()),
+        }
+    });
+    let Some(key) = key else {
+        p.status = UsageStatus::SignedOut;
+        p.error = Some(format!("{var} is not set for this server"));
+        return p;
+    };
+    let fetched = async {
+        let response = hub.http.get(OPENROUTER_KEY_URL).bearer_auth(&key).timeout(Duration::from_secs(15)).send().await.map_err(|e| {
+            if e.is_timeout() { "openrouter.ai timed out".to_string() } else { "could not reach openrouter.ai".to_string() }
+        })?;
+        let status = response.status();
+        if status == reqwest::StatusCode::UNAUTHORIZED || status == reqwest::StatusCode::FORBIDDEN {
+            return Err(format!("openrouter.ai refused {var} ({status})"));
+        }
+        if !status.is_success() {
+            return Err(format!("openrouter.ai answered {status}"));
+        }
+        response.json::<Value>().await.map_err(|_| "openrouter.ai sent a body that is not JSON".to_string())
+    }
+    .await;
+    match fetched {
+        Ok(body) => {
+            let (plan, windows) = parse_openrouter_key(&body);
+            for w in &windows {
+                if let Some(u) = w.used_pct
+                    && let Err(err) = hub.store.insert_usage_sample(name, &w.id, now, u, w.resets_at).await
+                {
+                    tracing::warn!("storing a usage sample: {err:#}");
+                }
+            }
+            p.plan = plan;
+            p.windows = windows;
+            p.read_at = Some(now);
+        }
+        Err(error) => {
+            p.status = UsageStatus::Error;
+            p.error = Some(error);
+            if let Some(last) = last {
+                p.windows = last.windows.iter().cloned().map(|w| UsageWindow { rate_per_hour: None, projected_pct: None, ..w }).collect();
+                p.read_at = last.read_at;
+                p.plan = last.plan.clone();
+            }
+        }
+    }
+    p
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1146,6 +1267,33 @@ mod tests {
         assert_eq!(hub.store.task(task.id).await.unwrap().unwrap().status, TaskStatus::Running);
     }
 
+    #[test]
+    fn openrouter_key_limits_become_windows() {
+        // GET /api/v1/key for a key with a monthly $20 limit and the free-model daily cap.
+        let body = serde_json::json!({"data": {"label": "sk-or-v1-abc...", "limit": 20.0, "limit_remaining": 15.0, "limit_reset": "monthly", "usage": 42.5, "usage_monthly": 5.0, "is_free_tier": false, "free_model_daily_requests": {"used": 10, "limit": 1000, "remaining": 990}}});
+        let (plan, windows) = parse_openrouter_key(&body);
+        assert_eq!(plan.as_deref(), Some("credits"));
+        assert_eq!(windows.len(), 2);
+        let w = &windows[0];
+        assert_eq!((w.id.as_str(), w.kind.as_str(), w.used_pct, w.used, w.cap), ("key_limit", "monthly key limit", Some(25.0), Some(5.0), Some(20.0)));
+        assert_eq!(w.note.as_deref(), Some("$5.00 of $20.00"));
+        assert_eq!((windows[1].id.as_str(), windows[1].used_pct), ("free_daily", Some(1.0)));
+        // No limit on the key: nothing to fill up, the spend goes in the plan line.
+        let (plan, windows) = parse_openrouter_key(&serde_json::json!({"data": {"limit": null, "usage": 3.21, "is_free_tier": true}}));
+        assert_eq!(plan.as_deref(), Some("free tier · $3.21 used, no key limit"));
+        assert!(windows.is_empty());
+    }
+
+    #[tokio::test]
+    async fn openrouter_without_a_key_is_signed_out_and_never_calls_out() {
+        let (hub, _dir) = hub_with("[providers.openrouter]\napi_key_env = \"MAP_TEST_NO_SUCH_KEY_9Q\"\nenv = {}\n").await;
+        assert_eq!(reader_for(&hub.config, "openrouter"), Some(Reader::OpenRouter), "by name, not by its `claude` binary");
+        let p = read_openrouter(&hub, "openrouter", None, Utc::now()).await;
+        assert_eq!(p.status, UsageStatus::SignedOut);
+        assert_eq!(p.error.as_deref(), Some("MAP_TEST_NO_SUCH_KEY_9Q is not set for this server"));
+        assert!(Config::parse("[workspace]\ndir = \"/r\"\n[usage.providers.cursor]\nreader = \"openrouter\"\n", Path::new("/")).is_ok());
+    }
+
     #[tokio::test]
     async fn samples_round_trip_and_disabled_readers_are_reported() {
         let (hub, _dir) = hub_with("[usage.providers.codex]\nenabled = false").await;
@@ -1160,6 +1308,16 @@ mod tests {
         assert_eq!(hub.store.usage_samples("claude", "session", now - chrono::Duration::hours(1)).await.unwrap().len(), 1);
 
         let statuses: Vec<(String, UsageStatus)> = hub.usage.report().providers.into_iter().map(|p| (p.provider, p.status)).collect();
-        assert_eq!(statuses, [("claude".into(), UsageStatus::Pending), ("codex".into(), UsageStatus::Disabled), ("gemini".into(), UsageStatus::NoReader)]);
+        assert_eq!(
+            statuses,
+            [
+                ("claude".into(), UsageStatus::Pending),
+                ("codex".into(), UsageStatus::Disabled),
+                ("copilot".into(), UsageStatus::NoReader),
+                ("cursor".into(), UsageStatus::NoReader),
+                ("gemini".into(), UsageStatus::NoReader),
+                ("openrouter".into(), UsageStatus::Pending),
+            ]
+        );
     }
 }

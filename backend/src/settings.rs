@@ -114,7 +114,7 @@ pub fn info(hub: &Hub) -> SettingsInfo {
             binary: spec.binary.clone(),
             path: path(&spec.binary),
             home: hub.provider_home(name).map(|p| p.display().to_string()),
-            home_env: hub.provider_env(name).into_iter().next().map(|(k, v)| format!("{k}={v}")),
+            home_env: hub.config.provider_home_export(name).map(|(k, v)| format!("{k}={v}")),
         })
         .collect();
     let agents_home = AgentsHome {

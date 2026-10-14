@@ -590,7 +590,17 @@ fn scan(cfg: &SkillsConfig, workspace: &Path) -> (Vec<ContextFile>, Vec<Skill>) 
         };
 
         let mut loads_in = vec![SkillLoad { provider: c.home.into(), how: "native".into() }];
+        if let Some(folder) = c.folder.as_deref().filter(|_| c.source == SkillSource::Project) {
+            for (provider, dirs) in &cfg.also_loaded_by {
+                if provider != c.home && dirs.iter().any(|d| d.as_os_str() == folder) {
+                    loads_in.push(SkillLoad { provider: provider.clone(), how: format!("native ({folder})") });
+                }
+            }
+        }
         for (provider, file, ctx) in &context_texts {
+            if loads_in.iter().any(|l| &l.provider == provider) {
+                continue;
+            }
             if provider != c.home && mentions(ctx, &name, c.folder.as_deref()) {
                 loads_in.push(SkillLoad { provider: provider.clone(), how: format!("via {file}") });
             }
@@ -1033,10 +1043,15 @@ mod tests {
         assert!(!verify.enabled && verify.can_toggle);
         // AGENTS.md names the project skills folder, so codex may read them.
         assert!(verify.loads_in.iter().any(|l| l.provider == "codex" && l.how == "via AGENTS.md"));
+        // Cursor and Copilot read .claude/skills themselves, and openrouter is Claude Code.
+        for p in ["cursor", "copilot", "openrouter"] {
+            assert!(verify.loads_in.iter().any(|l| l.provider == p && l.how == "native (.claude/skills)"), "{p}: {:?}", verify.loads_in);
+        }
         assert_eq!(by("nofm").description, "Just prose here.");
         let commit = by("commit-message");
         assert!(!commit.enabled && !commit.can_toggle && commit.toggle_note.as_deref().unwrap().contains("settings.json"));
         assert!(!commit.loads_in.iter().any(|l| l.provider == "codex"));
+        assert!(!commit.loads_in.iter().any(|l| l.provider == "copilot"), "user skills: not claimed for other CLIs");
         assert_eq!(by("engineering:debug").plugin.as_deref(), Some("engineering"));
         assert!(by("docs:writer").enabled);
         let img = by("imagegen");

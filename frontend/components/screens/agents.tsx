@@ -10,6 +10,7 @@ import type { AgentScope } from "@/lib/generated/AgentScope";
 import type { AgentsOverview } from "@/lib/generated/AgentsOverview";
 import type { PlannerInstructions } from "@/lib/generated/PlannerInstructions";
 import { plansApi } from "@/lib/use-plans";
+import { providerName } from "@/lib/use-usage";
 
 import { AgentEditor } from "../agents/agent-editor";
 import { AgentMatrix } from "../agents/agent-matrix";
@@ -159,7 +160,7 @@ export function AgentsScreen() {
         <PageHeader
           kicker={`Project · ${projectName}`}
           title="Agents"
-          lead="Custom sub-agents for this project and for you, written in each CLI's own format: Claude Code and agy read Markdown, Codex reads TOML."
+          lead={`Custom sub-agents for this project and for you, written in each CLI's own format: Claude Code and agy read Markdown, Codex reads TOML.${data?.readers.length ? ` ${data.readers.map((r) => providerName(r.provider, true)).join(" and ")} load the Claude Code files of a project.` : ""}`}
           actions={
             <>
               <div className="mr-2 flex flex-wrap items-center gap-x-[22px] gap-y-1.5 font-mono text-[11px] leading-[1.4] text-muted">
@@ -194,7 +195,7 @@ export function AgentsScreen() {
                 Agent × CLI
               </SectionTitle>
               {rows.length ? (
-                <AgentMatrix rows={rows} selected={target && target !== "new" ? agentArg(target.scope, target.name) : null} onSelect={open} />
+                <AgentMatrix rows={rows} readers={data.readers} selected={target && target !== "new" ? agentArg(target.scope, target.name) : null} onSelect={open} />
               ) : (
                 <div className="flex flex-col gap-2 rounded-xl border border-line bg-surface px-5 py-6 text-sm leading-[1.6] text-text-2">
                   <p className="text-text">No agents yet in this project or your home folder.</p>

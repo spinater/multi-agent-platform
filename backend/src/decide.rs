@@ -9,6 +9,7 @@ use chrono::Utc;
 use serde_json::{Value, json};
 use tokio::process::Command;
 
+use crate::config::ApiFormat;
 use crate::hub::Hub;
 use crate::model::{Answer, DecideResponse, Decision, FitCaseResult, FitResult, Lane, Project, Question, QuestionKind};
 use crate::projects::validate_questions;
@@ -129,31 +130,57 @@ pub fn api_usage(body: &Value) -> Option<(i64, i64)> {
     Some((input, u["output_tokens"].as_i64()?))
 }
 
+/// The text of a Chat Completions response: the first choice's message (a string, or a list of text parts).
+pub fn openai_reply(body: &Value) -> String {
+    let content = &body["choices"][0]["message"]["content"];
+    match content.as_str() {
+        Some(s) => s.to_string(),
+        None => content.as_array().into_iter().flatten().filter_map(|p| p["text"].as_str()).collect(),
+    }
+}
+
+/// `usage` of a Chat Completions response: prompt and completion tokens.
+pub fn openai_usage(body: &Value) -> Option<(i64, i64)> {
+    let u = body.get("usage")?;
+    Some((u["prompt_tokens"].as_i64()?, u["completion_tokens"].as_i64()?))
+}
+
 /// Returns the fallback's raw reply to `text`, the question's prompt.
 async fn ask_fallback(hub: &Hub, project: &Project, text: &str) -> Result<Reply> {
     let prompt_chars = text.chars().count() as i64;
     match project.fallback.as_str() {
         "none" => bail!("this project has no fallback"),
         "api" => {
-            let env = &hub.config.reflex.api_key_env;
-            let key = std::env::var(env).ok().filter(|k| !k.is_empty()).with_context(|| format!("{env} is not set on the server"))?;
-            let model = project.model.clone().unwrap_or_else(|| hub.config.reflex.api_model.clone());
-            let resp = hub
-                .http
-                .post("https://api.anthropic.com/v1/messages")
-                .header("x-api-key", key)
-                .header("anthropic-version", "2023-06-01")
-                .timeout(Duration::from_secs(60))
-                .json(&json!({ "model": model, "max_tokens": 64, "messages": [{ "role": "user", "content": text }] }))
-                .send()
-                .await?;
+            let cfg = &hub.config.reflex;
+            let env = &cfg.api_key_env;
+            let key = hub.config.env_value(env).with_context(|| format!("{env} is not set on the server"))?;
+            let model = project.model.clone().unwrap_or_else(|| cfg.api_model.clone());
+            let request = hub.http.post(cfg.api_endpoint()).timeout(Duration::from_secs(60));
+            let messages = json!([{ "role": "user", "content": text }]);
+            let request = match cfg.api_format {
+                ApiFormat::Anthropic => request
+                    .header("x-api-key", key)
+                    .header("anthropic-version", "2023-06-01")
+                    .json(&json!({ "model": model, "max_tokens": 64, "messages": messages })),
+                // OpenRouter shows the title in its activity log; other OpenAI-compatible servers ignore it.
+                ApiFormat::Openai => request
+                    .bearer_auth(key)
+                    .header("X-Title", "MAP")
+                    .json(&json!({ "model": model, "max_tokens": 64, "messages": messages })),
+            };
+            let resp = request.send().await?;
             let code = resp.status();
             let body: Value = resp.json().await?;
             if !code.is_success() {
-                bail!("Anthropic API {code}: {}", body["error"]["message"].as_str().unwrap_or("?"));
+                bail!("{} {code}: {}", cfg.api_name(), body["error"]["message"].as_str().unwrap_or("?"));
             }
-            let reply = body["content"].as_array().into_iter().flatten().filter_map(|b| b["text"].as_str()).collect();
-            Ok(Reply::new(reply, prompt_chars, api_usage(&body)))
+            Ok(match cfg.api_format {
+                ApiFormat::Anthropic => {
+                    let reply = body["content"].as_array().into_iter().flatten().filter_map(|b| b["text"].as_str()).collect();
+                    Reply::new(reply, prompt_chars, api_usage(&body))
+                }
+                ApiFormat::Openai => Reply::new(openai_reply(&body), prompt_chars, openai_usage(&body)),
+            })
         }
         provider => {
             let spec = hub.spec(provider)?;
@@ -170,8 +197,7 @@ async fn ask_fallback(hub: &Hub, project: &Project, text: &str) -> Result<Reply>
             let mut cmd = Command::new(program);
             cmd.args(args)
                 .current_dir(&dir)
-                .envs(hub.provider_env(provider))
-                .envs(&hub.config.workspace.env)
+                .envs(hub.run_env(provider, hub.config.workspace.env.iter().map(|(k, v)| (k.clone(), v.clone())).collect()))
                 .stdin(Stdio::null())
                 .kill_on_drop(true);
             let out = tokio::time::timeout(Duration::from_secs(180), cmd.output()).await.context("the fallback timed out")??;
@@ -410,6 +436,17 @@ pub async fn fit(hub: &Hub, project: &Project, cases: &[(String, Question, Value
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn openai_compatible_replies_and_usage() {
+        let body = json!({"choices": [{"message": {"role": "assistant", "content": "yes"}}], "usage": {"prompt_tokens": 40, "completion_tokens": 1, "total_tokens": 41}});
+        assert_eq!(openai_reply(&body), "yes");
+        assert_eq!(openai_usage(&body), Some((40, 1)));
+        let parts = json!({"choices": [{"message": {"content": [{"type": "text", "text": "no"}, {"type": "text", "text": "."}]}}]});
+        assert_eq!(openai_reply(&parts), "no.");
+        assert_eq!(openai_usage(&parts), None);
+        assert_eq!(openai_reply(&json!({"error": {"message": "x"}})), "");
+    }
 
     fn choice() -> Question {
         Question {
