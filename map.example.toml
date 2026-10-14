@@ -145,6 +145,15 @@ timeout_secs = 600
 # claude_settings = "~/.claude/settings.json"
 # Load counts come from Claude Code's session transcripts of the workspace.
 # claude_transcripts = "~/.claude/projects"
+# Project templates: "Init" on a project lays a development process (task cards, a verify gate, docs folders, agents
+# for every CLI) into the project's folder, never overwriting a file, then queues an init agent that fills in the
+# project-specific parts from your description. "team-process" is built in; each subfolder of these dirs with a
+# template.toml is another template (one with a built-in's name replaces it). `~` expands to $HOME.
+[templates]
+# dirs = ["~/.config/map/templates"]
+# The init agent's instructions (Markdown); unset: the ones built into MAP (backend/templates/init-agent.md).
+# init_agent = "~/.config/map/init-agent.md"
+
 # Plan limits per provider account, shown on the Usage screen and in the top bar. Claude: the account endpoint the
 # CLI's /usage reads, with Claude Code's own sign-in (the token only ever goes to api.anthropic.com). Codex: the
 # newest rate-limit snapshot in its session logs (from its last run). Other CLIs have no local source yet.

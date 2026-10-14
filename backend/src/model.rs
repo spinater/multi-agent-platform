@@ -1111,3 +1111,86 @@ pub struct ArchiveResult {
     pub commit: String,
     pub reflex: ReflexStatus,
 }
+
+// ---- templates: a development process laid into a project's folder (templates.rs)
+
+/// Where a template comes from: built into the binary, or a folder in `templates.dirs` of `map.toml`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum TemplateSource {
+    Builtin,
+    User,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct TemplateFile {
+    /// Relative to the project's folder.
+    pub path: String,
+    /// Names of the `MAP:FILL` placeholders in the file, in order.
+    pub placeholders: Vec<String>,
+    /// Merged line by line into an existing file (`.gitignore`) instead of being skipped.
+    pub append: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct TemplateInfo {
+    pub name: String,
+    pub title: String,
+    pub description: String,
+    pub source: TemplateSource,
+    /// The template's folder, for user templates.
+    pub dir: Option<String>,
+    /// Files whose placeholders the init agent must complete.
+    pub fill: Vec<String>,
+    /// Suggested verify commands for a project that uses the template.
+    pub verify: Vec<String>,
+    /// Every file the template lays down, rendered agents included, sorted by path.
+    pub files: Vec<TemplateFile>,
+}
+
+/// What laying a template down does to one file. Existing files are never overwritten.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum PlanAction {
+    Create,
+    /// The file exists (or, for an append file, already has every line): left alone.
+    Skip,
+    /// The file exists; only its missing lines are added at the end.
+    Append,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct PlannedFile {
+    pub path: String,
+    pub action: PlanAction,
+    /// Placeholders the init agent must fill: the template's for a new file, those still in an existing one.
+    pub placeholders: Vec<String>,
+    /// For `append`: the lines that will be added.
+    pub lines: Vec<String>,
+    pub note: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct InitPlan {
+    pub template: String,
+    /// The project's folder.
+    pub workspace: String,
+    /// The folder held nothing (besides `.git`) before the template.
+    pub folder_empty: bool,
+    pub files: Vec<PlannedFile>,
+}
+
+/// The result of `POST /api/projects/{slug}/init`: what was written, and the init agent's task.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct InitStarted {
+    pub plan: InitPlan,
+    pub checks: Vec<CheckLine>,
+    pub task: Task,
+}

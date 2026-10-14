@@ -4,6 +4,8 @@ import type { DecisionCounts } from "./generated/DecisionCounts";
 import type { DecisionModel } from "./generated/DecisionModel";
 import type { Event } from "./generated/Event";
 import type { FitResult } from "./generated/FitResult";
+import type { InitPlan } from "./generated/InitPlan";
+import type { InitStarted } from "./generated/InitStarted";
 import type { LoginState } from "./generated/LoginState";
 import type { Overview } from "./generated/Overview";
 import type { PipelineInfo } from "./generated/PipelineInfo";
@@ -21,6 +23,7 @@ import type { StepResult } from "./generated/StepResult";
 import type { SkillFile } from "./generated/SkillFile";
 import type { SkillsOverview } from "./generated/SkillsOverview";
 import type { Task } from "./generated/Task";
+import type { TemplateInfo } from "./generated/TemplateInfo";
 // Reflex screen.
 import type { ArchiveResult } from "./generated/ArchiveResult";
 import type { DecisionFeedback } from "./generated/DecisionFeedback";
@@ -142,6 +145,13 @@ export const api = {
     request<DecisionFeedback>("POST", `/projects/${slug}/decisions/${id}/feedback`, body),
   /** Moves domains to `_archive/` in the corpus repo (default: the smallest until 8 are left), or back with `restore`. */
   archiveDomains: (slug: string, body: { domains?: string[]; restore?: boolean }) => request<ArchiveResult>("POST", `/projects/${slug}/corpus/archive`, body),
+  // ---- templates: lay a development process into a project's folder, then queue the init agent
+  templates: () => request<TemplateInfo[]>("GET", "/templates"),
+  /** What each file would become (create, skip, append); writes nothing. */
+  initPlan: (slug: string, template: string) => request<InitPlan>("POST", `/projects/${slug}/init/plan`, { template }),
+  /** Writes the template (never overwriting a file) and queues the "Init project" task pinned to `provider`. */
+  initProject: (slug: string, body: { template: string; description: string; provider: string; model?: string; set_verify: boolean }) =>
+    request<InitStarted>("POST", `/projects/${slug}/init`, body),
 };
 
 /** The platform hosts one repo per project: the Reflex corpus. The code stays in the project's own folder. */

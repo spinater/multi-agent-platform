@@ -1,0 +1,17 @@
+# A template is this folder: template.toml plus the files laid into a project's folder (paths kept as they are here).
+# Existing files in the project are never overwritten: they are skipped, except the `append` files, which get only
+# their missing lines.
+name = "team-process"
+title = "Team process"
+description = "Task cards as files (todo, todo-human, done), a small verify gate, the rules for closing a card, docs folders, and five generic agents (code-reviewer, security-reviewer, architect, qa-tester, sa-requirements) for Claude Code, Codex and agy."
+# Files with `MAP:FILL` placeholders the init agent must complete from the project's description.
+fill = ["CLAUDE.md", "scripts/verify.sh"]
+# Suggested verify commands for the project (the orchestrator runs them after every task).
+verify = ["bash scripts/verify.sh"]
+# Merged line by line into an existing file instead of being skipped.
+append = [".gitignore"]
+# Files stored under another name here (a real .gitignore in this folder would apply to the platform's own repo).
+rename = { "gitignore" = ".gitignore" }
+# Agent definitions (frontmatter + instructions), rendered for every CLI: .claude/agents/<name>.md,
+# .codex/agents/<name>.toml and .agents/agents/<name>.md. Not copied themselves.
+agents = "agents"

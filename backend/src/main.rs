@@ -14,6 +14,7 @@ mod reflex_screen;
 mod repo;
 mod skills;
 mod store;
+mod templates;
 mod terminal;
 mod updates;
 mod usage;

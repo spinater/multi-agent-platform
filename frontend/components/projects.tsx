@@ -86,6 +86,9 @@ export function ProjectDetail({ slug }: { slug: string }) {
         lead={p.description || undefined}
         actions={
           <>
+            <Btn onClick={() => go("projects", `init/${slug}`)} title="Lay a development process (task cards, verify gate, docs, agents) into the folder">
+              Init
+            </Btn>
             <Btn onClick={togglePause}>{p.settings.paused ? "Resume" : "Pause"}</Btn>
             <Btn onClick={() => open("reflex")}>Reflex</Btn>
             <Btn tone="primary" onClick={() => open("command")}>

@@ -8,6 +8,7 @@ import type { CheckLine } from "@/lib/generated/CheckLine";
 import type { ProjectInfo } from "@/lib/generated/ProjectInfo";
 
 import { useApp } from "../app-context";
+import { ProjectInit } from "../project-init";
 import { ProjectDetail } from "../projects";
 import { ProviderChip, STATUS_TONE, StatusPill, TaskBar, ago, figures, projectProviders, useDefaults } from "../project-ui";
 import { ProjectWizard } from "../project-wizard";
@@ -21,10 +22,12 @@ const LEVEL_MARK: Record<CheckLine["level"], string> = { success: "✓", info: "
 type Reveal = { slug: string; checks: CheckLine[]; shown: number };
 
 /** Projects (Projects.dc.html): one card per project plus the default workspace, the "New project" wizard at
- * `#projects/new`, and a project's page at `#projects/<slug>`. */
+ * `#projects/new`, a project's page at `#projects/<slug>`, and its "Init project" page at `#projects/init/<slug>`. */
 export function ProjectsScreen() {
   const { route, go } = useApp();
   const [reveal, setReveal] = useState<Reveal | null>(null);
+  // A project just created by the wizard, offered "Init with a template" on its card until dismissed.
+  const [offer, setOffer] = useState<string | null>(null);
   const timer = useRef<number | undefined>(undefined);
 
   useEffect(() => {
@@ -37,14 +40,17 @@ export function ProjectsScreen() {
     return () => window.clearTimeout(timer.current);
   }, [reveal]);
 
-  const detail = route.arg && route.arg !== "new" ? route.arg : null;
+  const init = route.arg?.startsWith("init/") ? route.arg.slice("init/".length) : null;
+  const detail = route.arg && route.arg !== "new" && !init ? route.arg : null;
   return (
     <>
       <TopBar />
-      {detail ? (
+      {init ? (
+        <ProjectInit key={init} slug={init} />
+      ) : detail ? (
         <ProjectDetail slug={detail} />
       ) : (
-        <ProjectList reveal={reveal} />
+        <ProjectList reveal={reveal} offer={offer} onDismissOffer={() => setOffer(null)} />
       )}
       {route.arg === "new" && (
         <ProjectWizard
@@ -52,6 +58,7 @@ export function ProjectsScreen() {
           onCreated={(slug, checks) => {
             go("projects");
             setReveal({ slug, checks, shown: 0 });
+            setOffer(slug);
           }}
         />
       )}
@@ -68,7 +75,7 @@ type Card = {
   info: ProjectInfo | null;
 };
 
-function ProjectList({ reveal }: { reveal: Reveal | null }) {
+function ProjectList({ reveal, offer, onDismissOffer }: { reveal: Reveal | null; offer: string | null; onDismissOffer: () => void }) {
   const { projects, tasks, sessions, orchestrator, providers, server, now, go, setProject, setScope, scope, project, openAuth } = useApp();
   const defaults = useDefaults();
   const [query, setQuery] = useState("");
@@ -189,6 +196,22 @@ function ProjectList({ reveal }: { reveal: Reveal | null }) {
                 <TaskBar f={f} />
               )}
 
+              {c.slug && offer === c.slug && !revealing && (
+                <div className="flex flex-wrap items-center gap-2.5 rounded-lg border border-accent/40 bg-accent-tint px-3 py-2.5">
+                  <span className="min-w-0 flex-1 text-[12.5px] leading-snug text-text-2">Lay a development process into its folder: task cards, a verify gate, docs and agents.</span>
+                  <button
+                    onClick={() => {
+                      onDismissOffer();
+                      go("projects", `init/${c.slug}`);
+                    }}
+                    className="h-7 rounded-md border border-accent bg-accent px-3 text-[11.5px] font-semibold whitespace-nowrap text-accent-text hover:opacity-90"
+                  >
+                    Init with a template →
+                  </button>
+                  <SmallBtn onClick={onDismissOffer}>Not now</SmallBtn>
+                </div>
+              )}
+
               <div className="flex flex-wrap items-center gap-2">
                 {provs.map((name) => (
                   <ProviderChip key={name} name={name} info={providers.find((p) => p.name === name)} onSignIn={openAuth} />
@@ -203,6 +226,7 @@ function ProjectList({ reveal }: { reveal: Reveal | null }) {
                   {f.attention > 0 && <span className="text-warn"> · {f.attention} need you</span>}
                 </span>
                 <div className="flex gap-1.5">
+                  {c.slug && <SmallBtn onClick={() => go("projects", `init/${c.slug}`)}>Init</SmallBtn>}
                   <SmallBtn onClick={() => open(c.slug, "skills")}>Skills</SmallBtn>
                   <SmallBtn onClick={() => open(c.slug, "decisions")}>Decisions</SmallBtn>
                   <button
