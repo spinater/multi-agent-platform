@@ -104,7 +104,7 @@ impl Orchestrator {
         let mut active = tasks.iter().filter(|t| matches!(t.status, TaskStatus::Running | TaskStatus::Verifying | TaskStatus::Auditing | TaskStatus::Landing)).count();
         let paused = crate::project_settings::paused(&self.hub).await;
         for task in tasks.iter().filter(|t| t.status == TaskStatus::Pending && !crate::project_settings::is_paused(&paused, t)) {
-            if active >= self.hub.config.orchestrator.max_parallel {
+            if active >= self.hub.max_parallel() {
                 break;
             }
             let deps: Vec<&Task> = task.depends_on.iter().filter_map(|id| tasks.iter().find(|t| t.id == *id)).collect();
@@ -122,7 +122,7 @@ impl Orchestrator {
             if missing || deps.iter().any(|d| d.status != TaskStatus::Done) {
                 continue;
             }
-            record(&self.hub, Kind::READY_GO, task, dec::ready_detail(task, active, self.hub.config.orchestrator.max_parallel)).await;
+            record(&self.hub, Kind::READY_GO, task, dec::ready_detail(task, active, self.hub.max_parallel())).await;
             if self.start(task.clone()).await? {
                 active += 1;
             }
@@ -164,6 +164,12 @@ impl Orchestrator {
                  {{\"state\": \"<the facts, in English: Reflex reads English only>\", \"questions\": [{{\"id\", \"kind\": \"choice\"|\"score\"|\"noul\", \"prompt\", \"options\"}}]}}. \
                  Each answer has a `lane`; `abstain` means nobody decided, so handle it yourself.\n"
             ));
+            p.push_str(
+                "- Before you start, search the project's knowledge (its docs, requirements, past tasks and their outcomes, approved plans): \
+                 `curl -s -G -H \"Authorization: Bearer $MAP_PROJECT_TOKEN\" \"$MAP_KNOWLEDGE_URL/search\" --data-urlencode \"q=<a few words>\"` \
+                 (terms of 3+ characters, Thai or English; `&kind=card|requirement|task|rulebook|doc|memory`), then read a hit with \
+                 `curl -s -G -H \"Authorization: Bearer $MAP_PROJECT_TOKEN\" \"$MAP_KNOWLEDGE_URL/doc\" --data-urlencode \"path=<path>\"` or open the file.\n",
+            );
         }
         if let Some(failure) = previous_failure {
             p.push_str(&format!("\nThe previous attempt did not pass. Fix this first:\n```\n{}\n```\n", tail(failure, 2500)));

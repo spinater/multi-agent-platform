@@ -371,6 +371,32 @@ differently.
   file that holds another agent. Nothing is written outside the configured folders. Run one as the main agent with
   `claude --agent <name>` or `agy --agent <name>`.
 
+### Knowledge (`#knowledge`, `#knowledge/<slug>`, `#knowledge/<slug>/doc/<path>`)
+
+A project's knowledge: the Markdown and text files in its folder (knowledge cards with their index, requirements,
+task sheets, rulebooks such as `CLAUDE.md`) plus what MAP remembers itself (finished tasks, approved plans, shown as
+`map://tasks/<id>`, `map://plans/<id>`). Opened from the nav or a project page's **Knowledge** button
+(`frontend/components/knowledge/`):
+
+- **Header:** project picker, the folder, the index (or how the convention works when there is none), when it was
+  indexed, and **Reindex**.
+- **Health:** errors, warnings and info grouped by check (stale card, missing source, over or near the line cap, not
+  in the index, broken link, rulebook size, scratch size, nested repo copy, no index), each with a one-line reason.
+  **Create fix task** queues the issue's ready prompt as a task in the project after a confirm; **Fix all stale
+  cards** queues one task for all of them.
+- **Budgets:** each rulebook's bytes against its warn line and cap, and scratch folders with their size and any repo
+  copies inside.
+- **Search:** the same substring search agents use (Thai or English), filtered by kind; matches are highlighted.
+- **Browse:** documents by kind, sortable by name, lines or modified; cards show lines against the cap, whether the
+  index lists them and how many sources they have.
+- **Doc viewer:** a small built-in Markdown renderer (no HTML from the file ever reaches the page); links to other
+  indexed docs and the card's `sources:` open in the viewer, http(s) links in a new tab.
+- **Agent searches:** the latest queries, by agents or you, with their hit counts, so a search that found nothing
+  points at a gap.
+
+Folders, the index path, rulebooks, line and byte limits and scratch folders are in the project's settings
+(**Knowledge** box), saved with the other orchestrator settings.
+
 The **Reflex** screen (`#reflex`, `frontend/components/reflex/`) is the current project's decision engine: how it
 works with the last 24 h per lane, a set-up checklist that ticks itself (install, corpus, questions, calibration,
 playground), a playground with feedback, calibration on a log-scale scatter with a draggable threshold, and the
@@ -781,6 +807,29 @@ branch `map/task-N`, made from the base branch (`base`, or the branch checked ou
   tasks take one at a time and N at a time, and the drawbacks: conflicts and reruns, plan limits reached N× sooner,
   builds competing for the CPU, cold worktrees, shared ports and services.
 
+## Knowledge
+
+The Knowledge screen (`#knowledge/<slug>`) indexes a project's docs: the Markdown and text files under
+`knowledge.dirs` (`.docs`, `docs`, `tasks` by default; `.scratch` and build folders are skipped) and the rulebooks
+(`CLAUDE.md`, `AGENTS.md`), plus what MAP remembers itself: each finished or failed task (what was asked, the
+outcome, what went wrong on the way: verify and audit failures, conflicts, send-backs) and each approved plan, as
+`map://tasks/<id>` and `map://plans/<id>`. The index is SQLite FTS5 with the trigram tokenizer, so a search matches
+substrings in Thai as well as English (terms of three characters or more; shorter ones fall back to a plain scan); it
+is rebuilt when older than two minutes, or with Reindex.
+
+Health checks follow the team-process conventions (cards in `.docs/knowledge/` with an `index.md`, each card's
+`sources:` frontmatter listing the files it summarises): a card is **stale** when one of its sources was committed
+after it (git commit times), **missing source**, **over / near the line cap** (200 / 170), **not in the index**,
+**broken relative links**, **rulebook over its byte budget** (60 KB / 52 KB: it is sent with every request),
+**scratch folder** over 2 GB, and **copies of the repo inside a scratch folder** (a grep finds their stale docs). Every
+finding with a fix has a ready task prompt; Create fix task queues it. All limits are per project (Settings →
+Knowledge).
+
+Agents search it too: a project task's launch script exports `MAP_KNOWLEDGE_URL`, the prompt tells the worker to
+search before starting, and the project token opens `knowledge/search` and `knowledge/doc` (nothing else). Searches
+are logged, by agent or owner, and shown on the screen. The team-process template seeds `.docs/knowledge/index.md`
+with the conventions, and the init agent writes the first cards and their index rows.
+
 ## Reflex gates
 
 Two decisions the orchestrator makes for every task of a project can be asked of the project's own Reflex first:
@@ -864,6 +913,10 @@ All routes are under `/api`. When `server.api_token` is set, send `Authorization
 | PUT | `/git/identity` | `{"name", "email"}` (both empty: none) |
 | GET | `/projects/{slug}/git` | The folder's `is_repo`, branch, upstream, origin, ahead/behind, dirty count, last fetch and commit, `busy` |
 | POST | `/projects/{slug}/git/fetch`, `…/pull`, `…/push` | `{}`: run it; returns `ok`, commands, output, new status (409 with the reason when refused) |
+| GET | `/projects/{slug}/knowledge` | `KnowledgeOverview`: docs, counts by kind, health issues (with fix task prompts), rulebook budgets, scratch folders, recent searches; reindexes when older than 2 minutes |
+| POST | `/projects/{slug}/knowledge/reindex` | Reindex now; returns the overview |
+| GET | `/projects/{slug}/knowledge/search?q=&kind=&limit=` | Full-text search (trigram: Thai and English substrings); logged as by agent (project token) or owner. Project token allowed |
+| GET | `/projects/{slug}/knowledge/doc?path=` | One indexed document's text (only paths in the index; `map://` memory). Project token allowed |
 | POST | `/projects/{slug}/worktree-estimate` | `{"parallel"?, "copy"?, "setup"?}`: what N tasks in worktrees would cost this machine (`WorktreeEstimate`) |
 | PATCH | `/tasks/{id}` | `{"action": "retry" \| "cancel" \| "merge" \| "pull_request" \| "send_back" \| "discard", "note"?}`; merge / pull_request / send_back from `review` only (409 otherwise) |
 | POST | `/projects/{slug}/git/remote` | `{"url"}`: set or replace `origin` (`git init -b main` first when not a repo) |

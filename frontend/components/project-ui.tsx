@@ -13,6 +13,8 @@ import { providerColor } from "@/lib/colors";
 import type { OrchestratorStatus } from "@/lib/generated/OrchestratorStatus";
 import type { ProjectDefaults } from "@/lib/generated/ProjectDefaults";
 import type { ProjectBranches } from "@/lib/generated/ProjectBranches";
+import type { ProjectParallel } from "@/lib/generated/ProjectParallel";
+import type { KnowledgeSettings } from "@/lib/generated/KnowledgeSettings";
 import type { ProjectInfo } from "@/lib/generated/ProjectInfo";
 import type { ProjectSettings } from "@/lib/generated/ProjectSettings";
 import type { ProjectSource } from "@/lib/generated/ProjectSource";
@@ -206,6 +208,25 @@ export type SettingsForm = {
   gates: ReflexGates;
   /** `base: ""` in the form is the branch checked out in the project folder (`null` when saved). */
   branches: ProjectBranches;
+  knowledge: KnowledgeSettings;
+  parallel: ProjectParallel;
+};
+
+/** The backend's `ProjectParallel::default()`: no project limit, the analyst on. */
+export const DEFAULT_PARALLEL: ProjectParallel = { max: null, analyst: true, analyst_provider: null };
+
+/** The backend's `KnowledgeSettings::default()`: cards in `.docs/knowledge/` with an index, 200-line cards, a 60 KB
+ * rulebook budget, `.scratch/` warned at 2 GB. A project saved before the Knowledge screen gets these from the server. */
+export const DEFAULT_KNOWLEDGE: KnowledgeSettings = {
+  dirs: [".docs", "docs", "tasks"],
+  index: ".docs/knowledge/index.md",
+  rulebooks: ["CLAUDE.md", "AGENTS.md"],
+  card_line_cap: 200,
+  card_line_warn: 170,
+  rulebook_byte_cap: 60_000,
+  rulebook_byte_warn: 52_000,
+  scratch: [".scratch"],
+  scratch_byte_warn: 2 * 1024 * 1024 * 1024,
 };
 
 export const DEFAULT_BRANCHES: ProjectBranches = { mode: "shared", base: null, land: "merge", setup: [], copy: [] };
@@ -225,6 +246,8 @@ export function formFromSettings(s: ProjectSettings | null, providers: ProviderI
     auditor: s?.audit?.provider ?? "",
     gates: s?.reflex_gates ?? { audit: false, tier: false },
     branches: s?.branches ?? DEFAULT_BRANCHES,
+    knowledge: s?.knowledge ?? DEFAULT_KNOWLEDGE,
+    parallel: s?.parallel ?? DEFAULT_PARALLEL,
   };
 }
 
@@ -241,6 +264,8 @@ export function settingsFromForm(f: SettingsForm, defaults: ProjectDefaults | nu
     paused: f.paused,
     reflex_gates: f.gates,
     branches: { ...f.branches, base: f.branches.base?.trim() || null },
+    knowledge: { ...f.knowledge, index: f.knowledge.index.trim() || DEFAULT_KNOWLEDGE.index },
+    parallel: f.parallel,
   };
 }
 
@@ -556,6 +581,18 @@ export function tomlLines(
     if (s.branches.copy.length) kv("copy", arr(s.branches.copy));
     c("each task works on map/task-<id> in a git worktree of its own");
   } else c("every task works in the project folder itself");
+  blank();
+  sec("[project.knowledge]");
+  const k = s.knowledge;
+  kv("dirs", arr(k.dirs));
+  kv("index", q(k.index));
+  kv("rulebooks", arr(k.rulebooks));
+  kv("card_line_cap", String(k.card_line_cap));
+  kv("card_line_warn", String(k.card_line_warn));
+  kv("rulebook_byte_cap", String(k.rulebook_byte_cap));
+  kv("rulebook_byte_warn", String(k.rulebook_byte_warn));
+  kv("scratch", arr(k.scratch));
+  kv("scratch_byte_warn", String(k.scratch_byte_warn));
   for (const x of s.providers.filter((x) => x.model || x.max_parallel !== null)) {
     blank();
     sec(`[project.providers.${x.name}]`);

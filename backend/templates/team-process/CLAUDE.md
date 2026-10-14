@@ -82,6 +82,11 @@ not ready to ask. Questions go into the card's `## Questions`.
 
 ## Docs
 
+- `.docs/knowledge/index.md`: **start here**. One row per knowledge card; read your area's card before grepping.
+  Cards list their `sources:` in frontmatter, stay under 200 lines, and are updated in the same commit as their
+  sources (see the conventions at the top of the index).
+- Search the project's knowledge and past tasks' outcomes with `$MAP_KNOWLEDGE_URL/search?q=…` (header
+  `Authorization: Bearer $MAP_PROJECT_TOKEN`) before re-deriving something.
 - `.docs/knowledge/domain/`: business rules. Changing a rule means updating its doc in the same commit.
 - `.docs/knowledge/ops/`: how things run (environments, jobs, accounts, limits).
 - `.docs/design/`: designs and decisions that span several cards.
@@ -90,7 +95,8 @@ not ready to ask. Questions go into the card's `## Questions`.
 
 ## Scratch
 
-Scratch files go in `.scratch/` (git-ignored), never in `/tmp`.
+Scratch files go in `.scratch/` (git-ignored), never in `/tmp`. Never copy the repo into it: a stale copy's docs
+turn up in every grep. Delete what you no longer need.
 
 ## Status file
 

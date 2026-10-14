@@ -139,6 +139,7 @@ pub async fn update(State(hub): State<Arc<Hub>>, UrlPath(slug): UrlPath<String>,
 pub async fn delete(State(hub): State<Arc<Hub>>, UrlPath(slug): UrlPath<String>) -> ApiResult<Value> {
     load(&hub, &slug).await?;
     projects::delete(&hub, &slug).await?;
+    crate::knowledge::forget(&hub, &slug).await;
     Ok(Json(json!({ "ok": true })))
 }
 
@@ -438,4 +439,50 @@ pub async fn worktree_estimate(State(hub): State<Arc<Hub>>, UrlPath(slug): UrlPa
     let copy = body.copy.unwrap_or_else(|| project.settings.branches.copy.clone());
     let setup = body.setup.unwrap_or_else(|| project.settings.branches.setup.clone());
     Ok(Json(crate::worktree_estimate::estimate(&hub, &project, body.parallel, &copy, &setup).await))
+}
+
+// ---- knowledge (knowledge.rs)
+
+pub async fn knowledge(State(hub): State<Arc<Hub>>, UrlPath(slug): UrlPath<String>) -> ApiResult<crate::model::KnowledgeOverview> {
+    let project = load(&hub, &slug).await?;
+    Ok(Json(crate::knowledge::overview(&hub, &project, false).await?))
+}
+
+pub async fn knowledge_reindex(State(hub): State<Arc<Hub>>, UrlPath(slug): UrlPath<String>) -> ApiResult<crate::model::KnowledgeOverview> {
+    let project = load(&hub, &slug).await?;
+    Ok(Json(crate::knowledge::overview(&hub, &project, true).await?))
+}
+
+#[derive(Deserialize)]
+pub struct KnowledgeQueryParams {
+    #[serde(default)]
+    q: String,
+    kind: Option<String>,
+    limit: Option<u32>,
+    path: Option<String>,
+}
+
+/// The caller is one of the project's agents when it holds the project token rather than the API token.
+fn searched_by(hub: &Hub, slug: &str, headers: &axum::http::HeaderMap) -> &'static str {
+    let bearer = headers.get("authorization").and_then(|v| v.to_str().ok()).and_then(|v| v.strip_prefix("Bearer "));
+    match (bearer, hub.project_token(slug)) {
+        (Some(b), Some(t)) if b == t => "agent",
+        _ => "owner",
+    }
+}
+
+pub async fn knowledge_search(State(hub): State<Arc<Hub>>, UrlPath(slug): UrlPath<String>, headers: axum::http::HeaderMap, Query(p): Query<KnowledgeQueryParams>) -> ApiResult<crate::model::KnowledgeSearch> {
+    let project = load(&hub, &slug).await?;
+    let kind = match p.kind.as_deref().filter(|k| !k.is_empty()) {
+        Some(k) => Some(crate::knowledge::parse_kind(k).ok_or_else(|| ApiError(StatusCode::BAD_REQUEST, format!("unknown kind `{k}`")))?),
+        None => None,
+    };
+    let by = searched_by(&hub, &slug, &headers);
+    Ok(Json(crate::knowledge::search(&hub, &project, &p.q, kind, p.limit.unwrap_or(20), by).await?))
+}
+
+pub async fn knowledge_doc(State(hub): State<Arc<Hub>>, UrlPath(slug): UrlPath<String>, Query(p): Query<KnowledgeQueryParams>) -> ApiResult<crate::model::KnowledgeDocBody> {
+    let project = load(&hub, &slug).await?;
+    let path = p.path.unwrap_or_default();
+    crate::knowledge::doc(&hub, &project, &path).await?.map(Json).ok_or_else(|| not_found("document"))
 }

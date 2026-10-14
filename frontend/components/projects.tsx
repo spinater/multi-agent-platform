@@ -12,6 +12,7 @@ import type { RepoListing } from "@/lib/generated/RepoListing";
 
 import { useApp } from "./app-context";
 import { BranchesEditor } from "./branches";
+import { KnowledgeEditor } from "./knowledge/settings-editor";
 import { ProjectGit } from "./git-access";
 import {
   Btn,
@@ -71,10 +72,10 @@ export function ProjectDetail({ slug }: { slug: string }) {
   const p = info.project;
   const f = figures(slug, info, tasks, sessions, orchestrator);
   const current = scope === "project" && project === slug;
-  const open = (screen: "command" | "reflex") => {
+  const open = (screen: "command" | "reflex" | "knowledge", arg: string | null = null) => {
     setProject(slug);
     setScope("project");
-    go(screen);
+    go(screen, arg);
   };
   const togglePause = () =>
     api
@@ -96,6 +97,9 @@ export function ProjectDetail({ slug }: { slug: string }) {
             </Btn>
             <Btn onClick={togglePause}>{p.settings.paused ? "Resume" : "Pause"}</Btn>
             <Btn onClick={() => open("reflex")}>Reflex</Btn>
+            <Btn onClick={() => open("knowledge", slug)} title="Its docs, their health, search, and what agents looked up">
+              Knowledge
+            </Btn>
             <Btn tone="primary" onClick={() => open("command")}>
               Open command centre →
             </Btn>
@@ -588,6 +592,19 @@ function Settings({ info }: { info: ProjectInfo }) {
             <div className="flex items-center gap-2">
               <Btn tone="primary" onClick={saveSettings} disabled={!edited}>
                 Save orchestrator settings
+              </Btn>
+            </div>
+          </Box>
+        )}
+        {form && (
+          <Box title="Knowledge" note={`cards in ${form.knowledge.index.replace(/\/[^/]*$/, "") || "."}/`}>
+            <KnowledgeEditor value={form.knowledge} onChange={(knowledge) => patch({ knowledge })} />
+            <div className="flex flex-wrap items-center gap-2">
+              <Btn tone="primary" onClick={saveSettings} disabled={!edited}>
+                Save orchestrator settings
+              </Btn>
+              <Btn tone="quiet" onClick={() => go("knowledge", p.slug)}>
+                Open Knowledge →
               </Btn>
             </div>
           </Box>

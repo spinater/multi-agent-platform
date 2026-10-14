@@ -19,6 +19,10 @@ import type { GitKey } from "./generated/GitKey";
 import type { GitOpResult } from "./generated/GitOpResult";
 import type { GitSettings } from "./generated/GitSettings";
 import type { GitStatus } from "./generated/GitStatus";
+import type { KnowledgeDocBody } from "./generated/KnowledgeDocBody";
+import type { KnowledgeKind } from "./generated/KnowledgeKind";
+import type { KnowledgeOverview } from "./generated/KnowledgeOverview";
+import type { KnowledgeSearch } from "./generated/KnowledgeSearch";
 import type { KnownHost } from "./generated/KnownHost";
 import type { SettingsInfo } from "./generated/SettingsInfo";
 import type { GitTestResult } from "./generated/GitTestResult";
@@ -192,6 +196,15 @@ export const api = {
   archiveDomains: (slug: string, body: { domains?: string[]; restore?: boolean }) => request<ArchiveResult>("POST", `/projects/${slug}/corpus/archive`, body),
   /** Tokens Reflex saved against what the fallbacks spent over the last `hours`; `project: null` is every project. */
   savings: (hours: number, project: string | null) => request<SavingsReport>("GET", `/reflex/savings?hours=${hours}&project=${encodeURIComponent(project ?? "")}`),
+  // ---- knowledge (Knowledge screen): the project's docs, their health, search; fix tasks go through createTask
+  /** Reindexes first when the index is stale. */
+  knowledge: (slug: string) => request<KnowledgeOverview>("GET", `/projects/${slug}/knowledge`),
+  reindexKnowledge: (slug: string) => request<KnowledgeOverview>("POST", `/projects/${slug}/knowledge/reindex`, {}),
+  /** Substring search (Thai or English); recorded as an owner query. `kind: null` searches every kind. */
+  searchKnowledge: (slug: string, q: string, kind: KnowledgeKind | null, limit = 30) =>
+    request<KnowledgeSearch>("GET", `/projects/${slug}/knowledge/search?q=${encodeURIComponent(q)}&kind=${kind ?? ""}&limit=${limit}`),
+  /** Only indexed paths (including `map://tasks/<id>`, `map://plans/<id>`) are readable. */
+  knowledgeDoc: (slug: string, path: string) => request<KnowledgeDocBody>("GET", `/projects/${slug}/knowledge/doc?path=${encodeURIComponent(path)}`),
   // ---- templates: lay a development process into a project's folder, then queue the init agent
   templates: () => request<TemplateInfo[]>("GET", "/templates"),
   /** What each file would become (create, skip, append); writes nothing. */

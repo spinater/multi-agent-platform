@@ -176,7 +176,7 @@ impl Store {
 
     pub async fn save_task(&self, t: &Task) -> Result<()> {
         sqlx::query(
-            "UPDATE tasks SET title = ?, prompt = ?, depends_on = ?, provider = ?, model = ?, status = ?, session = ?, attempts = ?, result = ?, git = ?, updated_at = ? WHERE id = ?",
+            "UPDATE tasks SET title = ?, prompt = ?, depends_on = ?, provider = ?, model = ?, status = ?, session = ?, attempts = ?, result = ?, git = ?, scope = ?, updated_at = ? WHERE id = ?",
         )
         .bind(&t.title)
         .bind(&t.prompt)
@@ -188,6 +188,7 @@ impl Store {
         .bind(t.attempts)
         .bind(&t.result)
         .bind(t.git.as_ref().map(serde_json::to_string).transpose()?)
+        .bind(t.scope.as_ref().map(serde_json::to_string).transpose()?)
         .bind(t.updated_at)
         .bind(t.id)
         .execute(&self.pool)
@@ -209,6 +210,7 @@ impl Store {
             attempts: row.get("attempts"),
             result: row.get("result"),
             git: row.get::<Option<String>, _>("git").map(|g| serde_json::from_str(&g)).transpose()?,
+            scope: row.get::<Option<String>, _>("scope").map(|g| serde_json::from_str(&g)).transpose()?,
             created_at: row.get("created_at"),
             updated_at: row.get("updated_at"),
         })
@@ -226,6 +228,21 @@ impl Store {
 
     pub async fn delete_task(&self, id: i64) -> Result<()> {
         sqlx::query("DELETE FROM tasks WHERE id = ?").bind(id).execute(&self.pool).await?;
+        Ok(())
+    }
+
+    // ---- settings changed at runtime
+
+    pub async fn runtime_setting(&self, key: &str) -> Result<Option<String>> {
+        Ok(sqlx::query_scalar("SELECT value FROM runtime_settings WHERE key = ?").bind(key).fetch_optional(&self.pool).await?)
+    }
+
+    /// `None` clears it (the map.toml value applies again).
+    pub async fn set_runtime_setting(&self, key: &str, value: Option<&str>) -> Result<()> {
+        match value {
+            Some(v) => sqlx::query("INSERT INTO runtime_settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").bind(key).bind(v).execute(&self.pool).await?,
+            None => sqlx::query("DELETE FROM runtime_settings WHERE key = ?").bind(key).execute(&self.pool).await?,
+        };
         Ok(())
     }
 

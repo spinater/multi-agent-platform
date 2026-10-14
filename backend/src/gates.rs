@@ -380,6 +380,7 @@ mod tests {
             result: Some("fixed it".into()),
             project: None,
             git: None,
+            scope: None,
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
         };

@@ -36,6 +36,7 @@ const TEAM_PROCESS: &[(&str, &str)] = builtin!["team-process":
     "tasks/todo/.gitkeep",
     "tasks/todo-human/.gitkeep",
     "tasks/done/.gitkeep",
+    ".docs/knowledge/index.md",
     ".docs/knowledge/domain/.gitkeep",
     ".docs/knowledge/ops/.gitkeep",
     ".docs/design/.gitkeep",

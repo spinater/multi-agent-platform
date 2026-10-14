@@ -11,6 +11,7 @@ import { AuthModal } from "./auth-modal";
 import { AgentsScreen } from "./screens/agents";
 import { CommandScreen } from "./screens/command";
 import { DecisionsScreen } from "./screens/decisions";
+import { KnowledgeScreen } from "./screens/knowledge";
 import { ProjectsScreen } from "./screens/projects";
 import { ReflexScreen } from "./screens/reflex";
 import { SettingsScreen } from "./screens/settings";
@@ -85,6 +86,8 @@ function Router() {
       return <SkillsScreen />;
     case "agents":
       return <AgentsScreen />;
+    case "knowledge":
+      return <KnowledgeScreen />;
     case "decisions":
       return <DecisionsScreen />;
     case "reflex":

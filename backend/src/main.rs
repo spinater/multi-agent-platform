@@ -7,6 +7,7 @@ mod detect;
 mod gates;
 mod git_access;
 mod hub;
+mod knowledge;
 mod login;
 mod model;
 mod orchestrator;
@@ -86,7 +87,9 @@ async fn open(config: Config) -> Result<Arc<Hub>> {
     }
     let store = Store::open(&config.server.data_dir.join("map.db")).await?;
     let tmux = Tmux::new(config.workspace.tmux_socket.clone());
-    Ok(Hub::new(config, store, Arc::new(tmux)))
+    let hub = Hub::new(config, store, Arc::new(tmux));
+    hub.load_runtime_settings().await;
+    Ok(hub)
 }
 
 async fn check(config: Config) -> Result<()> {

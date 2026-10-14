@@ -289,7 +289,7 @@ pub fn model(hub: &Hub, tick_secs: u64) -> DecisionModel {
         edges,
         kinds,
         tick_secs,
-        max_parallel: cfg.max_parallel,
+        max_parallel: hub.max_parallel(),
         max_attempts: cfg.max_attempts,
         task_timeout_minutes: cfg.task_timeout_minutes,
         provider_order: cfg.provider_order.clone(),

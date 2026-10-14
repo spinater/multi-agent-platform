@@ -98,6 +98,10 @@ pub fn router(hub: Arc<Hub>) -> Router {
         .route("/fs/browse", get(fs::browse))
         .route("/projects/{slug}/trust", get(projects::trust_state).post(projects::trust))
         .route("/projects/{slug}/worktree-estimate", post(projects::worktree_estimate))
+        .route("/projects/{slug}/knowledge", get(projects::knowledge))
+        .route("/projects/{slug}/knowledge/reindex", post(projects::knowledge_reindex))
+        .route("/projects/{slug}/knowledge/search", get(projects::knowledge_search))
+        .route("/projects/{slug}/knowledge/doc", get(projects::knowledge_doc))
         .route("/providers/{name}/login", get(projects::login_state).post(projects::login_start))
         // ---- usage: plan limits per provider (usage.rs)
         .route("/usage", get(usage))
@@ -195,7 +199,7 @@ pub(crate) fn project_scope<'a>(method: &axum::http::Method, path: &'a str) -> O
     let ok = matches!(
         (method, tail),
         (&Method::POST, "decide" | "feedback" | "plans")
-            | (&Method::GET, "decisions" | "decisions/summary" | "repos/corpus" | "repos/corpus/file" | "plans")
+            | (&Method::GET, "decisions" | "decisions/summary" | "repos/corpus" | "repos/corpus/file" | "plans" | "knowledge/search" | "knowledge/doc")
             | (&Method::PUT, "repos/corpus/file")
     );
     (ok && !slug.is_empty()).then_some(slug)
@@ -462,13 +466,21 @@ async fn orchestrator(State(hub): State<Arc<Hub>>) -> ApiResult<Value> {
 
 #[derive(Deserialize)]
 struct SetOrchestrator {
-    running: bool,
+    running: Option<bool>,
+    /// Tasks at once across all projects, applied at the next tick; `0` goes back to map.toml's value.
+    max_parallel: Option<usize>,
 }
 
 async fn set_orchestrator(State(hub): State<Arc<Hub>>, Json(body): Json<SetOrchestrator>) -> ApiResult<Value> {
-    hub.set_orchestrator_running(body.running).await;
-    let word = if body.running { "started" } else { "paused" };
-    hub.event(Level::Info, "orchestrator", None, None, format!("Orchestrator {word}")).await;
+    if let Some(running) = body.running {
+        hub.set_orchestrator_running(running).await;
+        let word = if running { "started" } else { "paused" };
+        hub.event(Level::Info, "orchestrator", None, None, format!("Orchestrator {word}")).await;
+    }
+    if let Some(n) = body.max_parallel {
+        hub.set_max_parallel((n > 0).then_some(n)).await?;
+        hub.event(Level::Info, "orchestrator", None, None, format!("Up to {} tasks at once", hub.max_parallel())).await;
+    }
     Ok(Json(json!(hub.orchestrator_status().await)))
 }
 
@@ -596,7 +608,11 @@ mod tests {
         assert_eq!(project_scope(&Method::GET, "/projects/support/decisions"), Some("support"));
         assert_eq!(project_scope(&Method::POST, "/api/projects/support/plans"), Some("support"));
         assert_eq!(project_scope(&Method::GET, "/api/projects/support/plans"), Some("support"));
+        assert_eq!(project_scope(&Method::GET, "/api/projects/support/knowledge/search"), Some("support"));
+        assert_eq!(project_scope(&Method::GET, "/api/projects/support/knowledge/doc"), Some("support"));
         for (method, path) in [
+            (Method::GET, "/api/projects/support/knowledge"),
+            (Method::POST, "/api/projects/support/knowledge/reindex"),
             (Method::POST, "/api/projects/support/planner"),
             (Method::PATCH, "/api/projects/support/plans"),
             (Method::POST, "/api/plans/1/approve"),

@@ -93,7 +93,7 @@ export function BranchesEditor({ value, onChange, slug, defaults }: { value: Pro
 }
 
 /** A list of strings: remove with ×, add with Enter. */
-function ListEditor({ title, hint, placeholder, items, onChange }: { title: string; hint: string; placeholder: string; items: string[]; onChange: (items: string[]) => void }) {
+export function ListEditor({ title, hint, placeholder, items, onChange }: { title: string; hint: string; placeholder: string; items: string[]; onChange: (items: string[]) => void }) {
   const [draft, setDraft] = useState("");
   const add = () => {
     const v = draft.trim();

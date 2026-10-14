@@ -176,6 +176,8 @@ pub struct Task {
     /// The task's own branch and worktree, for a project with `branches.mode = worktree`; `None` when it runs in the
     /// project folder itself.
     pub git: Option<TaskGit>,
+    /// The parallel analyst's verdict, for a task of a shared-folder project; `None` until it has looked.
+    pub scope: Option<TaskScope>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -248,8 +250,13 @@ pub struct ProviderInfo {
 #[ts(export)]
 pub struct OrchestratorStatus {
     pub running: bool,
+    /// Tasks at once across all projects: `[orchestrator] max_parallel`, or the value set from the dashboard
+    /// (`POST /api/orchestrator {"max_parallel"}`, kept across restarts).
     #[ts(type = "number")]
     pub max_parallel: usize,
+    /// `[orchestrator] max_parallel` in map.toml, which the dashboard's value replaces.
+    #[ts(type = "number")]
+    pub config_max_parallel: usize,
     #[ts(type = "number")]
     pub active: usize,
 }
@@ -285,10 +292,11 @@ pub struct ServerInfo {
     pub api_fallback: String,
 }
 
-/// Messages pushed to dashboard clients over `/api/ws`.
+/// Messages pushed to dashboard clients over `/api/ws`. Sent once and dropped, so a large `Task` variant costs nothing.
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(tag = "type", rename_all = "snake_case")]
 #[ts(export)]
+#[allow(clippy::large_enum_variant)]
 pub enum ServerMessage {
     Event { event: Event },
     Session { session: Session },
@@ -1092,6 +1100,48 @@ pub struct ProjectSettings {
     pub reflex_gates: ReflexGates,
     /// Shared folder or a branch and worktree per task.
     pub branches: ProjectBranches,
+    /// Where the project keeps its knowledge and the limits the Knowledge screen checks.
+    pub knowledge: KnowledgeSettings,
+    /// How many of the project's tasks run at once, and who clears tasks to share one folder.
+    pub parallel: ProjectParallel,
+}
+
+/// A project's parallel tasks. Changes apply at the next orchestrator tick, without a restart.
+///
+/// With `branches.mode = worktree` each task has its own branch, so up to `max` run at once. In the shared folder
+/// (one branch) a second task only starts beside a running one when the parallel analyst (an agent) has cleared
+/// both: it read the tasks and the code, and declared the paths each one touches as disjoint.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(default)]
+#[ts(export)]
+pub struct ProjectParallel {
+    /// Most of the project's tasks at once; `None` is no project limit (only the machine-wide one).
+    pub max: Option<u32>,
+    /// In the shared folder, let the analyst clear independent tasks to run side by side. Off: one at a time.
+    pub analyst: bool,
+    /// The analyst's provider; `None` is the project's audit provider, else the first of the provider order.
+    pub analyst_provider: Option<String>,
+}
+
+impl Default for ProjectParallel {
+    fn default() -> Self {
+        Self { max: None, analyst: true, analyst_provider: None }
+    }
+}
+
+/// What the parallel analyst decided for a task: the paths it will touch, and whether it can share the folder with
+/// other cleared tasks whose paths do not overlap.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct TaskScope {
+    /// Files or folders (`src/billing/`, `web/app/page.tsx`, `src/**`); `*` is the whole repo.
+    pub paths: Vec<String>,
+    /// Cleared to run beside other cleared tasks with disjoint paths.
+    pub independent: bool,
+    pub reason: String,
+    /// The analyst (`analyst:<provider>`), or the agent that submitted it (`planner`, a session name).
+    pub by: String,
+    pub at: DateTime<Utc>,
 }
 
 /// Repeated orchestrator decisions answered by the project's Reflex (its `orchestration` corpus domain). An answer
@@ -2288,4 +2338,213 @@ pub struct Drawback {
     pub level: Level,
     pub title: String,
     pub detail: String,
+}
+
+// ---- knowledge (knowledge.rs): the project's docs, their health, search, and what MAP remembers of past tasks
+
+/// Where a project keeps its knowledge (paths relative to its folder) and the limits the health checks use. The
+/// defaults follow the team-process layout: knowledge cards under `.docs/knowledge/` with an `index.md`, each card
+/// listing the files it summarises in a `sources:` frontmatter list.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(default)]
+#[ts(export)]
+pub struct KnowledgeSettings {
+    /// Folders indexed for search (Markdown and text files).
+    pub dirs: Vec<String>,
+    /// The cards' index; the folder it is in holds the cards.
+    pub index: String,
+    /// Rule files loaded into every agent request, with a byte budget.
+    pub rulebooks: Vec<String>,
+    pub card_line_cap: u32,
+    pub card_line_warn: u32,
+    #[ts(type = "number")]
+    pub rulebook_byte_cap: u64,
+    #[ts(type = "number")]
+    pub rulebook_byte_warn: u64,
+    /// Agent scratch folders, checked for size and for copies of the repo inside them.
+    pub scratch: Vec<String>,
+    #[ts(type = "number")]
+    pub scratch_byte_warn: u64,
+}
+
+impl Default for KnowledgeSettings {
+    fn default() -> Self {
+        Self {
+            dirs: vec![".docs".into(), "docs".into(), "tasks".into()],
+            index: ".docs/knowledge/index.md".into(),
+            rulebooks: vec!["CLAUDE.md".into(), "AGENTS.md".into()],
+            card_line_cap: 200,
+            card_line_warn: 170,
+            rulebook_byte_cap: 60_000,
+            rulebook_byte_warn: 52_000,
+            scratch: vec![".scratch".into()],
+            scratch_byte_warn: 2 * 1024 * 1024 * 1024,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum KnowledgeKind {
+    /// A knowledge card (the index's folder).
+    Card,
+    /// Requirements, specs, client material (`requirement`, `customer`, `spec` in the path).
+    Requirement,
+    /// A task sheet under `tasks/`.
+    Task,
+    /// CLAUDE.md, AGENTS.md and the like.
+    Rulebook,
+    /// Any other document.
+    Doc,
+    /// What MAP remembers itself: a finished task's outcome, an approved plan.
+    Memory,
+}
+
+/// One indexed document. `path` is relative to the project folder, or `map://tasks/<id>` / `map://plans/<id>` for
+/// MAP's own memory.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct KnowledgeDoc {
+    pub path: String,
+    pub kind: KnowledgeKind,
+    pub title: String,
+    pub lines: u32,
+    #[ts(type = "number")]
+    pub bytes: u64,
+    pub modified: Option<DateTime<Utc>>,
+    /// A card's `sources:` frontmatter.
+    pub sources: Vec<String>,
+    /// For a card: the index mentions it.
+    pub in_index: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum KnowledgeCheck {
+    /// No index file where `knowledge.index` says.
+    NoIndex,
+    /// A source changed in a commit after the card's last commit.
+    Stale,
+    /// A card lists a source that does not exist.
+    MissingSource,
+    /// Over `card_line_cap` lines.
+    OverCap,
+    /// Over `card_line_warn` lines.
+    NearCap,
+    /// A card the index does not mention.
+    NotInIndex,
+    /// A relative Markdown link to a file that does not exist.
+    BrokenLink,
+    /// A rulebook over (error) or near (warning) its byte budget.
+    RulebookSize,
+    /// A scratch folder over `scratch_byte_warn`.
+    ScratchSize,
+    /// A copy of the repo (a `.git`, or the project's own docs) inside a scratch folder: grep finds stale copies.
+    NestedCopy,
+}
+
+/// One finding of the health checks, with a ready task prompt that fixes it.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct KnowledgeIssue {
+    pub level: Level,
+    pub check: KnowledgeCheck,
+    pub path: String,
+    pub detail: String,
+    /// Title and prompt for a task that fixes it; `None` when a person must decide.
+    pub fix_title: Option<String>,
+    pub fix_prompt: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct RulebookSize {
+    pub path: String,
+    #[ts(type = "number")]
+    pub bytes: u64,
+    #[ts(type = "number")]
+    pub cap: u64,
+    #[ts(type = "number")]
+    pub warn: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct ScratchInfo {
+    pub path: String,
+    #[ts(type = "number")]
+    pub bytes: u64,
+    /// Repo copies found inside it.
+    pub copies: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct KindCount {
+    pub kind: KnowledgeKind,
+    pub count: u32,
+}
+
+/// A search someone ran: an agent with its project token, or the owner from the dashboard.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct KnowledgeQuery {
+    pub at: DateTime<Utc>,
+    pub query: String,
+    pub hits: u32,
+    /// `agent` or `owner`.
+    pub by: String,
+}
+
+/// `GET /api/projects/{slug}/knowledge`: everything the Knowledge screen shows for one project.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct KnowledgeOverview {
+    pub slug: String,
+    /// The project folder.
+    pub root: String,
+    pub settings: KnowledgeSettings,
+    /// The index file, when it exists.
+    pub index_path: Option<String>,
+    pub indexed_at: Option<DateTime<Utc>>,
+    pub counts: Vec<KindCount>,
+    pub docs: Vec<KnowledgeDoc>,
+    /// Most serious first.
+    pub issues: Vec<KnowledgeIssue>,
+    pub rulebooks: Vec<RulebookSize>,
+    pub scratch: Vec<ScratchInfo>,
+    /// Newest first.
+    pub recent_queries: Vec<KnowledgeQuery>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct KnowledgeHit {
+    pub path: String,
+    pub kind: KnowledgeKind,
+    pub title: String,
+    /// The matching passage, matches wrapped in `[` `]`.
+    pub snippet: String,
+    /// Higher is better.
+    pub score: f64,
+}
+
+/// `GET /api/projects/{slug}/knowledge/search?q=&kind=&limit=`.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct KnowledgeSearch {
+    pub query: String,
+    pub hits: Vec<KnowledgeHit>,
+    #[ts(type = "number")]
+    pub took_ms: u64,
+}
+
+/// `GET /api/projects/{slug}/knowledge/doc?path=`: one indexed document's text.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct KnowledgeDocBody {
+    pub doc: KnowledgeDoc,
+    pub body: String,
 }

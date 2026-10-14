@@ -3,7 +3,7 @@
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, LazyLock, Mutex};
 use std::time::Duration;
 
@@ -27,6 +27,8 @@ pub struct Hub {
     pub term: Arc<dyn Terminal>,
     tx: broadcast::Sender<ServerMessage>,
     orchestrator_running: AtomicBool,
+    /// Tasks at once across all projects: `[orchestrator] max_parallel`, or the dashboard's value.
+    max_parallel: AtomicUsize,
     /// Runs one orchestrator tick on request (`POST /api/orchestrator/step`).
     pub step: crate::decisions::Stepper,
     cooldowns: Mutex<HashMap<String, DateTime<Utc>>>,
@@ -63,12 +65,14 @@ impl Hub {
         let running = config.orchestrator.autostart;
         let usage = crate::usage::UsageState::new(&config);
         let updates = crate::updates::UpdatesState::new(&config);
+        let max_parallel = config.orchestrator.max_parallel;
         Arc::new(Self {
             config,
             store,
             term,
             tx,
             orchestrator_running: AtomicBool::new(running),
+            max_parallel: AtomicUsize::new(max_parallel),
             step: Default::default(),
             cooldowns: Mutex::new(HashMap::new()),
             reflex: reflex::Manager::default(),
@@ -315,9 +319,34 @@ impl Hub {
             .store
             .tasks()
             .await
-            .map(|ts| ts.iter().filter(|t| matches!(t.status, TaskStatus::Running | TaskStatus::Verifying | TaskStatus::Auditing)).count())
+            .map(|ts| ts.iter().filter(|t| matches!(t.status, TaskStatus::Running | TaskStatus::Verifying | TaskStatus::Auditing | TaskStatus::Landing)).count())
             .unwrap_or(0);
-        OrchestratorStatus { running: self.orchestrator_running(), max_parallel: self.config.orchestrator.max_parallel, active }
+        OrchestratorStatus { running: self.orchestrator_running(), max_parallel: self.max_parallel(), config_max_parallel: self.config.orchestrator.max_parallel, active }
+    }
+
+    pub fn max_parallel(&self) -> usize {
+        self.max_parallel.load(Ordering::Relaxed)
+    }
+
+    /// Sets the machine-wide task limit from the dashboard (kept in the database across restarts); `None` goes back
+    /// to map.toml's value.
+    pub async fn set_max_parallel(&self, n: Option<usize>) -> Result<()> {
+        if n == Some(0) {
+            bail!("max_parallel must be at least 1");
+        }
+        self.store.set_runtime_setting("orchestrator.max_parallel", n.map(|n| n.to_string()).as_deref()).await?;
+        self.max_parallel.store(n.unwrap_or(self.config.orchestrator.max_parallel), Ordering::Relaxed);
+        Ok(())
+    }
+
+    /// Settings the dashboard changed earlier, read once at startup.
+    pub async fn load_runtime_settings(&self) {
+        if let Ok(Some(v)) = self.store.runtime_setting("orchestrator.max_parallel").await
+            && let Ok(n) = v.parse::<usize>()
+            && n > 0
+        {
+            self.max_parallel.store(n, Ordering::Relaxed);
+        }
     }
 
     /// Avoid `provider` until `until` (a quota reset or an auth failure). A later deadline wins.
@@ -515,6 +544,7 @@ impl Hub {
             script.push_str(&format!("export MAP_PROJECT={}\n", quote(slug)?));
             script.push_str(&format!("export MAP_DECIDE_URL={}\n", quote(&format!("{}/projects/{slug}/decide", self.local_api_url()))?));
             script.push_str(&format!("export MAP_API_URL={}\n", quote(&self.local_api_url())?));
+            script.push_str(&format!("export MAP_KNOWLEDGE_URL={}\n", quote(&format!("{}/projects/{slug}/knowledge", self.local_api_url()))?));
             script.push_str(&format!("export MAP_PROJECT_TOKEN={}\n", quote(&self.project_token(slug).unwrap_or_default())?));
         }
         for (k, v) in env {

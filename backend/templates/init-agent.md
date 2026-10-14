@@ -29,8 +29,11 @@ owner's description below, so that the next agents can start working on task car
    concrete, testable steps, in the order they should be worked. Each card quotes the description in its
    `## Source`. Questions only the owner can answer go into a card's `## Questions`, each option with one concrete
    scenario; a card that cannot start before such an answer goes into `tasks/todo-human/` instead.
-7. If the stack needs business rules or operations notes the description already gives, write them as short files
-   in `.docs/knowledge/domain/` or `.docs/knowledge/ops/`.
+7. If the stack needs business rules or operations notes the description already gives, write them as knowledge
+   cards in `.docs/knowledge/domain/` or `.docs/knowledge/ops/`, each with the `sources:` frontmatter and title the
+   conventions in `.docs/knowledge/index.md` describe, and add a row per card to that index. For a folder that
+   already had code, write one card per main area of the code (what it does, where to look, the traps), so the
+   next agent starts from the index instead of grepping.
 
 <!-- corpus -->
 ## Draft the Reflex corpus

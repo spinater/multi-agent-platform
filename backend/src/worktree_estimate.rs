@@ -18,7 +18,7 @@ const REBUILT: &[&str] = &["node_modules", "target", ".venv", "venv", ".next", "
 
 pub async fn estimate(hub: &Hub, project: &Project, parallel: Option<u32>, copy: &[String], setup: &[String]) -> WorktreeEstimate {
     let folder = hub.workspace_of(project);
-    let parallel = parallel.unwrap_or(hub.config.orchestrator.max_parallel as u32).clamp(1, 64);
+    let parallel = parallel.unwrap_or(hub.max_parallel() as u32).clamp(1, 64);
     let machine = machine(&hub.project_dir(&project.slug)).await;
 
     let (checkout_bytes, tracked_files) = checkout(hub, &folder).await;
@@ -189,27 +189,28 @@ async fn rebuilt_folders(hub: &Hub, folder: &Path) -> Vec<SizedPath> {
 
 /// The size of a file or folder, counted for at most `limit` (a huge folder is undercounted rather than slow).
 async fn size_of(path: PathBuf, limit: Duration) -> u64 {
-    tokio::task::spawn_blocking(move || {
-        let start = Instant::now();
-        let mut total = 0;
-        let mut stack = vec![path];
-        while let Some(p) = stack.pop() {
-            if start.elapsed() > limit {
-                break;
-            }
-            let Ok(meta) = std::fs::symlink_metadata(&p) else { continue };
-            if meta.is_dir() {
-                if let Ok(entries) = std::fs::read_dir(&p) {
-                    stack.extend(entries.flatten().map(|e| e.path()));
-                }
-            } else {
-                total += meta.len();
-            }
+    tokio::task::spawn_blocking(move || size_blocking(&path, limit)).await.unwrap_or(0)
+}
+
+/// [`size_of`] on the calling thread.
+pub fn size_blocking(path: &Path, limit: Duration) -> u64 {
+    let start = Instant::now();
+    let mut total = 0;
+    let mut stack = vec![path.to_path_buf()];
+    while let Some(p) = stack.pop() {
+        if start.elapsed() > limit {
+            break;
         }
-        total
-    })
-    .await
-    .unwrap_or(0)
+        let Ok(meta) = std::fs::symlink_metadata(&p) else { continue };
+        if meta.is_dir() {
+            if let Ok(entries) = std::fs::read_dir(&p) {
+                stack.extend(entries.flatten().map(|e| e.path()));
+            }
+        } else {
+            total += meta.len();
+        }
+    }
+    total
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -410,9 +411,9 @@ fn drawbacks(hub: &Hub, folder: &Path, f: &Facts) -> Vec<Drawback> {
         out.push(d(Level::Info, "Dependencies still run in order", format!("The {} open tasks take {} rounds one at a time and {} rounds with {n} at once; only independent tasks run together.", f.open_tasks, f.waves_serial, f.waves_parallel)));
     }
     out.push(d(Level::Info, "Untracked files are not there", "Files git does not track (.env, local config, data) are missing in a worktree unless listed under copy; copied files are never committed.".into()));
-    let max = hub.config.orchestrator.max_parallel as u32;
+    let max = hub.max_parallel() as u32;
     if n > max {
-        out.push(d(Level::Info, "MAP runs fewer at once today", format!("[orchestrator] max_parallel = {max} in map.toml caps all tasks; set it to {n} and restart MAP to run {n} at once.")));
+        out.push(d(Level::Info, "MAP runs fewer at once today", format!("MAP runs at most {max} tasks at once across all projects; raise it to {n} in the Command centre (no restart) to run {n} at once.")));
     }
     out
 }

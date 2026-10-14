@@ -5,7 +5,7 @@ name = "team-process"
 title = "Team process"
 description = "Task cards as files (todo, todo-human, done), a small verify gate, the rules for closing a card, docs folders, and five generic agents (code-reviewer, security-reviewer, architect, qa-tester, sa-requirements) for Claude Code, Codex and agy."
 # Files with `MAP:FILL` placeholders the init agent must complete from the project's description.
-fill = ["CLAUDE.md", "scripts/verify.sh"]
+fill = ["CLAUDE.md", "scripts/verify.sh", ".docs/knowledge/index.md"]
 # Suggested verify commands for the project (the orchestrator runs them after every task).
 verify = ["bash scripts/verify.sh"]
 # Merged line by line into an existing file instead of being skipped.
