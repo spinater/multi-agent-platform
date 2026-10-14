@@ -42,19 +42,27 @@ fn credential_ok(path: &PathBuf) -> bool {
     !looks_json || serde_json::from_slice::<serde_json::Value>(&bytes).is_ok()
 }
 
+/// Whether the provider's key variable has a value: in `[workspace.env]`, MAP's environment, or the provider's own
+/// `env` (a literal, or a reference to a variable that is set). Only ever a boolean: the value is not kept.
 fn api_key_set(hub: &Hub, spec: &ProviderSpec) -> bool {
     spec.api_key_env.as_deref().is_some_and(|key| {
-        hub.config.workspace.env.get(key).is_some_and(|v| !v.is_empty()) || std::env::var(key).is_ok_and(|v| !v.is_empty())
+        hub.config.env_value(key).is_some()
+            || spec.env.get(key).is_some_and(|v| match crate::config::env_ref(v) {
+                Some(r) => hub.config.env_value(r).is_some(),
+                None => !v.is_empty(),
+            })
     })
 }
 
 /// `Some(true)` with a valid credential file or an API key variable, `Some(false)` when credential files are
-/// configured and none is valid, `None` when the platform cannot tell.
+/// configured and none is valid (or the provider signs in by its key alone, with no sign-in command, and the key is
+/// not set), `None` when the platform cannot tell.
 pub fn signed_in(hub: &Hub, spec: &ProviderSpec) -> Option<bool> {
     if spec.credentials.iter().any(|c| credential_ok(&expand_home(c))) || api_key_set(hub, spec) {
         return Some(true);
     }
-    (!spec.credentials.is_empty()).then_some(false)
+    let key_only = spec.login.is_empty() && spec.api_key_env.is_some();
+    (!spec.credentials.is_empty() || key_only).then_some(false)
 }
 
 fn credentials_updated_at(spec: &ProviderSpec) -> Option<DateTime<Utc>> {
@@ -318,6 +326,44 @@ mod tests {
         for var in ["CODEX_HOME", "CLAUDE_CONFIG_DIR", "export HOME", "CARGO_HOME"] {
             assert!(!script.contains(var), "{var}: {script}");
         }
+    }
+
+    #[tokio::test]
+    async fn openrouter_is_signed_in_by_its_key_and_launches_with_it_by_reference() {
+        use crate::terminal::fake::FakeTerminal;
+        let dir = tempfile::tempdir().unwrap();
+        let d = dir.path().display();
+        // A key variable no environment has, so the test does not depend on the machine.
+        let config = |extra: &str| {
+            let text = format!(
+                "[workspace]\ndir = \"{d}\"\n{extra}\n[server]\ndata_dir = \"{d}/data\"\n[agents_home]\nmode = \"isolated\"\ndir = \"{d}/ah\"\n[providers.openrouter]\nbinary = \"/bin/sh\"\napi_key_env = \"MAP_TEST_OR_KEY_7F3\"\nenv = {{ ANTHROPIC_BASE_URL = \"https://openrouter.ai/api\", ANTHROPIC_AUTH_TOKEN = \"$MAP_TEST_OR_KEY_7F3\", ANTHROPIC_API_KEY = \"\" }}\n"
+            );
+            crate::config::Config::parse(&text, std::path::Path::new("/")).unwrap()
+        };
+        let term = Arc::new(FakeTerminal::default());
+        let hub = Hub::new(config(""), crate::store::Store::memory().await.unwrap(), term.clone());
+        let spec = hub.spec("openrouter").unwrap();
+        assert_eq!(signed_in(&hub, spec), Some(false), "no sign-in command: the key is the sign-in");
+        assert!(start(&hub, "openrouter").await.is_err(), "nothing to sign in with");
+        let info = info(&hub, "openrouter", spec);
+        assert_eq!((info.command.as_str(), info.api_key_env.as_deref(), info.api_key_set), ("", Some("MAP_TEST_OR_KEY_7F3"), false));
+
+        hub.launch(LaunchRequest { name: Some("or".into()), provider: "openrouter".into(), model: None, role: Role::Manual, task_id: None, project: None, prompt: Some("hi".into()) }).await.unwrap();
+        let script = term.sessions.lock().unwrap()["map-or"].script.clone();
+        let at = |needle: &str| script.find(needle).unwrap_or_else(|| panic!("{needle} missing: {script}"));
+        at("export ANTHROPIC_AUTH_TOKEN=\"$MAP_TEST_OR_KEY_7F3\"\n");
+        at("export ANTHROPIC_BASE_URL=https://openrouter.ai/api\n");
+        at("export ANTHROPIC_API_KEY=''\n");
+        at(&format!("export CLAUDE_CONFIG_DIR={}/ah/openrouter\n", dir.path().display()));
+        assert!(at("ANTHROPIC_AUTH_TOKEN") < at("exec "), "exported before the CLI starts");
+        assert!(script.contains("--model '~anthropic/claude-sonnet-latest'"), "{script}");
+
+        // The key in [workspace.env]: signed in, and only ever a boolean in what the dashboard gets.
+        let hub = Hub::new(config("[workspace.env]\nMAP_TEST_OR_KEY_7F3 = \"sk-or-v1-SECRET-42\""), crate::store::Store::memory().await.unwrap(), term.clone());
+        assert_eq!(signed_in(&hub, hub.spec("openrouter").unwrap()), Some(true));
+        let json = serde_json::to_string(&hub.providers()).unwrap();
+        assert!(!json.contains("SECRET"), "{json}");
+        assert!(json.contains("\"api_key_set\":true"), "{json}");
     }
 
     #[test]

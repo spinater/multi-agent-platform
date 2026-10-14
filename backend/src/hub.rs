@@ -366,6 +366,16 @@ impl Hub {
         self.config.provider_env(provider)
     }
 
+    /// Every variable a command MAP runs itself for `provider` gets, in order: [`Hub::provider_env`], `extra`
+    /// (`[workspace.env]`, or [`Hub::command_env`]), then the provider's own `env` with its references resolved in
+    /// memory ([`Config::provider_fixed_env`]).
+    pub fn run_env(&self, provider: &str, extra: Vec<(String, String)>) -> Vec<(String, String)> {
+        let mut env = self.provider_env(provider);
+        env.extend(extra);
+        env.extend(self.config.provider_fixed_env(provider));
+        env
+    }
+
     /// The provider's binary is on the workspace PATH (or the absolute path exists).
     pub fn provider_available(&self, provider: &str) -> bool {
         self.spec(provider).is_ok_and(|spec| self.binary_path(&spec.binary).is_some())
@@ -389,6 +399,7 @@ impl Hub {
             watcher_interval_secs: self.config.watcher.interval_secs,
             reflex_version: self.reflex.version(&self.config.reflex.binary),
             tmux_socket: self.config.workspace.tmux_socket.clone(),
+            api_fallback: self.config.reflex.api_name(),
         }
     }
 
@@ -487,6 +498,12 @@ impl Hub {
         }
         for (k, v) in &self.config.workspace.env {
             script.push_str(&format!("export {k}={}\n", quote(v)?));
+        }
+        // The provider's own variables (openrouter's endpoint and key), after workspace.env so they win over it. A
+        // secret is exported by reference (`"$OPENROUTER_API_KEY"`), never by value.
+        for line in self.config.provider_script_env(&req.provider) {
+            script.push_str(&line);
+            script.push('\n');
         }
         script.push_str(&format!("export MAP_SESSION={}\n", quote(&name)?));
         script.push_str(&format!("export MAP_RUN_DIR={}\n", quote(dir.to_str().context("non-UTF-8 path")?)?));

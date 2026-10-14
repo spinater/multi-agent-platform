@@ -5,6 +5,9 @@ const PROVIDER_VAR: Record<string, string> = {
   codex: "var(--p-codex)",
   gemini: "var(--p-gemini)",
   agy: "var(--p-gemini)",
+  cursor: "var(--p-cursor)",
+  copilot: "var(--p-copilot)",
+  openrouter: "var(--p-openrouter)",
 };
 
 export function providerColor(name: string | null | undefined): string {

@@ -67,6 +67,9 @@ const NAMES: Record<string, [string, string]> = {
   claude: ["Claude Code", "Claude"],
   codex: ["Codex", "Codex"],
   gemini: ["Gemini CLI", "Gemini"],
+  cursor: ["Cursor CLI", "Cursor"],
+  copilot: ["GitHub Copilot CLI", "Copilot"],
+  openrouter: ["OpenRouter · Claude Code", "OpenRouter"],
 };
 
 /** Display name of a provider: long for cards, short for the top bar. */

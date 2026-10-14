@@ -21,6 +21,10 @@ static RATE_LIMIT: LazyLock<Regex> = LazyLock::new(|| {
         | quota\s+has\s+been\s+exhausted
         | (?:usage|hour|weekly|session)\s+limit\s+reached
         | you'?ve\s+hit\s+your\s+(?:usage\s+)?limit
+        | you'?ve\s+reached\s+your\s+(?:usage|monthly|weekly|session|premium\s+request)\s+limit
+        | exceeded\s+your\s+(?:premium\s+request\s+|monthly\s+)?(?:allowance|quota)
+        | insufficient\s+credits
+        | requires\s+more\s+credits
         | (?:try\s+again\s+in|retry\s+after|resets?\s+in)\s+\d+\s*(?:s|sec|seconds?|m|min|minutes?|h|hr|hours?)\b
         | quota\s+resets?\s+at
         ",
@@ -411,6 +415,42 @@ mod tests {
         assert_eq!(p.moves, Some(0));
         let agy = "Do you trust the contents of this project?\n> No, exit\n  Yes, I trust this folder\n";
         assert_eq!(trust_prompt(&providers["gemini"], agy).unwrap().moves, Some(1));
+    }
+
+    #[test]
+    fn copilot_and_cursor_trust_questions() {
+        let providers = crate::config::builtin_providers();
+        // GitHub Copilot CLI's folder question, from its docs.
+        let copilot = "Confirm folder trust\n/home/me/app\nDuring this GitHub Copilot CLI session, Copilot may attempt to read, modify, and execute files in and below this folder.\nYou should only proceed if you trust the files in this location.\n❯ 1. Yes\n  2. Yes, and remember this folder for future sessions\n  3. No (Esc)\n";
+        let p = trust_prompt(&providers["copilot"], copilot).expect("copilot trust prompt");
+        assert_eq!(p.marker, "only proceed if you trust the files in this location");
+        assert_eq!(p.moves, Some(1), "to “remember this folder”");
+        let cursor = "⚠ Workspace Trust Required\nCursor Agent can execute code and access files in this directory.\nDo you want to trust this workspace?\n▶ [a] Trust this workspace\n  [q] Quit\n";
+        let p = trust_prompt(&providers["cursor"], cursor).expect("cursor trust prompt");
+        assert_eq!(p.marker, "Workspace Trust Required");
+        assert_eq!(p.moves, Some(0));
+        // OpenRouter is Claude Code: the same question.
+        assert!(trust_prompt(&providers["openrouter"], CLAUDE_TRUST_PANE).is_some());
+        // Copilot's working line under the question means it is past it.
+        assert!(trust_prompt(&providers["copilot"], &format!("{copilot}● Thinking (Esc to cancel)\n")).is_none());
+    }
+
+    #[test]
+    fn new_providers_limit_and_sign_in_messages() {
+        for text in [
+            "You have exceeded your premium request allowance. Upgrade or wait for the reset.",
+            "You've reached your monthly limit. Switch to Auto or raise your spend limit.",
+            "API Error: 402 {\"error\":{\"message\":\"Insufficient credits. Add more using https://openrouter.ai/settings/credits\"}}",
+            "This request requires more credits, or fewer max_tokens.",
+            "You've hit your usage limit",
+        ] {
+            assert!(rate_limit_line(text).is_some(), "missed: {text}");
+        }
+        let providers = crate::config::builtin_providers();
+        let s = scan(&providers["openrouter"], "API Error: 401 {\"error\":{\"message\":\"User not found.\",\"code\":401}}\n", 40, at(10, 0));
+        assert_eq!(s.needs_auth.as_deref(), Some("User not found"));
+        let s = scan(&providers["copilot"], "Error: No authentication information found.\nPlease run /login\n", 40, at(10, 0));
+        assert!(s.needs_auth.is_some());
     }
 
     fn at(h: u32, m: u32) -> DateTime<Local> {

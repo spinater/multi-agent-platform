@@ -72,10 +72,7 @@ pub fn mark(format: TrustFormat, file: &Path, folder: &str) -> Result<Marked> {
             Err(err) => return Err(err).with_context(|| format!("reading {}", file.display())),
         };
         let text = std::str::from_utf8(original.as_deref().unwrap_or_default()).with_context(|| format!("{} is not UTF-8; left alone", file.display()))?;
-        let (state, updated) = match format {
-            TrustFormat::ClaudeJson => claude_json(text, folder),
-            TrustFormat::CodexToml => codex_toml(text, folder),
-        }
+        let (state, updated) = edit(format, text, folder)
         .with_context(|| format!("{}; left alone", file.display()))?;
         let Some(updated) = updated else { return Ok(state) };
         if !replace_if_unchanged(&file, original.as_deref(), updated.as_bytes())? {
@@ -83,30 +80,83 @@ pub fn mark(format: TrustFormat, file: &Path, folder: &str) -> Result<Marked> {
         }
         // The CLI may have renamed its own copy over ours in the meantime.
         let now = std::fs::read_to_string(&file).unwrap_or_default();
-        let kept = match format {
-            TrustFormat::ClaudeJson => claude_json(&now, folder),
-            TrustFormat::CodexToml => codex_toml(&now, folder),
-        };
+        let kept = edit(format, &now, folder);
         if matches!(kept, Ok((Marked::Already, None))) {
-            return Ok(Marked::Now);
+            // `Already` when only an onboarding key was added to a trusted folder.
+            return Ok(state);
         }
     }
     bail!("{} kept changing while MAP wrote it; the CLI may still ask about {folder}", file.display())
 }
 
+/// `text` with `folder` marked trusted in `format`, and whether that changed anything.
+fn edit(format: TrustFormat, text: &str, folder: &str) -> Result<(Marked, Option<String>)> {
+    match format {
+        TrustFormat::ClaudeJson => claude_json(text, folder, false),
+        TrustFormat::ClaudeJsonOnboarded => claude_json(text, folder, true),
+        TrustFormat::CodexToml => codex_toml(text, folder),
+        TrustFormat::TrustedFoldersJson => trusted_folders_json(text, folder),
+    }
+}
+
+fn json_object(text: &str) -> Result<Value> {
+    let doc: Value = if text.trim().is_empty() { Value::Object(Map::new()) } else { serde_json::from_str(text).context("not valid JSON")? };
+    if !doc.is_object() {
+        bail!("not a JSON object");
+    }
+    Ok(doc)
+}
+
 /// Claude Code's `.claude.json` with `projects[folder].hasTrustDialogAccepted = true`; `None` when it already is.
-/// Every other key, project and value is kept (and in its order).
-fn claude_json(text: &str, folder: &str) -> Result<(Marked, Option<String>)> {
-    let mut doc: Value = if text.trim().is_empty() { Value::Object(Map::new()) } else { serde_json::from_str(text).context("not valid JSON")? };
+/// Every other key, project and value is kept (and in its order). `onboarded`: also `hasCompletedOnboarding = true`
+/// when the file has no such key (a config folder only MAP uses), so a first run skips the theme picker.
+fn claude_json(text: &str, folder: &str, onboarded: bool) -> Result<(Marked, Option<String>)> {
+    let mut doc = json_object(text)?;
     let root = doc.as_object_mut().context("not a JSON object")?;
+    let mut changed = false;
+    if onboarded && !root.contains_key("hasCompletedOnboarding") {
+        root.insert("hasCompletedOnboarding".into(), Value::Bool(true));
+        changed = true;
+    }
     let projects = root.entry("projects").or_insert_with(|| Value::Object(Map::new())).as_object_mut().context("`projects` is not an object")?;
     let project = projects.entry(folder).or_insert_with(|| Value::Object(Map::new())).as_object_mut().with_context(|| format!("`projects[{folder:?}]` is not an object"))?;
     if project.get("hasTrustDialogAccepted") == Some(&Value::Bool(true)) {
-        return Ok((Marked::Already, None));
+        // The folder was trusted already; a missing onboarding key is still added.
+        return Ok((Marked::Already, if changed { Some(serde_json::to_string_pretty(&doc)?) } else { None }));
     }
     project.insert("hasTrustDialogAccepted".into(), Value::Bool(true));
     // Claude Code writes it with JSON.stringify(config, null, 2).
     Ok((Marked::Now, Some(serde_json::to_string_pretty(&doc)?)))
+}
+
+/// GitHub Copilot CLI's `config.json` with `folder` in its `trusted_folders` list (Copilot also trusts the folders
+/// below a listed one); `None` when it, or a folder above it, is listed already. Every other key is kept, and so are
+/// the `// …` lines Copilot writes above the JSON ("This file is managed automatically.").
+fn trusted_folders_json(text: &str, folder: &str) -> Result<(Marked, Option<String>)> {
+    let (mut header, mut at) = (String::new(), 0);
+    for line in text.split_inclusive('\n') {
+        let t = line.trim();
+        if !(t.is_empty() || t.starts_with("//")) {
+            break;
+        }
+        if !t.is_empty() {
+            header.push_str(t);
+            header.push('\n');
+        }
+        at += line.len();
+    }
+    let mut doc = json_object(&text[at..])?;
+    let root = doc.as_object_mut().context("not a JSON object")?;
+    let list = root.entry("trusted_folders").or_insert_with(|| Value::Array(vec![])).as_array_mut().context("`trusted_folders` is not a list")?;
+    let covered = list.iter().filter_map(Value::as_str).any(|t| {
+        let t = t.trim_end_matches('/');
+        folder == t || (!t.is_empty() && folder.strip_prefix(t).is_some_and(|rest| rest.starts_with('/')))
+    });
+    if covered {
+        return Ok((Marked::Already, None));
+    }
+    list.push(Value::String(folder.to_string()));
+    Ok((Marked::Now, Some(format!("{header}{}\n", serde_json::to_string_pretty(&doc)?))))
 }
 
 /// Codex's `config.toml` with `[projects."<folder>"] trust_level = "trusted"`, comments and layout kept; `None` when
@@ -192,11 +242,7 @@ pub fn is_trusted(format: TrustFormat, file: &Path, folder: &str) -> Result<bool
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(false),
         Err(err) => return Err(err).with_context(|| format!("reading {}", file.display())),
     };
-    let (state, _) = match format {
-        TrustFormat::ClaudeJson => claude_json(&text, folder),
-        TrustFormat::CodexToml => codex_toml(&text, folder),
-    }
-    .with_context(|| file.display().to_string())?;
+    let (state, _) = edit(format, &text, folder).with_context(|| file.display().to_string())?;
     Ok(state == Marked::Already)
 }
 
@@ -406,6 +452,7 @@ pub async fn answer(hub: &Arc<Hub>, name: &str) -> Result<TrustAnswer, AnswerErr
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::NO_NEW_CLIS;
     use crate::config::Config;
     use crate::hub::LaunchRequest;
     use crate::model::{ProjectSettings, ProjectSource, Role, SourceKind};
@@ -422,7 +469,7 @@ mod tests {
             std::fs::create_dir_all(dir.path().join(sub)).unwrap();
         }
         let text = format!(
-            "[projects]\npath = \"{d}\"\n[workspace]\ndir = \"{d}/ws\"\n{workspace}\n[workspace.env]\nCLAUDE_CONFIG_DIR = \"{d}/claude\"\nCODEX_HOME = \"{d}/codex\"\n[server]\ndata_dir = \"{d}/data\"\n[reflex]\nbinary = \"/nonexistent/reflex\"\n[providers.claude]\nbinary = \"/bin/sh\"\n[providers.codex]\nbinary = \"/bin/sh\"\n"
+            "[projects]\npath = \"{d}\"\n[workspace]\ndir = \"{d}/ws\"\n{workspace}\n[workspace.env]\nCLAUDE_CONFIG_DIR = \"{d}/claude\"\nCODEX_HOME = \"{d}/codex\"\n[server]\ndata_dir = \"{d}/data\"\n[reflex]\nbinary = \"/nonexistent/reflex\"\n[providers.claude]\nbinary = \"/bin/sh\"\n[providers.codex]\nbinary = \"/bin/sh\"\n{NO_NEW_CLIS}"
         );
         let term = Arc::new(FakeTerminal::default());
         let hub = Hub::new(Config::parse(&text, Path::new("/")).unwrap(), Store::memory().await.unwrap(), term.clone());
@@ -475,6 +522,82 @@ mod tests {
         assert_eq!(mark(TrustFormat::ClaudeJson, &file, "/new").unwrap(), Marked::Now);
         assert!(is_trusted(TrustFormat::ClaudeJson, &file, "/new").unwrap());
         assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 1);
+    }
+
+    #[test]
+    fn copilot_trusted_folders_keep_the_header_and_other_keys() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("config.json");
+        // As copilot 1.0 writes it: two comment lines, then JSON.
+        let before = "// User settings belong in settings.json.\n// This file is managed automatically.\n{\n  \"firstLaunchAt\": \"2026-01-01T00:00:00.000Z\",\n  \"trusted_folders\": [\"/srv/other\"]\n}\n";
+        std::fs::write(&file, before).unwrap();
+        assert_eq!(mark(TrustFormat::TrustedFoldersJson, &file, "/w/app").unwrap(), Marked::Now);
+        let after = std::fs::read_to_string(&file).unwrap();
+        assert!(after.starts_with("// User settings belong in settings.json.\n// This file is managed automatically.\n{"), "{after}");
+        let json: Value = serde_json::from_str(after.split_once("automatically.\n").unwrap().1).unwrap();
+        assert_eq!(json["firstLaunchAt"], "2026-01-01T00:00:00.000Z");
+        assert_eq!(json["trusted_folders"], serde_json::json!(["/srv/other", "/w/app"]));
+        assert!(is_trusted(TrustFormat::TrustedFoldersJson, &file, "/w/app").unwrap());
+        // Idempotent, and a listed parent folder covers its sub-folders (but not a sibling with the same prefix).
+        let bytes = std::fs::read(&file).unwrap();
+        assert_eq!(mark(TrustFormat::TrustedFoldersJson, &file, "/w/app").unwrap(), Marked::Already);
+        assert_eq!(mark(TrustFormat::TrustedFoldersJson, &file, "/srv/other/sub").unwrap(), Marked::Already);
+        assert_eq!(std::fs::read(&file).unwrap(), bytes);
+        assert!(!is_trusted(TrustFormat::TrustedFoldersJson, &file, "/srv/otherwise").unwrap());
+        // A missing file is created; a list that is not a list is left alone.
+        let fresh = dir.path().join("new/config.json");
+        assert_eq!(mark(TrustFormat::TrustedFoldersJson, &fresh, "/w").unwrap(), Marked::Now);
+        assert_eq!(serde_json::from_str::<Value>(&std::fs::read_to_string(&fresh).unwrap()).unwrap()["trusted_folders"], serde_json::json!(["/w"]));
+        let odd = dir.path().join("odd.json");
+        std::fs::write(&odd, "{\"trusted_folders\": \"/w\"}").unwrap();
+        assert!(mark(TrustFormat::TrustedFoldersJson, &odd, "/w").is_err());
+        assert_eq!(std::fs::read_to_string(&odd).unwrap(), "{\"trusted_folders\": \"/w\"}");
+    }
+
+    #[test]
+    fn openrouter_claude_json_also_skips_onboarding_once() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join(".claude.json");
+        assert_eq!(mark(TrustFormat::ClaudeJsonOnboarded, &file, "/w").unwrap(), Marked::Now);
+        let json: Value = serde_json::from_str(&std::fs::read_to_string(&file).unwrap()).unwrap();
+        assert_eq!(json["hasCompletedOnboarding"], true);
+        assert_eq!(json["projects"]["/w"]["hasTrustDialogAccepted"], true);
+        // A value the CLI wrote itself is never changed.
+        std::fs::write(&file, r#"{"hasCompletedOnboarding": false, "projects": {"/w": {"hasTrustDialogAccepted": true}}}"#).unwrap();
+        assert_eq!(mark(TrustFormat::ClaudeJsonOnboarded, &file, "/w").unwrap(), Marked::Already);
+        assert!(std::fs::read_to_string(&file).unwrap().contains("\"hasCompletedOnboarding\": false"));
+        // A trusted folder without the key: the key is added, the folder counts as already trusted.
+        std::fs::write(&file, r#"{"projects": {"/w": {"hasTrustDialogAccepted": true}}}"#).unwrap();
+        assert_eq!(mark(TrustFormat::ClaudeJsonOnboarded, &file, "/w").unwrap(), Marked::Already);
+        assert!(std::fs::read_to_string(&file).unwrap().contains("hasCompletedOnboarding"));
+        // The plain claude format never adds it.
+        let plain = dir.path().join("plain.json");
+        mark(TrustFormat::ClaudeJson, &plain, "/w").unwrap();
+        assert!(!std::fs::read_to_string(&plain).unwrap().contains("hasCompletedOnboarding"));
+    }
+
+    #[tokio::test]
+    async fn copilot_and_openrouter_trust_files_follow_their_folders() {
+        let dir = tempfile::tempdir().unwrap();
+        let d = dir.path().display();
+        std::fs::create_dir_all(dir.path().join("ws")).unwrap();
+        let text = format!(
+            "[workspace]\ndir = \"{d}/ws\"\n[server]\ndata_dir = \"{d}/data\"\n[agents_home]\nmode = \"isolated\"\ndir = \"{d}/ah\"\n[providers.copilot]\nbinary = \"/bin/sh\"\n[providers.openrouter]\nbinary = \"/bin/sh\"\n[providers.claude]\nbinary = \"/nonexistent/claude\"\n[providers.codex]\nbinary = \"/nonexistent/codex\"\n[providers.gemini]\nbinary = \"/nonexistent/agy\"\n[providers.cursor]\nbinary = \"/bin/sh\"\n"
+        );
+        let config = Config::parse(&text, Path::new("/")).unwrap();
+        let hub = Hub::new(config, Store::memory().await.unwrap(), Arc::new(FakeTerminal::default()));
+        let ws = dir.path().join("ws");
+        let key = folder_key(&ws).unwrap();
+        let lines = trust_workspace(&hub).await;
+        assert_eq!(lines[0].text, format!("trusted {key} for copilot, openrouter"), "{lines:?}");
+        let copilot: Value = serde_json::from_str(&std::fs::read_to_string(dir.path().join("ah/copilot/config.json")).unwrap()).unwrap();
+        assert_eq!(copilot["trusted_folders"], serde_json::json!([key]));
+        let or: Value = serde_json::from_str(&std::fs::read_to_string(dir.path().join("ah/openrouter/.claude.json")).unwrap()).unwrap();
+        assert_eq!(or["projects"][&key]["hasTrustDialogAccepted"], true);
+        assert!(!dir.path().join("ah/claude").exists(), "never the claude provider's folder");
+        let st = status(&hub, &ws);
+        let cursor = st.providers.iter().find(|p| p.provider == "cursor").unwrap();
+        assert_eq!((cursor.file.as_deref(), cursor.trusted), (None, None), "cursor: answered in the session");
     }
 
     #[test]

@@ -485,9 +485,10 @@ function RepoEditor({ slug, repo }: { slug: string; repo: RepoName }) {
 }
 
 function FallbackSelect({ value, onChange, providers }: { value: string; onChange: (v: string) => void; providers: ProviderInfo[] }) {
+  const { server } = useApp();
   return (
     <select value={value} onChange={(e) => onChange(e.target.value)} className="h-[38px] rounded-[7px] border border-line-2 bg-inset px-2 font-mono text-[13px] tracking-normal text-text normal-case">
-      <option value="api">Anthropic API</option>
+      <option value="api">{server?.api_fallback ?? "Anthropic API"}</option>
       {providers.map((p) => (
         <option key={p.name} value={p.name} disabled={!p.available}>
           {p.name} (headless){p.available ? "" : " · not installed"}

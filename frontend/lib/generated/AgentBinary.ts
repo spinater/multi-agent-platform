@@ -17,7 +17,7 @@ path: string | null,
  */
 home: string | null, 
 /**
- * What MAP exports to relocate it in isolated mode (`CLAUDE_CONFIG_DIR=/…/agent-home/claude`); `None` in shared
- * mode, or when the CLI has no such variable.
+ * What MAP exports to relocate it in isolated mode (`CLAUDE_CONFIG_DIR=/…/agent-home/claude`), or in both modes
+ * for a provider with a `shared_home` (openrouter); `None` otherwise, or when the CLI has no such variable.
  */
 home_env: string | null, };

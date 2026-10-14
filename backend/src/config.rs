@@ -230,10 +230,18 @@ pub struct ReflexConfig {
     pub binary: String,
     /// Each project's Reflex listens on loopback at the first free port from here.
     pub port_base: u16,
-    /// Environment variable holding the Anthropic API key for projects whose fallback is `api`.
+    /// Environment variable holding the API key for projects whose fallback is `api` (read from MAP's environment or
+    /// `[workspace.env]` for each call; never stored or shown).
     pub api_key_env: String,
     /// Model for the `api` fallback when a project does not set one.
     pub api_model: String,
+    /// The `api` fallback's wire format: `anthropic` (Messages API, `x-api-key`) or `openai` (Chat Completions,
+    /// `Authorization: Bearer`), which OpenRouter and other gateways speak.
+    pub api_format: ApiFormat,
+    /// The endpoint the `api` fallback posts to; unset: `https://api.anthropic.com/v1/messages` for `anthropic`,
+    /// `https://api.openai.com/v1/chat/completions` for `openai`. For OpenRouter:
+    /// `https://openrouter.ai/api/v1/chat/completions`.
+    pub api_url: Option<String>,
     /// Tokens added to every call of a fallback (`api`, or a provider name) in the savings report, both saved and
     /// spent: a headless CLI's own system prompt, which its output does not report. Missing: 0.
     pub fallback_overhead_tokens: BTreeMap<String, u64>,
@@ -246,7 +254,39 @@ impl Default for ReflexConfig {
             port_base: 7400,
             api_key_env: "ANTHROPIC_API_KEY".into(),
             api_model: "claude-haiku-5-5".into(),
+            api_format: ApiFormat::Anthropic,
+            api_url: None,
             fallback_overhead_tokens: BTreeMap::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ApiFormat {
+    #[default]
+    Anthropic,
+    Openai,
+}
+
+impl ReflexConfig {
+    /// Where the `api` fallback posts.
+    pub fn api_endpoint(&self) -> &str {
+        match (&self.api_url, self.api_format) {
+            (Some(url), _) => url,
+            (None, ApiFormat::Anthropic) => "https://api.anthropic.com/v1/messages",
+            (None, ApiFormat::Openai) => "https://api.openai.com/v1/chat/completions",
+        }
+    }
+
+    /// The `api` fallback's name on the dashboard: "Anthropic API", "OpenRouter API", "OpenAI-compatible API".
+    pub fn api_name(&self) -> String {
+        let host = self.api_endpoint().split("://").nth(1).and_then(|r| r.split(['/', ':']).next()).unwrap_or("").to_ascii_lowercase();
+        let known = [("anthropic.com", "Anthropic API"), ("openrouter.ai", "OpenRouter API"), ("openai.com", "OpenAI API")];
+        match known.iter().find(|(h, _)| host == *h || host.ends_with(&format!(".{h}"))) {
+            Some((_, name)) => (*name).into(),
+            None if self.api_format == ApiFormat::Openai => format!("OpenAI-compatible API ({host})"),
+            None => format!("Anthropic-compatible API ({host})"),
         }
     }
 }
@@ -299,6 +339,9 @@ pub struct SkillsConfig {
     pub claude_project_dirs: Vec<PathBuf>,
     /// Skill folders inside a workspace that Codex loads.
     pub codex_project_dirs: Vec<PathBuf>,
+    /// Other CLIs that load skills natively from some of those workspace folders, per provider (Cursor and Copilot
+    /// read `.claude/skills` and `.agents/skills`; `openrouter` is Claude Code).
+    pub also_loaded_by: BTreeMap<String, Vec<PathBuf>>,
     /// Personal Claude Code skills, searched recursively (claude.ai-synced skills live under `synced/`).
     pub claude_user_dirs: Vec<PathBuf>,
     /// Claude Code plugins: every folder with `.claude-plugin/plugin.json` below these is a plugin, and its
@@ -315,11 +358,19 @@ pub struct SkillsConfig {
 
 impl Default for SkillsConfig {
     fn default() -> Self {
-        let context_files = [("claude", "CLAUDE.md"), ("codex", "AGENTS.md"), ("gemini", "GEMINI.md")].into_iter().map(|(k, v)| (k.to_string(), v.to_string())).collect();
+        let context_files = [("claude", "CLAUDE.md"), ("codex", "AGENTS.md"), ("gemini", "GEMINI.md"), ("copilot", ".github/copilot-instructions.md")].into_iter().map(|(k, v)| (k.to_string(), v.to_string())).collect();
         Self {
             context_files,
             claude_project_dirs: vec![".claude/skills".into()],
             codex_project_dirs: vec![".agents/skills".into()],
+            also_loaded_by: [
+                ("cursor", vec![".claude/skills", ".agents/skills"]),
+                ("copilot", vec![".claude/skills", ".agents/skills"]),
+                ("openrouter", vec![".claude/skills"]),
+            ]
+            .into_iter()
+            .map(|(k, v)| (k.to_string(), v.into_iter().map(PathBuf::from).collect()))
+            .collect(),
             claude_user_dirs: vec!["~/.claude/skills".into()],
             claude_plugin_dirs: vec!["~/.claude/plugins".into()],
             codex_user_dirs: vec!["~/.codex/skills".into()],
@@ -344,6 +395,22 @@ pub struct AgentsConfig {
     pub claude_user_dirs: Vec<PathBuf>,
     pub codex_user_dirs: Vec<PathBuf>,
     pub gemini_user_dirs: Vec<PathBuf>,
+    /// CLIs MAP writes no files for that load another CLI's agents natively, with the scopes they load them in:
+    /// Cursor and GitHub Copilot read Claude Code's `.claude/agents` in a workspace. Shown on the Agents screen only.
+    pub also_loaded_by: BTreeMap<String, AlsoLoaded>,
+}
+
+/// `[agents.also_loaded_by.<provider>]`.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AlsoLoaded {
+    pub reads: crate::model::AgentProvider,
+    #[serde(default = "project_scope")]
+    pub scopes: Vec<crate::model::AgentScope>,
+}
+
+fn project_scope() -> Vec<crate::model::AgentScope> {
+    vec![crate::model::AgentScope::Project]
 }
 
 impl Default for AgentsConfig {
@@ -355,6 +422,10 @@ impl Default for AgentsConfig {
             claude_user_dirs: vec!["~/.claude/agents".into()],
             codex_user_dirs: vec!["~/.codex/agents".into()],
             gemini_user_dirs: vec!["~/.gemini/config/agents".into()],
+            also_loaded_by: ["cursor", "copilot"]
+                .into_iter()
+                .map(|p| (p.to_string(), AlsoLoaded { reads: crate::model::AgentProvider::Claude, scopes: project_scope() }))
+                .collect(),
         }
     }
 }
@@ -376,7 +447,7 @@ pub struct UsageConfig {
     pub codex_sessions: PathBuf,
     /// Codex's sign-in file; only its presence is checked.
     pub codex_auth: PathBuf,
-    /// Per provider: turn the reader off, or pick one (`claude`, `codex`, `none`) for a provider with another name.
+    /// Per provider: turn the reader off, or pick one (`claude`, `codex`, `openrouter`, `none`) for a provider with another name.
     pub providers: BTreeMap<String, UsageProviderConfig>,
 }
 
@@ -597,17 +668,18 @@ pub fn expand_home(p: &Path) -> PathBuf {
 }
 
 /// How the initial prompt reaches an interactive agent.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum PromptMode {
     /// Appended as the last command-line argument.
     Arg,
     /// Typed into the pane after `startup_secs`.
+    #[default]
     Send,
 }
 
 /// A coding-agent CLI. Command templates substitute `{binary}`, `{model}`, `{session}` and (headless only) `{prompt}`.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct ProviderSpec {
     pub binary: String,
     pub models: Vec<String>,
@@ -660,6 +732,19 @@ pub struct ProviderSpec {
     /// `VAR=~/path` exported next to `home_env` in isolated mode, so tools the agent runs keep their real folders
     /// when `home_env` is `HOME` (cargo, rustup, go). `~` is MAP's own `$HOME`; a value in MAP's environment wins.
     pub home_keep: Vec<String>,
+    /// The folder `home_env` points at in shared mode too (`~/` is the home directory), for a provider that runs
+    /// another provider's CLI and must never use that one's sign-in (`openrouter` runs `claude` with
+    /// `CLAUDE_CONFIG_DIR=~/.claude-openrouter`). `None`: shared mode leaves `home_env` alone.
+    pub shared_home: Option<String>,
+    /// Variables exported for every run of the provider, after `[workspace.env]` (so they win over it). A value that is
+    /// exactly `$NAME` is a reference: launch scripts say `export VAR="$NAME"`, so a secret's value is never written
+    /// to disk, and commands MAP runs itself read `NAME` from `[workspace.env]` or MAP's environment.
+    pub env: BTreeMap<String, String>,
+}
+
+/// The variable a provider `env` value refers to (`$OPENROUTER_API_KEY` → `OPENROUTER_API_KEY`); `None` for a literal.
+pub fn env_ref(value: &str) -> Option<&str> {
+    value.strip_prefix('$').filter(|v| valid_var(v))
 }
 
 /// Where a CLI records that its user trusts a folder (`backend/src/trust.rs` writes it).
@@ -681,6 +766,11 @@ pub enum TrustFormat {
     ClaudeJson,
     /// Codex's `config.toml`: `[projects."<folder>"] trust_level = "trusted"`.
     CodexToml,
+    /// `claude_json` plus `hasCompletedOnboarding = true` when the key is missing, for a Claude Code config folder
+    /// that only MAP uses (the `openrouter` provider's): its first run would otherwise stop at the theme picker.
+    ClaudeJsonOnboarded,
+    /// A JSON config with a `trusted_folders` array of paths (GitHub Copilot CLI's `config.json`).
+    TrustedFoldersJson,
 }
 
 /// `[providers.<name>.trust]`: each field overrides the built-in one; `file = ""` turns marking off.
@@ -776,6 +866,8 @@ struct ProviderOverride {
     home_subdir: Option<String>,
     isolated_dir: Option<String>,
     home_keep: Option<Vec<String>>,
+    shared_home: Option<String>,
+    env: Option<BTreeMap<String, String>>,
 }
 
 /// An optional override: missing keeps the built-in value, `""` clears it.
@@ -835,6 +927,8 @@ pub fn builtin_providers() -> BTreeMap<String, ProviderSpec> {
             home_subdir: None,
             isolated_dir: None,
             home_keep: vec![],
+            shared_home: None,
+            env: BTreeMap::new(),
         },
     );
     map.insert(
@@ -875,6 +969,8 @@ pub fn builtin_providers() -> BTreeMap<String, ProviderSpec> {
             home_subdir: None,
             isolated_dir: None,
             home_keep: vec![],
+            shared_home: None,
+            env: BTreeMap::new(),
         },
     );
     map.insert(
@@ -918,8 +1014,148 @@ pub fn builtin_providers() -> BTreeMap<String, ProviderSpec> {
             home_subdir: Some(".gemini".into()),
             isolated_dir: Some("gemini-home".into()),
             home_keep: strings(&["CARGO_HOME=~/.cargo", "RUSTUP_HOME=~/.rustup", "GOPATH=~/go"]),
+            shared_home: None,
+            env: BTreeMap::new(),
         },
     );
+    // Cursor CLI (https://cursor.com/docs/cli/overview). Installed as `agent` and `cursor-agent`; the longer name is
+    // the one no other tool uses. None of the pane strings below were captured from a real pane: they come from
+    // Cursor's docs and forum, and a `[providers.cursor]` override fixes them.
+    map.insert(
+        "cursor".into(),
+        ProviderSpec {
+            binary: "cursor-agent".into(),
+            // `cursor-agent --list-models` prints the ids this account can use; add them to `models` in map.toml.
+            models: strings(&["auto"]),
+            default_model: "auto".into(),
+            interactive: strings(&["{binary}", "--model", "{model}"]),
+            // Print mode proposes edits only (no --force); --trust: print mode never asks about the folder.
+            headless: strings(&["{binary}", "-p", "--output-format", "text", "--trust", "--model", "{model}", "{prompt}"]),
+            extra_args: vec![],
+            prompt_mode: PromptMode::Arg,
+            startup_secs: 5,
+            idle_markers: strings(&["Plan, search, build anything"]),
+            working_markers: vec![],
+            auth_markers: strings(&["Not logged in", "Authentication required", "Please log in", "run `agent login`", "run `cursor-agent login`"]),
+            // "Workspace Trust Required … Do you want to trust this workspace?" with "Trust this workspace". Where the
+            // CLI keeps trusted workspaces is not documented, so MAP does not write it: the question shows as
+            // `needs_trust`.
+            trust_markers: strings(&["Workspace Trust Required", "Do you want to trust this workspace", "Trust this workspace"]),
+            trust_accept: strings(&["Trust this workspace"]),
+            trust: None,
+            // A browser sign-in; NO_OPEN_BROWSER prints the URL instead of opening a browser on the server.
+            login: strings(&["env", "NO_OPEN_BROWSER=1", "{binary}", "login"]),
+            login_send: None,
+            login_warning: None,
+            // Where the sign-in is kept is not documented (a keyring where there is one): the state is unknown.
+            credentials: vec![],
+            api_key_env: Some("CURSOR_API_KEY".into()),
+            version: strings(&["{binary}", "--version"]),
+            latest: None,
+            update: strings(&["{binary}", "update"]),
+            // CURSOR_CONFIG_DIR moves ~/.cursor/cli-config.json, but not provably the sign-in, so isolated mode gives
+            // the CLI a HOME of its own, as for agy.
+            home_env: Some("HOME".into()),
+            default_home: Some("~/.cursor".into()),
+            home_subdir: Some(".cursor".into()),
+            isolated_dir: Some("cursor-home".into()),
+            home_keep: strings(&["CARGO_HOME=~/.cargo", "RUSTUP_HOME=~/.rustup", "GOPATH=~/go"]),
+            shared_home: None,
+            env: BTreeMap::new(),
+        },
+    );
+    // GitHub Copilot CLI (https://docs.github.com/en/copilot/how-tos/copilot-cli), npm @github/copilot.
+    map.insert(
+        "copilot".into(),
+        ProviderSpec {
+            binary: "copilot".into(),
+            models: strings(&["auto", "claude-opus-5.5", "claude-sonnet-4.6", "claude-haiku-4.5", "gpt-6-astra", "gpt-5.6-luna", "gpt-5.4-mini"]),
+            default_model: "auto".into(),
+            interactive: strings(&["{binary}", "--model", "{model}"]),
+            // -s: the answer only. Without --allow-all-tools a headless run uses no tool that needs approval.
+            headless: strings(&["{binary}", "-p", "{prompt}", "--model", "{model}", "-s", "--no-ask-user"]),
+            extra_args: vec![],
+            // The first prompt is `-i <prompt>`, which a session without one cannot leave dangling: typed in instead.
+            prompt_mode: PromptMode::Send,
+            startup_secs: 6,
+            idle_markers: vec![],
+            working_markers: strings(&["Esc to cancel"]),
+            auth_markers: strings(&["/login to authenticate", "Not authenticated", "No authentication information found", "Please run /login"]),
+            // "… You should only proceed if you trust the files in this location." with "1. Yes", "2. Yes, and
+            // remember this folder for future sessions", "3. No (Esc)".
+            trust_markers: strings(&["only proceed if you trust the files in this location", "Do you trust the files in this folder"]),
+            trust_accept: strings(&["Yes, and remember this folder"]),
+            trust: Some(TrustSpec {
+                format: TrustFormat::TrustedFoldersJson,
+                file: "~/.copilot/config.json".into(),
+                dir_env: Some("COPILOT_HOME".into()),
+                dir_file: Some("config.json".into()),
+            }),
+            login: strings(&["{binary}", "login", "--device-code"]),
+            login_send: None,
+            login_warning: None,
+            // The token is in the system keychain (or, without one, in config.json next to other state), so a file
+            // cannot tell: the state is unknown unless the variable below is set.
+            credentials: vec![],
+            api_key_env: Some("COPILOT_GITHUB_TOKEN".into()),
+            version: strings(&["{binary}", "--version"]),
+            latest: Some(LatestSource { url: "https://registry.npmjs.org/@github/copilot/latest".into(), json: Some("version".into()), channel: None }),
+            update: strings(&["{binary}", "update"]),
+            home_env: Some("COPILOT_HOME".into()),
+            default_home: Some("~/.copilot".into()),
+            home_subdir: None,
+            isolated_dir: None,
+            home_keep: vec![],
+            shared_home: None,
+            env: BTreeMap::new(),
+        },
+    );
+    // OpenRouter (https://openrouter.ai/docs/guides/guides/coding-agents): Claude Code against OpenRouter's
+    // Anthropic-compatible endpoint, signed in by the owner's OPENROUTER_API_KEY. Its own Claude config folder, in
+    // shared mode too, so it never uses (or signs out) the `claude` provider's account.
+    let mut openrouter = map["claude"].clone();
+    openrouter.models = strings(&[
+        "~anthropic/claude-sonnet-latest",
+        "~anthropic/claude-opus-latest",
+        "~anthropic/claude-haiku-latest",
+        "anthropic/claude-sonnet-5.5",
+        "anthropic/claude-opus-5.5",
+        "openai/gpt-6.1-sol",
+        "google/gemini-4-argon",
+        "moonshotai/kimi-k3",
+    ]);
+    openrouter.default_model = "~anthropic/claude-sonnet-latest".into();
+    openrouter.auth_markers.extend(strings(&["Invalid API key", "No auth credentials found", "User not found"]));
+    openrouter.trust = Some(TrustSpec {
+        format: TrustFormat::ClaudeJsonOnboarded,
+        file: "~/.claude-openrouter/.claude.json".into(),
+        dir_env: Some("CLAUDE_CONFIG_DIR".into()),
+        dir_file: Some(".claude.json".into()),
+    });
+    // No sign-in: the key is the sign-in.
+    openrouter.login = vec![];
+    openrouter.credentials = vec![];
+    openrouter.api_key_env = Some("OPENROUTER_API_KEY".into());
+    // The same `claude` binary: the claude provider announces and runs its updates.
+    openrouter.latest = None;
+    openrouter.update = vec![];
+    openrouter.default_home = Some("~/.claude-openrouter".into());
+    openrouter.shared_home = Some("~/.claude-openrouter".into());
+    openrouter.env = [
+        ("ANTHROPIC_BASE_URL", "https://openrouter.ai/api"),
+        ("ANTHROPIC_AUTH_TOKEN", "$OPENROUTER_API_KEY"),
+        // Must be set and empty, or Claude Code may send an Anthropic key to OpenRouter.
+        ("ANTHROPIC_API_KEY", ""),
+        // The models behind Claude Code's own aliases (sub-agents, background calls).
+        ("ANTHROPIC_DEFAULT_OPUS_MODEL", "~anthropic/claude-opus-latest"),
+        ("ANTHROPIC_DEFAULT_SONNET_MODEL", "~anthropic/claude-sonnet-latest"),
+        ("ANTHROPIC_DEFAULT_HAIKU_MODEL", "~anthropic/claude-haiku-latest"),
+    ]
+    .into_iter()
+    .map(|(k, v)| (k.to_string(), v.to_string()))
+    .collect();
+    map.insert("openrouter".into(), openrouter);
+
     map
 }
 
@@ -937,29 +1173,8 @@ impl ProviderOverride {
                     models: if model.is_empty() { vec![] } else { vec![model.clone()] },
                     default_model: model,
                     interactive,
-                    headless: vec![],
-                    extra_args: vec![],
-                    prompt_mode: PromptMode::Send,
                     startup_secs: 4,
-                    idle_markers: vec![],
-                    working_markers: vec![],
-                    auth_markers: vec![],
-                    trust_markers: vec![],
-                    trust_accept: vec![],
-                    trust: None,
-                    login: vec![],
-                    login_send: None,
-                    login_warning: None,
-                    credentials: vec![],
-                    api_key_env: None,
-                    version: vec![],
-                    latest: None,
-                    update: vec![],
-                    home_env: None,
-                    default_home: None,
-                    home_subdir: None,
-                    isolated_dir: None,
-                    home_keep: vec![],
+                    ..Default::default()
                 }
             }
         };
@@ -998,6 +1213,8 @@ impl ProviderOverride {
             home_subdir: optional(self.home_subdir, base.home_subdir),
             isolated_dir: optional(self.isolated_dir, base.isolated_dir),
             home_keep: self.home_keep.unwrap_or(base.home_keep),
+            shared_home: optional(self.shared_home, base.shared_home),
+            env: self.env.unwrap_or(base.env),
         })
     }
 }
@@ -1038,7 +1255,7 @@ impl Config {
         }
         skills.claude_settings = home(&skills.claude_settings);
         skills.claude_transcripts = home(&skills.claude_transcripts);
-        if let Some(dir) = skills.claude_project_dirs.iter().chain(&skills.codex_project_dirs).find(|d| d.is_absolute() || d.components().any(|c| c == std::path::Component::ParentDir)) {
+        if let Some(dir) = skills.claude_project_dirs.iter().chain(&skills.codex_project_dirs).chain(skills.also_loaded_by.values().flatten()).find(|d| d.is_absolute() || d.components().any(|c| c == std::path::Component::ParentDir)) {
             bail!("skills project dir `{}` must be relative to the workspace and stay inside it", dir.display());
         }
         let agents = &mut config.agents;
@@ -1048,6 +1265,15 @@ impl Config {
         let project_dirs = [&agents.claude_project_dirs, &agents.codex_project_dirs, &agents.gemini_project_dirs];
         if let Some(dir) = project_dirs.iter().flat_map(|d| d.iter()).find(|d| d.is_absolute() || d.as_os_str().is_empty() || d.components().any(|c| c == std::path::Component::ParentDir)) {
             bail!("agents project dir `{}` must be relative to the workspace and stay inside it", dir.display());
+        }
+        config.reflex.api_url = config.reflex.api_url.take().map(|u| u.trim().to_string()).filter(|u| !u.is_empty());
+        if let Some(url) = &config.reflex.api_url
+            && !(url.starts_with("https://") || url.starts_with("http://"))
+        {
+            bail!("reflex.api_url must start with https:// or http://");
+        }
+        if !valid_var(&config.reflex.api_key_env) {
+            bail!("reflex.api_key_env `{}` is not a valid variable name", config.reflex.api_key_env);
         }
         if config.reflex.binary.contains('/') {
             config.reflex.binary = resolve(Path::new(&config.reflex.binary)).to_string_lossy().into_owned();
@@ -1099,6 +1325,15 @@ impl Config {
             if let Some(keep) = spec.home_keep.iter().find(|k| !k.split_once('=').is_some_and(|(k, v)| valid_var(k) && !v.is_empty())) {
                 bail!("providers.{name}.home_keep `{keep}` must be VAR=value");
             }
+            if let Some(k) = spec.env.keys().find(|k| !valid_var(k)) {
+                bail!("providers.{name}.env key `{k}` is not a valid variable name");
+            }
+            if let Some((k, v)) = spec.env.iter().find(|(_, v)| v.starts_with('$') && env_ref(v).is_none()) {
+                bail!("providers.{name}.env.{k} = `{v}`: a reference is `$NAME` and nothing else");
+            }
+            if let Some((k, _)) = spec.env.iter().find(|(_, v)| v.contains('\0')) {
+                bail!("providers.{name}.env.{k} contains a NUL byte");
+            }
             if config.agents_home.isolated() && spec.home_env.is_none() {
                 config.warnings.push(format!("provider `{name}` has no home_env, so in isolated mode it still uses its usual folders and sign-in"));
             }
@@ -1120,9 +1355,9 @@ impl Config {
                 bail!("unknown provider `{name}` in [usage.providers]");
             }
             if let Some(r) = &p.reader
-                && !matches!(r.as_str(), "claude" | "codex" | "none")
+                && !matches!(r.as_str(), "claude" | "codex" | "openrouter" | "none")
             {
-                bail!("usage.providers.{name}.reader must be `claude`, `codex` or `none`");
+                bail!("usage.providers.{name}.reader must be `claude`, `codex`, `openrouter` or `none`");
             }
         }
 
@@ -1178,10 +1413,14 @@ impl Config {
 
     /// The folder `providers.<name>.home_env` points the CLI at: a value in `[workspace.env]` wins, then the
     /// isolated folder (`[agents_home] mode = "isolated"`), then MAP's own environment. `None`: the variable is not
-    /// set, so the CLI uses its `default_home`.
+    /// set, so the CLI uses its `default_home`. A provider with a `shared_home` always gets its own folder (the
+    /// isolated one, else `shared_home`), whatever `[workspace.env]` says, so it never shares another's sign-in.
     pub fn provider_home_var(&self, name: &str) -> Option<PathBuf> {
         let spec = self.providers.get(name)?;
         let var = spec.home_env.as_deref()?;
+        if let Some(home) = &spec.shared_home {
+            return Some(if self.agents_home.isolated() { self.isolated_folder(name, spec) } else { expand_home(Path::new(home)) });
+        }
         if let Some(v) = self.workspace.env.get(var).filter(|v| !v.is_empty()) {
             return Some(expand_home(Path::new(v)));
         }
@@ -1189,6 +1428,17 @@ impl Config {
             return Some(self.isolated_folder(name, spec));
         }
         std::env::var_os(var).filter(|v| !v.is_empty()).map(|v| expand_home(Path::new(&v)))
+    }
+
+    /// The `home_env` assignment MAP makes for every run of the provider, if any (`CLAUDE_CONFIG_DIR=/…`): the
+    /// isolated folder, or a `shared_home`. For Settings → Agent CLIs.
+    pub fn provider_home_export(&self, name: &str) -> Option<(String, String)> {
+        let spec = self.providers.get(name)?;
+        let var = spec.home_env.as_deref()?;
+        if spec.shared_home.is_some() {
+            return self.provider_home_var(name).map(|d| (var.to_string(), d.display().to_string()));
+        }
+        self.provider_env(name).into_iter().find(|(k, _)| k == var)
     }
 
     /// The CLI's state folder as the CLI will see it (`~/.claude`, `<agents_home.dir>/claude`,
@@ -1205,12 +1455,13 @@ impl Config {
         }
     }
 
-    /// What every launch of the provider exports besides `[workspace.env]`: in isolated mode its `home_env` (unless
-    /// `[workspace.env]` sets that variable itself) and its `home_keep`; nothing in shared mode.
+    /// What every launch of the provider exports before `[workspace.env]`: in isolated mode its `home_env` (unless
+    /// `[workspace.env]` sets that variable itself) and its `home_keep`; nothing in shared mode. A provider with a
+    /// `shared_home` gets its folder after `[workspace.env]` instead ([`Config::provider_fixed_env`]).
     pub fn provider_env(&self, name: &str) -> Vec<(String, String)> {
         let Some(spec) = self.providers.get(name) else { return vec![] };
         let Some(var) = spec.home_env.as_deref() else { return vec![] };
-        if !self.agents_home.isolated() || self.workspace.env.get(var).is_some_and(|v| !v.is_empty()) {
+        if spec.shared_home.is_some() || !self.agents_home.isolated() || self.workspace.env.get(var).is_some_and(|v| !v.is_empty()) {
             return vec![];
         }
         let mut env = vec![(var.to_string(), self.isolated_folder(name, spec).display().to_string())];
@@ -1222,6 +1473,46 @@ impl Config {
             env.push((k.to_string(), v));
         }
         env
+    }
+
+    /// A variable's value as the commands MAP runs itself see it: `[workspace.env]` first, then MAP's environment.
+    pub fn env_value(&self, var: &str) -> Option<String> {
+        self.workspace.env.get(var).cloned().filter(|v| !v.is_empty()).or_else(|| std::env::var(var).ok().filter(|v| !v.is_empty()))
+    }
+
+    /// The provider's `env` with every `$NAME` reference read from [`Config::env_value`] (missing: empty), for the
+    /// commands MAP runs itself (headless fallback, audit, version check), after `[workspace.env]`. Never written
+    /// anywhere: launch scripts get [`Config::provider_script_env`] instead.
+    pub fn provider_fixed_env(&self, name: &str) -> Vec<(String, String)> {
+        let Some(spec) = self.providers.get(name) else { return vec![] };
+        let mut env: Vec<(String, String)> = self.shared_home_export(name).into_iter().collect();
+        env.extend(spec.env.iter().map(|(k, v)| (k.clone(), match env_ref(v) { Some(r) => self.env_value(r).unwrap_or_default(), None => v.clone() })));
+        env
+    }
+
+    /// A `shared_home` provider's `home_env` and folder, exported after `[workspace.env]` so it wins.
+    fn shared_home_export(&self, name: &str) -> Option<(String, String)> {
+        let spec = self.providers.get(name)?;
+        spec.shared_home.as_ref()?;
+        Some((spec.home_env.clone()?, self.provider_home_var(name)?.display().to_string()))
+    }
+
+    /// The provider's `env` as launch-script lines, after `[workspace.env]`: a literal is shell-quoted, a `$NAME`
+    /// reference stays a reference (`export ANTHROPIC_AUTH_TOKEN="$OPENROUTER_API_KEY"`), so its value never reaches
+    /// the script on disk. A reference that is empty when the script runs prints a warning in the pane.
+    pub fn provider_script_env(&self, name: &str) -> Vec<String> {
+        let Some(spec) = self.providers.get(name) else { return vec![] };
+        let mut lines: Vec<String> = self.shared_home_export(name).map(|(k, v)| format!("export {k}={}", shlex::try_quote(&v).map(|q| q.into_owned()).unwrap_or_else(|_| "''".into()))).into_iter().collect();
+        for (k, v) in &spec.env {
+            match env_ref(v) {
+                Some(r) => {
+                    lines.push(format!("[ -n \"${{{r}:-}}\" ] || echo \"map: {r} is not set in this session's environment ({k} needs it)\" >&2"));
+                    lines.push(format!("export {k}=\"${r}\""));
+                }
+                None => lines.push(format!("export {k}={}", shlex::try_quote(v).map(|q| q.into_owned()).unwrap_or_else(|_| "''".into()))),
+            }
+        }
+        lines
     }
 
     fn isolated_folder(&self, name: &str, spec: &ProviderSpec) -> PathBuf {
@@ -1308,6 +1599,12 @@ impl Config {
         }
     }
 }
+
+/// For tests whose outcome depends on which CLIs are installed: Cursor, Copilot and OpenRouter (the `claude`
+/// binary) as not installed, whatever this machine's PATH has.
+#[cfg(test)]
+pub const NO_NEW_CLIS: &str =
+    "[providers.cursor]\nbinary = \"/nonexistent/cursor-agent\"\n[providers.copilot]\nbinary = \"/nonexistent/copilot\"\n[providers.openrouter]\nbinary = \"/nonexistent/claude\"\n";
 
 /// A shell variable name: letters, digits and `_`, not starting with a digit.
 fn valid_var(k: &str) -> bool {
@@ -1614,6 +1911,114 @@ default_root = "Docker""#,
         let shared = Config::parse(&format!("[workspace]\ndir = \"/r\"\n[server]\ndata_dir = \"{}/s\"\n", dir.path().display()), Path::new("/")).unwrap();
         assert!(shared.create_agent_homes().unwrap().is_empty());
         assert!(!dir.path().join("s").exists());
+    }
+
+    #[test]
+    fn cursor_copilot_and_openrouter_are_built_in_but_not_in_the_order() {
+        let c = Config::parse("[workspace]\ndir = \"/r\"\n", Path::new("/")).unwrap();
+        assert_eq!(c.orchestrator.provider_order, ["claude", "codex", "gemini"], "new providers are opt-in");
+        let cursor = &c.providers["cursor"];
+        assert_eq!((cursor.binary.as_str(), cursor.default_model.as_str(), cursor.prompt_mode), ("cursor-agent", "auto", PromptMode::Arg));
+        assert!(cursor.headless.windows(2).any(|w| w == ["-p", "--output-format"]) && cursor.headless.contains(&"--trust".to_string()));
+        assert!(cursor.trust.is_none(), "where cursor keeps trusted folders is undocumented");
+        assert_eq!(cursor.api_key_env.as_deref(), Some("CURSOR_API_KEY"));
+        assert!(cursor.credentials.is_empty());
+
+        let copilot = &c.providers["copilot"];
+        assert_eq!((copilot.binary.as_str(), copilot.prompt_mode), ("copilot", PromptMode::Send));
+        assert_eq!(copilot.headless[..3], ["{binary}", "-p", "{prompt}"]);
+        assert_eq!(copilot.trust.as_ref().unwrap().format, TrustFormat::TrustedFoldersJson);
+        assert_eq!(copilot.home_env.as_deref(), Some("COPILOT_HOME"));
+        assert_eq!(copilot.latest.as_ref().unwrap().url, "https://registry.npmjs.org/@github/copilot/latest");
+        assert!(copilot.models.contains(&copilot.default_model));
+
+        let or = &c.providers["openrouter"];
+        assert_eq!(or.binary, "claude");
+        assert!(or.login.is_empty() && or.credentials.is_empty() && or.update.is_empty() && or.latest.is_none());
+        assert_eq!(or.api_key_env.as_deref(), Some("OPENROUTER_API_KEY"));
+        assert_eq!(or.env["ANTHROPIC_BASE_URL"], "https://openrouter.ai/api");
+        assert_eq!(or.env["ANTHROPIC_AUTH_TOKEN"], "$OPENROUTER_API_KEY");
+        assert_eq!(or.env["ANTHROPIC_API_KEY"], "");
+        assert!(or.models.contains(&or.default_model));
+        assert_eq!(or.trust.as_ref().unwrap().format, TrustFormat::ClaudeJsonOnboarded);
+        // Opting in is one line.
+        let c = Config::parse("[workspace]\ndir = \"/r\"\n[orchestrator]\nprovider_order = [\"claude\", \"openrouter\", \"copilot\", \"cursor\"]\n", Path::new("/")).unwrap();
+        assert_eq!(c.orchestrator.provider_order.len(), 4);
+        // The trust formats by their map.toml names.
+        let c = Config::parse(
+            "[workspace]\ndir = \"/r\"\n[providers.codex.trust]\nformat = \"trusted_folders_json\"\n[providers.gemini.trust]\nformat = \"claude_json_onboarded\"\nfile = \"~/.x.json\"\n",
+            Path::new("/"),
+        )
+        .unwrap();
+        assert_eq!(c.providers["codex"].trust.as_ref().unwrap().format, TrustFormat::TrustedFoldersJson);
+        assert_eq!(c.providers["gemini"].trust.as_ref().unwrap().format, TrustFormat::ClaudeJsonOnboarded);
+    }
+
+    #[test]
+    fn openrouter_never_shares_the_claude_providers_folder() {
+        let home = PathBuf::from(std::env::var_os("HOME").unwrap());
+        // Shared mode, even with CLAUDE_CONFIG_DIR in [workspace.env] for the claude provider.
+        let c = Config::parse("[workspace]\ndir = \"/r\"\n[workspace.env]\nCLAUDE_CONFIG_DIR = \"/opt/claude\"\n", Path::new("/")).unwrap();
+        assert_eq!(c.provider_home("claude"), Some(PathBuf::from("/opt/claude")));
+        assert_eq!(c.provider_home("openrouter"), Some(home.join(".claude-openrouter")));
+        assert!(c.provider_env("openrouter").is_empty(), "exported after [workspace.env] instead");
+        let fixed = c.provider_fixed_env("openrouter");
+        assert_eq!(fixed[0], ("CLAUDE_CONFIG_DIR".to_string(), home.join(".claude-openrouter").display().to_string()));
+        assert_eq!(c.provider_home_export("openrouter"), Some(("CLAUDE_CONFIG_DIR".to_string(), home.join(".claude-openrouter").display().to_string())));
+        assert_eq!(c.provider_home_export("claude"), None, "shared mode exports nothing for claude");
+        // Isolated: its own folder under agents_home, apart from claude's.
+        let c = Config::parse("[workspace]\ndir = \"/r\"\n[agents_home]\nmode = \"isolated\"\ndir = \"/srv/ah\"\n", Path::new("/")).unwrap();
+        assert_eq!(c.provider_home("openrouter"), Some(PathBuf::from("/srv/ah/openrouter")));
+        assert_eq!(c.provider_home("claude"), Some(PathBuf::from("/srv/ah/claude")));
+        assert_eq!(c.provider_home("copilot"), Some(PathBuf::from("/srv/ah/copilot")));
+        assert_eq!(c.provider_env("copilot"), [("COPILOT_HOME".to_string(), "/srv/ah/copilot".to_string())]);
+        assert_eq!(c.provider_home("cursor"), Some(PathBuf::from("/srv/ah/cursor-home/.cursor")));
+        assert_eq!(c.provider_env("cursor")[0], ("HOME".to_string(), "/srv/ah/cursor-home".to_string()));
+        assert!(c.provider_env("cursor").iter().any(|(k, _)| k == "CARGO_HOME"));
+        let dirs = c.provider_script_env("openrouter");
+        assert_eq!(dirs[0], "export CLAUDE_CONFIG_DIR=/srv/ah/openrouter");
+    }
+
+    #[test]
+    fn provider_env_references_secrets_and_resolves_them_only_in_memory() {
+        let c = Config::parse(
+            "[workspace]\ndir = \"/r\"\n[workspace.env]\nMY_KEY = \"sk-or-SECRET-123\"\n[providers.openrouter]\nenv = { ANTHROPIC_AUTH_TOKEN = \"$MY_KEY\", ANTHROPIC_API_KEY = \"\", X_LITERAL = \"it's $x\" }\n",
+            Path::new("/"),
+        )
+        .unwrap();
+        let script = c.provider_script_env("openrouter").join("\n");
+        assert!(script.contains("export ANTHROPIC_AUTH_TOKEN=\"$MY_KEY\""), "{script}");
+        assert!(script.contains("[ -n \"${MY_KEY:-}\" ] || echo"), "{script}");
+        assert!(script.contains("export ANTHROPIC_API_KEY=''"), "{script}");
+        assert!(script.contains("export X_LITERAL=\"it's \"'$x'"), "a literal `$` is quoted, not expanded: {script}");
+        assert!(!script.contains("SECRET"), "the value never reaches the script: {script}");
+        let fixed: BTreeMap<String, String> = c.provider_fixed_env("openrouter").into_iter().collect();
+        assert_eq!(fixed["ANTHROPIC_AUTH_TOKEN"], "sk-or-SECRET-123");
+        assert_eq!(fixed["ANTHROPIC_API_KEY"], "");
+        assert_eq!(env_ref("$OPENROUTER_API_KEY"), Some("OPENROUTER_API_KEY"));
+        assert_eq!(env_ref("${X}"), None);
+        assert_eq!(env_ref("plain"), None);
+        for bad in ["env = { \"1X\" = \"a\" }", "env = { A = \"$1X\" }", "env = { A = \"$X-Y\" }"] {
+            assert!(Config::parse(&format!("[workspace]\ndir = \"/r\"\n[providers.openrouter]\n{bad}\n"), Path::new("/")).is_err(), "{bad}");
+        }
+    }
+
+    #[test]
+    fn api_fallback_format_url_and_name() {
+        let c = Config::parse("[workspace]\ndir = \"/r\"\n", Path::new("/")).unwrap();
+        assert_eq!((c.reflex.api_format, c.reflex.api_endpoint(), c.reflex.api_name().as_str()), (ApiFormat::Anthropic, "https://api.anthropic.com/v1/messages", "Anthropic API"));
+        let c = Config::parse(
+            "[workspace]\ndir = \"/r\"\n[reflex]\napi_format = \"openai\"\napi_url = \"https://openrouter.ai/api/v1/chat/completions\"\napi_key_env = \"OPENROUTER_API_KEY\"\napi_model = \"~anthropic/claude-haiku-latest\"\n",
+            Path::new("/"),
+        )
+        .unwrap();
+        assert_eq!((c.reflex.api_endpoint(), c.reflex.api_name().as_str()), ("https://openrouter.ai/api/v1/chat/completions", "OpenRouter API"));
+        let c = Config::parse("[workspace]\ndir = \"/r\"\n[reflex]\napi_format = \"openai\"\napi_url = \"http://127.0.0.1:8080/v1/chat/completions\"\n", Path::new("/")).unwrap();
+        assert_eq!(c.reflex.api_name(), "OpenAI-compatible API (127.0.0.1)");
+        assert_eq!(Config::parse("[workspace]\ndir = \"/r\"\n[reflex]\napi_format = \"openai\"\n", Path::new("/")).unwrap().reflex.api_endpoint(), "https://api.openai.com/v1/chat/completions");
+        for bad in ["api_url = \"ftp://x\"", "api_format = \"grpc\"", "api_key_env = \"MY-KEY\""] {
+            assert!(Config::parse(&format!("[workspace]\ndir = \"/r\"\n[reflex]\n{bad}\n"), Path::new("/")).is_err(), "{bad}");
+        }
     }
 
     #[test]

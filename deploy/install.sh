@@ -233,6 +233,13 @@ provider_order = ["claude", "codex", "gemini"]
 [providers.gemini]
 binary = "$gemini_binary"
 
+# Also built in and opt-in (add them to provider_order above; see map.example.toml for every field):
+#   cursor      the Cursor CLI (cursor-agent); sign in under Settings -> Agent CLIs, or set CURSOR_API_KEY
+#   copilot     the GitHub Copilot CLI (copilot); sign in there, or set COPILOT_GITHUB_TOKEN
+#   openrouter  Claude Code through OpenRouter: set OPENROUTER_API_KEY in this service's environment (never here)
+# [providers.copilot]
+# extra_args = ["--allow-all-tools"]
+
 [reflex]
 binary = "$REFLEX"
 

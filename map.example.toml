@@ -19,8 +19,8 @@ data_dir = ".map"
 dir = "../my-repo"
 # Only tmux sessions with this prefix are managed; nothing else is ever touched.
 session_prefix = "map-"
-# MAP marks the default workspace and each project's folder as trusted for Claude Code and Codex before it starts an
-# agent there; set false to answer the CLIs' own trust prompts yourself.
+# MAP marks the default workspace and each project's folder as trusted for Claude Code, Codex, Copilot and OpenRouter
+# before it starts an agent there; set false to answer the CLIs' own trust prompts yourself.
 trust_folders = true
 # A private tmux server for MAP's sessions (`tmux -L <name>`), apart from the tmux you use yourself; attach with
 # `tmux -L <name> attach -t <session>` (Settings → Server shows the command). Unset: tmux's default server. Either
@@ -93,7 +93,8 @@ timeout_secs = 600
 # standard = "gpt-6-astra"
 # heavy = "gpt-6-sol"
 
-# Built-in providers: claude, codex, gemini (the `agy` CLI). Any field below overrides the built-in value.
+# Built-in providers: claude, codex, gemini (the `agy` CLI), and opt-in cursor, copilot and openrouter (Claude Code via
+# OpenRouter), further down. Any field below overrides the built-in value.
 # Templates substitute {binary}, {model}, {session} and, for headless, {prompt}.
 
 #
@@ -117,11 +118,15 @@ timeout_secs = 600
 #
 # Folder trust (workspace.trust_folders above):
 #   trust         where the CLI records trusted folders, which MAP writes before starting it in a folder:
-#                 { format = "claude_json" | "codex_toml", file = "~/...", dir_env = "VAR", dir_file = "..." }.
+#                 { format = "claude_json" | "codex_toml" | "trusted_folders_json" | "claude_json_onboarded",
+#                   file = "~/...", dir_env = "VAR", dir_file = "..." }.
 #                 With dir_env set (in [workspace.env] or MAP's environment) the file is <$dir_env>/<dir_file>.
 #                 Built in: claude  { format = "claude_json", file = "~/.claude.json", dir_env = "CLAUDE_CONFIG_DIR", dir_file = ".claude.json" }
 #                           codex   { format = "codex_toml", file = "~/.codex/config.toml", dir_env = "CODEX_HOME", dir_file = "config.toml" }
-#                 None for gemini (agy). trust = { file = "" } turns it off for one provider.
+#                           copilot { format = "trusted_folders_json", file = "~/.copilot/config.json", dir_env = "COPILOT_HOME", dir_file = "config.json" }
+#                           openrouter { format = "claude_json_onboarded", ... }: claude_json plus hasCompletedOnboarding
+#                           (its config folder is MAP's alone, so a first run skips Claude Code's theme picker)
+#                 None for gemini (agy) and cursor. trust = { file = "" } turns it off for one provider.
 #                 In isolated mode ([agents_home]) the variable is MAP's folder for the CLI.
 #   trust_markers pane text of the CLI's trust question; the session then shows as needs_trust.
 #   trust_accept  the label of the option that trusts the folder ("Yes, I trust this folder"), which the dashboard's
@@ -137,6 +142,14 @@ timeout_secs = 600
 #   home_keep     VAR=~/path exported with home_env in isolated mode, so tools an agent runs keep their real folders
 #                 when HOME moves (gemini: CARGO_HOME, RUSTUP_HOME, GOPATH). A value in MAP's environment wins.
 #   home_env = "" opts one provider out: it keeps using its usual folders and sign-in.
+#   shared_home   the folder home_env points at in shared mode too (openrouter: ~/.claude-openrouter), for a provider
+#                 that runs another one's CLI and must never use that one's sign-in. It wins over [workspace.env].
+#
+# Environment:
+#   env           { VAR = "value" } exported for every run of the provider, after [workspace.env] (so it wins). A value
+#                 that is exactly "$NAME" is a reference: launch scripts say export VAR="$NAME", so a secret's value is
+#                 never written to disk; commands MAP runs itself (headless fallback, audit) read NAME from
+#                 [workspace.env] or MAP's environment.
 
 [providers.claude]
 # Unattended workers need this, or they stop at every permission prompt (the watcher shows them as waiting).
@@ -178,6 +191,63 @@ timeout_secs = 600
 # agy from your own shell. agy may keep its token in the system keyring, which a different HOME does not isolate.
 # update = ["{binary}", "update"]
 
+# Also built in, and opt-in: add them to provider_order (or pick them for a task, project or the planner) to use them.
+# A provider whose binary is missing just shows as not installed.
+#
+# Cursor CLI (https://cursor.com/docs/cli/overview), installed as `cursor-agent` (and `agent`).
+[providers.cursor]
+# binary = "cursor-agent"
+# `cursor-agent --list-models` prints the ids your account can use; list them here (the built-in list is just "auto").
+# models = ["auto"]
+# default_model = "auto"
+# Unattended workers: --force runs commands without asking (unless denied in ~/.cursor/cli-config.json).
+# extra_args = ["--force"]
+# headless = ["{binary}", "-p", "--output-format", "text", "--trust", "--model", "{model}", "{prompt}"]
+# Browser sign-in; NO_OPEN_BROWSER makes it print the URL. Where the CLI keeps the sign-in is not documented, so the
+# dashboard shows it as unknown unless CURSOR_API_KEY is set.
+# login = ["env", "NO_OPEN_BROWSER=1", "{binary}", "login"]
+# api_key_env = "CURSOR_API_KEY"
+# Where cursor keeps trusted folders is not documented: MAP does not write it, and its "Trust this workspace"
+# question shows as needs_trust (the session's "Trust this folder" button answers it).
+# trust_markers = ["Workspace Trust Required", "Do you want to trust this workspace", "Trust this workspace"]
+# update = ["{binary}", "update"]
+# Isolated mode gives it a HOME of its own (<dir>/cursor-home), like agy: CURSOR_CONFIG_DIR moves its config but
+# not provably its sign-in.
+
+# GitHub Copilot CLI (https://docs.github.com/en/copilot/how-tos/copilot-cli), npm @github/copilot.
+[providers.copilot]
+# binary = "copilot"
+# models = ["auto", "claude-opus-5.5", "claude-sonnet-4.6", "claude-haiku-4.5", "gpt-6-astra", "gpt-5.6-luna", "gpt-5.4-mini"]
+# default_model = "auto"
+# Unattended workers need tool approval switched off (--allow-all-tools; --yolo also allows every path and URL).
+# extra_args = ["--allow-all-tools"]
+# headless = ["{binary}", "-p", "{prompt}", "--model", "{model}", "-s", "--no-ask-user"]
+# Device-code sign-in. Or a fine-grained token with the "Copilot Requests" permission in COPILOT_GITHUB_TOKEN (GH_TOKEN
+# and GITHUB_TOKEN also work; classic ghp_ tokens do not). The sign-in sits in the system keychain, so without the
+# variable the dashboard shows it as unknown.
+# login = ["{binary}", "login", "--device-code"]
+# api_key_env = "COPILOT_GITHUB_TOKEN"
+# MAP adds each folder to trusted_folders in ~/.copilot/config.json ($COPILOT_HOME/config.json).
+# trust = { format = "trusted_folders_json", file = "~/.copilot/config.json", dir_env = "COPILOT_HOME", dir_file = "config.json" }
+# latest = { url = "https://registry.npmjs.org/@github/copilot/latest", json = "version" }
+# update = ["{binary}", "update"]
+
+# OpenRouter (https://openrouter.ai/docs/guides/guides/coding-agents): Claude Code against OpenRouter's
+# Anthropic-compatible endpoint. Set OPENROUTER_API_KEY in MAP's own environment (e.g. the systemd unit's
+# EnvironmentFile): launch scripts export ANTHROPIC_AUTH_TOKEN="$OPENROUTER_API_KEY" by reference and never write the
+# key, and the dashboard only shows whether it is set. With the default tmux server a session only sees variables
+# that server has, so use workspace.tmux_socket (a server MAP starts, with MAP's environment). It has its own Claude
+# config folder (~/.claude-openrouter; isolated: <dir>/openrouter), never the claude provider's sign-in.
+[providers.openrouter]
+# binary = "claude"
+# models = ["~anthropic/claude-sonnet-latest", "~anthropic/claude-opus-latest", "~anthropic/claude-haiku-latest", "anthropic/claude-sonnet-5.5", "anthropic/claude-opus-5.5", "openai/gpt-6.1-sol", "google/gemini-4-argon", "moonshotai/kimi-k3"]
+# default_model = "~anthropic/claude-sonnet-latest"
+# extra_args = ["--dangerously-skip-permissions"]
+# api_key_env = "OPENROUTER_API_KEY"
+# Exported after [workspace.env]; a value that is exactly $NAME is exported by reference ("$NAME").
+# env = { ANTHROPIC_BASE_URL = "https://openrouter.ai/api", ANTHROPIC_AUTH_TOKEN = "$OPENROUTER_API_KEY", ANTHROPIC_API_KEY = "", ANTHROPIC_DEFAULT_OPUS_MODEL = "~anthropic/claude-opus-latest", ANTHROPIC_DEFAULT_SONNET_MODEL = "~anthropic/claude-sonnet-latest", ANTHROPIC_DEFAULT_HAIKU_MODEL = "~anthropic/claude-haiku-latest" }
+# shared_home = "~/.claude-openrouter"
+
 # A provider that is not built in needs at least binary and interactive:
 # [providers.aider]
 # binary = "aider"
@@ -194,9 +264,17 @@ timeout_secs = 600
 [reflex]
 # binary = "reflex"
 # port_base = 7400
-# Used by projects whose fallback is "api"; the other fallbacks are the providers above, run headless.
+# Used by projects whose fallback is "api"; the other fallbacks are the providers above, run headless. The key is read
+# from MAP's environment (or [workspace.env]) for each call, never stored or shown.
 # api_key_env = "ANTHROPIC_API_KEY"
 # api_model = "claude-haiku-5-5"
+# "anthropic" (Messages API) or "openai" (Chat Completions, which OpenRouter and other gateways speak).
+# api_format = "anthropic"
+# Unset: the format's own endpoint (api.anthropic.com, api.openai.com). OpenRouter:
+# api_format = "openai"
+# api_url = "https://openrouter.ai/api/v1/chat/completions"
+# api_key_env = "OPENROUTER_API_KEY"
+# api_model = "~anthropic/claude-haiku-latest"
 # The Reflex savings page (#reflex/savings) prices each fallback call from the API's reported usage, else at
 # ~4 chars per token. A headless CLI's own system prompt is not in that count: add a headless CLI call's own
 # system-prompt cost if you want it counted (tokens per call, added to both saved and spent; default 0).
@@ -207,9 +285,11 @@ timeout_secs = 600
 # disable or enable a skill for a project (a `Skill(name)` deny rule, plus `skillOverrides` for non-plugin skills).
 # `~` expands to $HOME; *_project_dirs are relative to each workspace.
 [skills]
-# context_files = { claude = "CLAUDE.md", codex = "AGENTS.md", gemini = "GEMINI.md" }
+# context_files = { claude = "CLAUDE.md", codex = "AGENTS.md", gemini = "GEMINI.md", copilot = ".github/copilot-instructions.md" }
 # claude_project_dirs = [".claude/skills"]
 # codex_project_dirs = [".agents/skills"]
+# CLIs that load project skills from some of those folders natively (shown on the skill; nothing else changes).
+# also_loaded_by = { cursor = [".claude/skills", ".agents/skills"], copilot = [".claude/skills", ".agents/skills"], openrouter = [".claude/skills"] }
 # claude_user_dirs = ["~/.claude/skills"]
 # claude_plugin_dirs = ["~/.claude/plugins"]
 # codex_user_dirs = ["~/.codex/skills"]
@@ -261,9 +341,16 @@ timeout_secs = 600
 # claude_user_dirs = ["~/.claude/agents"]
 # codex_user_dirs = ["~/.codex/agents"]
 # gemini_user_dirs = ["~/.gemini/config/agents"]
+# CLIs MAP writes no agent files for, that load another CLI's agents themselves; the Agents screen shows them as extra
+# columns. Cursor and Copilot read Claude Code's .claude/agents in a project.
+# [agents.also_loaded_by.cursor]
+# reads = "claude"
+# scopes = ["project"]
 # Plan limits per provider account, shown on the Usage screen and in the top bar. Claude: the account endpoint the
 # CLI's /usage reads, with Claude Code's own sign-in (the token only ever goes to api.anthropic.com). Codex: the
-# newest rate-limit snapshot in its session logs (from its last run). Other CLIs have no local source yet.
+# newest rate-limit snapshot in its session logs (from its last run). OpenRouter: the API key's own credit limit
+# (GET openrouter.ai/api/v1/key with OPENROUTER_API_KEY, sent nowhere else). Other CLIs (agy, Cursor, Copilot) have no
+# usage source MAP can read, so the Usage screen says so.
 [usage]
 # enabled = true
 # interval_secs = 300
@@ -273,7 +360,7 @@ skip_pct = 90
 # claude_projects = "~/.claude/projects"
 # codex_sessions = "~/.codex/sessions"
 # codex_auth = "~/.codex/auth.json"
-# Turn a reader off, or pick one ("claude", "codex", "none") for a provider with another name.
+# Turn a reader off, or pick one ("claude", "codex", "openrouter", "none") for a provider with another name.
 # [usage.providers.codex]
 # enabled = false
 

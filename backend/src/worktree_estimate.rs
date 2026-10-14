@@ -321,9 +321,9 @@ async fn agent_memory(hub: &Hub, providers: &[String]) -> Vec<AgentMemory> {
                 .collect();
             if rss.is_empty() {
                 let typical = match provider.as_str() {
-                    "claude" => 450 * MIB,
+                    "claude" | "openrouter" => 450 * MIB,
                     "codex" => 200 * MIB,
-                    "gemini" => 350 * MIB,
+                    "gemini" | "cursor" => 350 * MIB,
                     _ => 300 * MIB,
                 };
                 AgentMemory { provider: provider.clone(), bytes: typical, measured: 0 }

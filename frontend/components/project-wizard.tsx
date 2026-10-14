@@ -355,7 +355,7 @@ export function ProjectWizard({ onClose, onCreated, initialStep = 0 }: { onClose
                 </Field>
                 <Field label="When Reflex is unsure, ask" hint="The project's decision engine answers locally first; this answers the rest.">
                   <select value={fallback} onChange={(e) => setFallback(e.target.value)} className="h-[38px] rounded-[7px] border border-line-2 bg-inset px-2 font-mono text-[13px] tracking-normal text-text normal-case">
-                    <option value="api">Anthropic API</option>
+                    <option value="api">{server?.api_fallback ?? "Anthropic API"}</option>
                     {providers.map((p) => (
                       <option key={p.name} value={p.name} disabled={!p.available}>
                         {p.name} (headless){p.available ? "" : " · not installed"}

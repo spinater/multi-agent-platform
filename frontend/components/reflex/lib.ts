@@ -158,7 +158,8 @@ export const MODE_BADGE: Record<Mode, [string, string]> = {
 export const toLlm = (fallback: string) => (fallback === "none" ? "nobody (this project has no fallback)" : "the LLM");
 
 /** Who answers below the threshold, in a few words. */
-export const fallbackName = (f: string) => (f === "api" ? "Anthropic API" : f === "none" ? "no fallback" : f);
+/** A project fallback as words; `api` is named after `[reflex] api_url` (`ServerInfo.api_fallback`). */
+export const fallbackName = (f: string, api = "Anthropic API") => (f === "api" ? api : f === "none" ? "no fallback" : f);
 
 /** Scrolls to a section of the screen, below the sticky top bar. */
 export function scrollToSection(id: string) {

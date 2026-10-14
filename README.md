@@ -23,7 +23,7 @@ nothing is tied to one repository, session name or provider.
     (`VERDICT: PASS`), then `post_done` hooks (e.g. commit).
   - **Retries.** A failed check retries the task with the failure output in the new prompt, up to `max_attempts`.
   - **Human safety.** It never kills a worker that someone is attached to, or one with typing on its input line.
-  - **Folder trust.** Claude Code and Codex ask once per folder whether to trust it, and an unattended worker would
+  - **Folder trust.** The CLIs ask once per folder whether to trust it, and an unattended worker would
     wait there forever. MAP marks each folder trusted before agents run in it, and shows any question that still
     appears as `needs_trust`, with a button to answer it. See [Folder trust](#folder-trust).
   - **Reflex gates.** A project can let its own Reflex answer two repeated decisions instead of an LLM: whether a
@@ -40,7 +40,8 @@ nothing is tied to one repository, session name or provider.
     files from the dashboard.
   - **Decide before calling an LLM.** `POST /api/projects/<slug>/decide` asks Reflex first (local, no model, a few
     milliseconds). Answers at or above the project's confidence threshold are final; only the rest go to the
-    project's fallback: the Anthropic API, or any provider run headless (`claude -p`, `codex exec`, `agy -p`).
+    project's fallback: an LLM API (Anthropic's, or an OpenAI-compatible one such as OpenRouter: `[reflex]
+    api_format`, `api_url`), or any provider run headless (`claude -p`, `codex exec`, `agy -p`, `copilot -p`, …).
     Agents started in a project get the endpoint as `$MAP_DECIDE_URL`, and their prompt tells them to use it.
     With `api_token` set they also get `$MAP_PROJECT_TOKEN` (and `$MAP_API_URL`): a token derived from the API token
     that opens only that project's decide/feedback/decision-log endpoints and its corpus (files and `corpus.git`).
@@ -65,7 +66,10 @@ nothing is tied to one repository, session name or provider.
   - **Claude**: the account endpoint the CLI's `/usage` reads, with Claude Code's own sign-in from
     `claude_credentials`. The token is sent only to api.anthropic.com; it is never logged, stored or returned.
   - **Codex**: the newest `rate_limits` snapshot in its session logs, shown with its age (and "signed out" when
-    `codex_auth` is missing). Other CLIs (`agy`) have no local source, so they show "no reader" rather than a guess.
+    `codex_auth` is missing).
+  - **OpenRouter**: the API key's own credit limit and the free models' daily cap (`GET openrouter.ai/api/v1/key`
+    with `OPENROUTER_API_KEY`, sent nowhere else). Other CLIs (`agy`, Cursor, Copilot) have no usage source MAP can
+    read, so they show "no reader" rather than a guess.
   - **Tokens** today and by project (from each session's working directory), from the CLIs' session logs.
   - **Pace.** Readings are stored, and the last hour's rate projects the use at reset.
   - **Skip line.** No new tasks for a provider while any of its windows is at or above `skip_pct` (default 90),
@@ -342,6 +346,14 @@ folders in `[agents]` of `map.toml`):
 | Claude Code | Markdown, YAML header, body = prompt | `.claude/agents/**/*.md` | `~/.claude/agents` |
 | Codex | TOML (`developer_instructions`) | `.codex/agents/*.toml` | `~/.codex/agents` |
 | agy (`gemini`) | Markdown, YAML header, body = prompt | `.agents/agents/<name>.md`, `<name>/agent.md` | `~/.gemini/config/agents` |
+| Cursor, Copilot | none of their own here: they load Claude Code's files | `.claude/agents` | (their own folders, not managed) |
+
+Cursor ([subagents](https://cursor.com/docs/context/subagents)) and Copilot
+([custom agents](https://docs.github.com/en/copilot/reference/cli-command-reference)) both read a project's
+`.claude/agents`, so MAP writes nothing for them; when they are configured the matrix shows a column for each
+(`↳ via Claude Code` when the Claude file is usable, `—` without one, `n/a` for user agents) from
+`[agents.also_loaded_by]`. Model names in those files are Claude Code's aliases, which the other CLIs may map
+differently.
 
 - **Matrix.** The CLIs find agents by `name`, not file name, so files are grouped by name: one row per agent and
   scope, a column per CLI (✓ with its model, ! a file the CLI may not load, — none). Files that name no agent are
@@ -449,6 +461,53 @@ path = "/root/project/MAP/workspace"   # `root` is the older name; default ~/pro
   file count), sorted, at most 500 (`truncated`), with symlinks listed only when they lead to a folder inside the same
   root; an absolute path, `..` or a symlink out of the root is a 400.
 
+## Providers
+
+Six providers are built in; `provider_order` (which the orchestrator tries for tasks without a pinned provider) keeps
+the first three, and the other three are opt-in: add them to `provider_order`, the audit `chain`, a project's
+providers, or pick them for a session. A provider whose binary is not on the agents' PATH shows as not installed and
+is skipped. Everything below is a default that `[providers.<name>]` in `map.toml` overrides (`map.example.toml` lists
+every field).
+
+| provider | CLI | sign-in | headless | folder trust | sub-agents | usage |
+| --- | --- | --- | --- | --- | --- | --- |
+| `claude` | Claude Code | `claude auth login`, or `ANTHROPIC_API_KEY` | `claude -p` | written | `.claude/agents` | account endpoint |
+| `codex` | Codex | `codex login --device-auth`, or `OPENAI_API_KEY` | `codex exec` | written | `.codex/agents` | session logs |
+| `gemini` | agy | `/login` in its TUI, or `GEMINI_API_KEY` | `agy -p` | asked (`needs_trust`) | `.agents/agents` | none |
+| `cursor` | [Cursor CLI](https://cursor.com/docs/cli/overview) (`cursor-agent`) | `cursor-agent login` (URL printed), or `CURSOR_API_KEY` | `cursor-agent -p --output-format text --trust` | asked (`needs_trust`) | loads `.claude/agents` | none |
+| `copilot` | [GitHub Copilot CLI](https://docs.github.com/en/copilot/how-tos/copilot-cli) (`copilot`) | `copilot login --device-code`, or `COPILOT_GITHUB_TOKEN` | `copilot -p … -s --no-ask-user` | written (`trusted_folders`) | loads `.claude/agents` | none |
+| `openrouter` | Claude Code via [OpenRouter](https://openrouter.ai/docs/guides/guides/coding-agents) | `OPENROUTER_API_KEY` only | `claude -p` | written | `.claude/agents` | key limit |
+
+- **Cursor** takes its first prompt as an argument. Its model list is just `auto`: `cursor-agent --list-models` prints
+  the ids your account has; add them to `models`. Where it keeps its sign-in and trusted folders is not documented,
+  so the dashboard shows its sign-in as unknown (unless `CURSOR_API_KEY` is set) and its "Trust this workspace"
+  question as `needs_trust`. Unattended workers need `extra_args = ["--force"]` to run commands.
+- **Copilot** gets its first prompt typed in (`-i <prompt>` cannot be left empty for a session without one). Its
+  sign-in sits in the system keychain, so it shows as unknown unless `COPILOT_GITHUB_TOKEN` (a fine-grained token
+  with the "Copilot Requests" permission; `GH_TOKEN` and `GITHUB_TOKEN` also work, classic `ghp_` tokens do not) is
+  set. MAP adds each folder to `trusted_folders` in `~/.copilot/config.json` (keeping the comment lines Copilot
+  writes above the JSON). Unattended workers need `extra_args = ["--allow-all-tools"]`. Copilot also reads
+  `AGENTS.md`, `CLAUDE.md` and `.github/copilot-instructions.md`, and skills in `.claude/skills` and `.agents/skills`.
+- **OpenRouter** runs `claude` with `ANTHROPIC_BASE_URL=https://openrouter.ai/api`, `ANTHROPIC_API_KEY=""` and
+  `ANTHROPIC_AUTH_TOKEN="$OPENROUTER_API_KEY"`, and points Claude Code's own `opus`/`sonnet`/`haiku` aliases at
+  OpenRouter's `~anthropic/claude-*-latest` models. Models are OpenRouter ids (`~anthropic/claude-sonnet-latest`,
+  `anthropic/claude-opus-5.5`, `openai/gpt-6.1-sol`, …); non-Anthropic models work only as well as they handle Claude
+  Code's tools. It has its own Claude config folder, `~/.claude-openrouter` (isolated: `<dir>/openrouter`), in both
+  modes and whatever `[workspace.env]` says, so it never uses, or signs out, the `claude` provider's account; MAP
+  marks it onboarded there so the first run skips Claude Code's theme picker. It is "signed in" when
+  `OPENROUTER_API_KEY` is set in MAP's environment or `[workspace.env]`; the dashboard only ever shows that boolean.
+  The key is never written into a launch script: the script exports it by reference, so it must be in the tmux
+  session's environment. Put it in MAP's service environment (e.g. a systemd `EnvironmentFile`) and use a private
+  `workspace.tmux_socket`, whose server MAP starts with its own environment; with tmux's default server the session
+  only has what that server has, and the pane says `map: OPENROUTER_API_KEY is not set` when it is missing.
+- **OpenRouter as the decision fallback.** A project whose fallback is `api` can use OpenRouter (or any
+  OpenAI-compatible server) instead of the Anthropic API: `[reflex] api_format = "openai"`, `api_url =
+  "https://openrouter.ai/api/v1/chat/completions"`, `api_key_env = "OPENROUTER_API_KEY"`, `api_model =
+  "~anthropic/claude-haiku-latest"`. The key is read from MAP's environment for each call and never stored.
+- A provider's `env` table is exported for every run after `[workspace.env]`; a value that is exactly `$NAME` is
+  exported by reference (`export VAR="$NAME"`), and commands MAP runs itself (headless fallback, audit) resolve it in
+  memory.
+
 ## Agent logins
 
 `[agents_home] mode` in `map.toml` decides whose accounts and history MAP's agents use.
@@ -466,6 +525,13 @@ path = "/root/project/MAP/workspace"   # `root` is the older name; default ~/pro
 | claude | `CLAUDE_CONFIG_DIR=<dir>/claude` | `<dir>/claude` | `.claude.json`, `.credentials.json`, `settings.json`, `projects/` (transcripts), `skills/`, `agents/` |
 | codex | `CODEX_HOME=<dir>/codex` | `<dir>/codex` | `auth.json`, `config.toml`, `sessions/`, `skills/`, `agents/` |
 | gemini (`agy`) | `HOME=<dir>/gemini-home` | `<dir>/gemini-home/.gemini` | `jetski-standalone-oauth-token`, `config/agents/`, … |
+| cursor | `HOME=<dir>/cursor-home` | `<dir>/cursor-home/.cursor` | `cli-config.json`, and whatever else it keeps under `~` |
+| copilot | `COPILOT_HOME=<dir>/copilot` | `<dir>/copilot` | `config.json` (sign-in without a keychain, `trusted_folders`), `settings.json`, `agents/`, `skills/` |
+| openrouter | `CLAUDE_CONFIG_DIR=<dir>/openrouter` | `<dir>/openrouter` | as claude; shared mode: `~/.claude-openrouter` |
+
+Cursor has `CURSOR_CONFIG_DIR`, but its docs do not say that it moves the sign-in too, so like agy it gets a `HOME` of
+its own (with the same `home_keep`). Copilot's `COPILOT_HOME` replaces `~/.copilot` entirely; its token may still be
+in the system keychain (service `copilot-cli`), which `COPILOT_HOME` does not separate.
 
 agy 1.3 has no variable for its `~/.gemini` (its binary only knows `JETSKI_APP_DATA_DIR`, which it passes to its own
 language server), so MAP gives it a `HOME` of its own; `CARGO_HOME`, `RUSTUP_HOME` and `GOPATH` are exported next to
@@ -609,7 +675,7 @@ are `done`. If a dependency fails or is cancelled, its dependents show as blocke
 
 ## Folder trust
 
-Claude Code, Codex and agy ask once per folder whether you trust it (Claude: "Quick safety check: Is this a project
+Claude Code, Codex, agy, Cursor and Copilot ask once per folder whether you trust it (Claude: "Quick safety check: Is this a project
 you created or one you trust?"). Nobody answers that in an unattended worker, so the task would sit there. Two layers
 handle it (`backend/src/trust.rs`):
 
@@ -626,6 +692,13 @@ handle it (`backend/src/trust.rs`):
      left as it is.
    - **agy**: it keeps its answers in `trustedWorkspaces` of `~/.gemini/antigravity-cli/settings.json`, in a format MAP
      has not confirmed, so MAP does not write it and relies on layer 2.
+   - **Copilot**: the folder is added to `trusted_folders` in `$COPILOT_HOME/config.json` (else
+     `~/.copilot/config.json`); a folder below a listed one counts as trusted. The `// …` lines Copilot writes above
+     the JSON are kept. Layer 2 answers "Yes, and remember this folder for future sessions".
+   - **OpenRouter**: as Claude Code, in its own config folder, plus `hasCompletedOnboarding = true` when that file has
+     no such key.
+   - **Cursor**: where it records trusted workspaces is not documented, so MAP relies on layer 2 ("Trust this
+     workspace"). Headless calls pass `--trust`.
 
    Folders are canonical absolute paths. MAP does this when a project is created (every source: an existing folder, a
    new one, a clone once it succeeds; the result is a check line such as `trusted /srv/app for claude, codex`, or a

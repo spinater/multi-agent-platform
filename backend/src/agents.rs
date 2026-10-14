@@ -22,7 +22,7 @@ use regex::Regex;
 
 use crate::config::AgentsConfig;
 use crate::model::{
-    AgentChange, AgentDef, AgentDetail, AgentDir, AgentFile, AgentFileError, AgentModels, AgentNote, AgentPlan, AgentProvider, AgentRow, AgentScope, AgentsOverview, Capability, Effort,
+    AgentChange, AgentDef, AgentDetail, AgentDir, AgentFile, AgentFileError, AgentModels, AgentNote, AgentPlan, AgentProvider, AgentReader, AgentRow, AgentScope, AgentsOverview, Capability, Effort,
 };
 use crate::skills::{Raw, display_path, header_fields, split_tools};
 
@@ -752,7 +752,8 @@ pub fn overview(cfg: &AgentsConfig, workspace: &Path) -> AgentsOverview {
             dirs.extend(dirs_of(cfg, workspace, provider, scope).into_iter().map(|d| AgentDir { provider, scope, exists: d.is_dir(), path: display_path(&d, workspace) }));
         }
     }
-    AgentsOverview { project: None, workspace: workspace.display().to_string(), rows, errors, dirs, scanned_at: Utc::now() }
+    let readers = cfg.also_loaded_by.iter().map(|(provider, a)| AgentReader { provider: provider.clone(), reads: a.reads, scopes: a.scopes.clone() }).collect();
+    AgentsOverview { project: None, workspace: workspace.display().to_string(), rows, errors, dirs, readers, scanned_at: Utc::now() }
 }
 
 pub fn detail(cfg: &AgentsConfig, workspace: &Path, scope: AgentScope, name: &str) -> Option<AgentDetail> {
@@ -965,6 +966,9 @@ mod tests {
         assert!(o.rows[2].files[0].path.ends_with(".claude/agents/reviewer.md"));
         assert_eq!(o.rows[2].description, "Mine.");
         assert_eq!(o.dirs.len(), 6);
+        // Cursor and Copilot have no format of their own here: they load the Claude files of a workspace.
+        let reader = |p: &str| AgentReader { provider: p.into(), reads: Claude, scopes: vec![AgentScope::Project] };
+        assert_eq!(o.readers, [reader("copilot"), reader("cursor")]);
 
         let d = detail(&cfg, w, AgentScope::Project, "reviewer").unwrap();
         assert_eq!(d.source, Claude);

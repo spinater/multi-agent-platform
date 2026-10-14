@@ -281,6 +281,8 @@ pub struct ServerInfo {
     pub reflex_version: Option<String>,
     /// `workspace.tmux_socket`: the private tmux server (`tmux -L <name>`) agents run on; `None`: tmux's default.
     pub tmux_socket: Option<String>,
+    /// What a project fallback of `api` calls, from `[reflex] api_url`: "Anthropic API", "OpenRouter API", …
+    pub api_fallback: String,
 }
 
 /// Messages pushed to dashboard clients over `/api/ws`.
@@ -886,6 +888,19 @@ pub struct AgentDir {
     pub exists: bool,
 }
 
+/// A configured CLI MAP writes no agent files for, that loads another CLI's files itself (`[agents.also_loaded_by]`):
+/// Cursor and Copilot read Claude Code's `.claude/agents`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct AgentReader {
+    /// The provider's name in `map.toml` (`cursor`, `copilot`).
+    pub provider: String,
+    /// Whose files it loads.
+    pub reads: AgentProvider,
+    /// The scopes it loads them in (Copilot: project only; its own user folder is `~/.copilot/agents`).
+    pub scopes: Vec<AgentScope>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[ts(export)]
 pub struct AgentsOverview {
@@ -895,6 +910,9 @@ pub struct AgentsOverview {
     pub rows: Vec<AgentRow>,
     pub errors: Vec<AgentFileError>,
     pub dirs: Vec<AgentDir>,
+    /// Configured CLIs that load these files without a format of their own; the matrix shows them as extra columns.
+    #[serde(default)]
+    pub readers: Vec<AgentReader>,
     pub scanned_at: DateTime<Utc>,
 }
 
@@ -1937,8 +1955,8 @@ pub struct AgentBinary {
     pub path: Option<String>,
     /// The CLI's state folder (sign-in, settings, history) as MAP's agents see it; `None`: not known.
     pub home: Option<String>,
-    /// What MAP exports to relocate it in isolated mode (`CLAUDE_CONFIG_DIR=/…/agent-home/claude`); `None` in shared
-    /// mode, or when the CLI has no such variable.
+    /// What MAP exports to relocate it in isolated mode (`CLAUDE_CONFIG_DIR=/…/agent-home/claude`), or in both modes
+    /// for a provider with a `shared_home` (openrouter); `None` otherwise, or when the CLI has no such variable.
     pub home_env: Option<String>,
 }
 
