@@ -49,7 +49,7 @@ function Toasts() {
           key={t.id}
           role="status"
           className={clsx(
-            "rounded-lg border bg-menu px-4 py-2 font-mono text-[12px] shadow-[0_12px_36px_rgba(0,0,0,.45)]",
+            "map-toast-in rounded-lg border bg-menu px-4 py-2 font-mono text-[12px] shadow-[0_12px_36px_rgba(0,0,0,.45)]",
             t.tone === "ok" ? "border-ok/40 text-ok" : t.tone === "warn" ? "border-warn/40 text-warn" : "border-bad/40 text-bad",
           )}
         >

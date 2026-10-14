@@ -9,6 +9,7 @@ import type { OrchestratorStatus } from "@/lib/generated/OrchestratorStatus";
 import type { Session } from "@/lib/generated/Session";
 import { attachCommand } from "@/lib/tmux";
 
+import { PhaseBar } from "./activity";
 import { useApp } from "./app-context";
 import { keySlug, type Command } from "./command-data";
 import { Btn, LEVEL_TONE, Pill, SESSION_TONE, TASK_TONE, TONE_TEXT, hms, rel, type Tone } from "./command-ui";
@@ -248,7 +249,16 @@ export function DetailCard({
         ],
         blocks,
         // Its buttons act on the task, so like the other actions they are left out in all-projects mode.
-        extra: t.git ? <TaskGitPanel key={t.id} task={t} act={act} actions={!cmd.all} /> : undefined,
+        extra: (
+          <>
+            {["running", "verifying", "auditing", "landing", "review", "done"].includes(t.status) && (
+              <div className="px-4 pb-3">
+                <PhaseBar status={t.status} color={s ? providerColor(s.provider) : "var(--accent)"} labels />
+              </div>
+            )}
+            {t.git && <TaskGitPanel key={t.id} task={t} act={act} actions={!cmd.all} />}
+          </>
+        ),
         actions,
         project: t.project,
       };

@@ -212,3 +212,247 @@ body {
   scrollbar-width: thin;
   scrollbar-color: var(--line-2) transparent;
 }
+
+/* Live activity (lib/activity.ts): a worker popping in, its heartbeat, each new output line, phase changes, a done
+   settle and a failed shake. Each animation runs once per mount or class change, so a quiet page costs nothing; a
+   reduced-motion setting keeps only the colour and opacity changes (the block at the end). `--pc` is the colour of
+   the thing that changed (its provider, or the phase's tone). */
+@keyframes map-pop-in {
+  0% {
+    opacity: 0;
+    transform: translateX(14px) scale(0.96);
+  }
+  55% {
+    opacity: 1;
+    transform: translateX(-2px) scale(1.01);
+  }
+  100% {
+    transform: none;
+  }
+}
+
+@keyframes map-glow {
+  0% {
+    background-color: color-mix(in srgb, var(--pc, var(--accent)) 22%, transparent);
+  }
+  100% {
+    background-color: transparent;
+  }
+}
+
+@keyframes map-feed-in {
+  0% {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+  100% {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes map-line-in {
+  0% {
+    opacity: 0.25;
+    transform: translateY(5px);
+    color: var(--text);
+  }
+  60% {
+    opacity: 1;
+    transform: none;
+    color: var(--text);
+  }
+  100% {
+    color: var(--text-2);
+  }
+}
+
+@keyframes map-heartbeat {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--pc, var(--ok)) 60%, transparent);
+  }
+  70% {
+    box-shadow: 0 0 0 5px color-mix(in srgb, var(--pc, var(--ok)) 0%, transparent);
+  }
+}
+
+@keyframes map-blip {
+  0% {
+    transform: scale(1.9);
+  }
+  100% {
+    transform: none;
+  }
+}
+
+@keyframes map-shake {
+  0%,
+  100% {
+    transform: none;
+  }
+  15%,
+  55% {
+    transform: translateX(-4px);
+  }
+  35%,
+  75% {
+    transform: translateX(4px);
+  }
+}
+
+@keyframes map-flash-bad {
+  0% {
+    background-color: color-mix(in srgb, var(--bad) 26%, transparent);
+    border-color: var(--bad);
+  }
+}
+
+@keyframes map-settle {
+  0% {
+    transform: scale(1.03);
+    background-color: color-mix(in srgb, var(--ok) 20%, transparent);
+    border-color: var(--ok);
+  }
+  45% {
+    transform: scale(0.995);
+  }
+  100% {
+    transform: none;
+  }
+}
+
+@keyframes map-flash-ok {
+  0% {
+    background-color: color-mix(in srgb, var(--ok) 20%, transparent);
+    border-color: var(--ok);
+  }
+}
+
+@keyframes map-phase-in {
+  0% {
+    opacity: 0;
+    transform: scale(0.7);
+  }
+  70% {
+    transform: scale(1.12);
+  }
+  100% {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes map-shimmer {
+  0% {
+    background-position: -150% 0;
+  }
+  100% {
+    background-position: 250% 0;
+  }
+}
+
+@keyframes map-toast-in {
+  0% {
+    opacity: 0;
+    transform: translateY(14px) scale(0.97);
+  }
+  100% {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes map-fade-in {
+  0% {
+    opacity: 0;
+  }
+  100% {
+    opacity: 1;
+  }
+}
+
+.map-pop-in {
+  animation:
+    map-pop-in 700ms cubic-bezier(0.2, 0.9, 0.3, 1.2) both,
+    map-glow 2.4s ease-out;
+}
+.map-feed-in {
+  animation:
+    map-feed-in 380ms ease-out both,
+    map-glow 2s ease-out;
+}
+.map-line-in {
+  animation: map-line-in 900ms ease-out both;
+}
+/* Infinite, but only on the 7px dot of a working session. */
+.map-heartbeat {
+  animation: map-heartbeat 1.6s ease-out infinite;
+}
+.map-blip {
+  animation: map-blip 500ms ease-out;
+}
+.map-heartbeat.map-blip {
+  animation:
+    map-blip 500ms ease-out,
+    map-heartbeat 1.6s ease-out infinite;
+}
+.map-glow {
+  animation: map-glow 2.4s ease-out;
+}
+.map-shake {
+  animation:
+    map-shake 520ms ease-in-out,
+    map-flash-bad 1.6s ease-out;
+}
+.map-settle {
+  animation: map-settle 900ms cubic-bezier(0.2, 0.9, 0.3, 1.1);
+}
+.map-phase-in {
+  animation: map-phase-in 420ms ease-out both;
+}
+.map-toast-in {
+  animation: map-toast-in 260ms ease-out both;
+}
+/* The current pipeline step: a light band sweeping across it. */
+.map-step-live {
+  background-image: linear-gradient(90deg, transparent 0%, color-mix(in srgb, var(--text) 50%, transparent) 50%, transparent 100%);
+  background-size: 50% 100%;
+  background-repeat: no-repeat;
+  animation: map-shimmer 1.8s linear infinite;
+}
+.map-step {
+  transition:
+    background-color 500ms ease,
+    opacity 500ms ease;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .map-pop-in,
+  .map-feed-in,
+  .map-toast-in,
+  .map-phase-in {
+    animation:
+      map-fade-in 300ms ease-out both,
+      map-glow 2s ease-out;
+  }
+  .map-line-in {
+    animation: map-fade-in 400ms ease-out both;
+  }
+  .map-shake {
+    animation: map-flash-bad 1.6s ease-out;
+  }
+  .map-settle {
+    animation: map-flash-ok 1.6s ease-out;
+  }
+  .map-blip,
+  .map-heartbeat,
+  .map-heartbeat.map-blip {
+    animation: none;
+  }
+  .map-step-live {
+    animation: none;
+    background-image: none;
+    opacity: 0.75;
+  }
+}

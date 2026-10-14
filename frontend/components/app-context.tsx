@@ -2,6 +2,7 @@
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 
+import { onSpawn } from "@/lib/activity";
 import type { ProjectInfo } from "@/lib/generated/ProjectInfo";
 import { formatHash, parseHash, type Route, type Screen } from "@/lib/nav";
 import { useDashboard, type DashboardState } from "@/lib/use-dashboard";
@@ -103,6 +104,17 @@ export function AppProvider({ children, now }: { children: ReactNode; now: numbe
     setToasts((list) => [...list, { id, text, tone }]);
     window.setTimeout(() => setToasts((list) => list.filter((t) => t.id !== id)), 4000);
   }, []);
+
+  // Every task worker the orchestrator starts while the page is open: "Task #7 → claude (sonnet) spawned".
+  const projects = dash.projects;
+  useEffect(
+    () =>
+      onSpawn((a) => {
+        const where = a.project === null ? "" : ` · ${projects.find((p) => p.project.slug === a.project)?.project.name ?? a.project}`;
+        toast(`Task #${a.taskId} → ${a.provider} (${a.model}) spawned${a.attempt > 1 ? ` · try ${a.attempt}` : ""}${where}`);
+      }),
+    [toast, projects],
+  );
 
   // A project removed elsewhere falls back to the default workspace.
   const current = dash.projects.find((p) => p.project.slug === project) ?? null;

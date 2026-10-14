@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import { baseline, forgetSession, forgetTask, trackSession, trackTask } from "./activity";
 import { ApiError, api, wsUrl } from "./api";
 import type { Event } from "./generated/Event";
 import type { OrchestratorStatus } from "./generated/OrchestratorStatus";
@@ -54,6 +55,7 @@ export function useDashboard(): DashboardState {
   const reload = useCallback(async () => {
     try {
       const [overview, recent] = await Promise.all([api.overview(), api.events()]);
+      baseline(overview.tasks, overview.sessions);
       setSessions(overview.sessions);
       setTasks(overview.tasks);
       setProviders(overview.providers);
@@ -79,15 +81,19 @@ export function useDashboard(): DashboardState {
           setEvents((list) => [msg.event, ...list].slice(0, MAX_EVENTS));
           break;
         case "session":
+          trackSession(msg.session);
           setSessions((list) => upsert(list, msg.session, (s) => s.name === msg.session.name));
           break;
         case "session_removed":
+          forgetSession(msg.name);
           setSessions((list) => list.filter((s) => s.name !== msg.name));
           break;
         case "task":
+          trackTask(msg.task);
           setTasks((list) => upsert(list, msg.task, (t) => t.id === msg.task.id).sort((a, b) => a.id - b.id));
           break;
         case "task_removed":
+          forgetTask(msg.id);
           setTasks((list) => list.filter((t) => t.id !== msg.id));
           break;
         case "orchestrator":

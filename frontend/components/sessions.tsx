@@ -1,8 +1,9 @@
 "use client";
 
 import clsx from "clsx";
-import { useState } from "react";
+import { useState, type CSSProperties } from "react";
 
+import { activityMarks, ageOf, useActivity } from "@/lib/activity";
 import { api } from "@/lib/api";
 import { providerColor } from "@/lib/colors";
 import type { ProviderInfo } from "@/lib/generated/ProviderInfo";
@@ -31,38 +32,59 @@ export function SessionRows({
   /** All projects: the project name before the meta line. */
   prefix?: (s: Session) => string;
 }) {
+  // Re-render on every live change: a spawn pops the row in, a state change pops its pill, a new output line
+  // slides in and blips the dot. The dot of a working session beats.
+  useActivity();
+  const marks = activityMarks();
   if (sessions.length === 0) return <p className="font-mono text-[11px] text-muted">No sessions. Start one, or add a task and run the orchestrator.</p>;
   const sorted = [...sessions].sort((a, b) => (ORDER[a.state] ?? 5) - (ORDER[b.state] ?? 5) || b.last_activity_at.localeCompare(a.last_activity_at));
   return (
     <div className="flex flex-col">
-      {sorted.map((s) => (
-        <button
-          key={s.name}
-          onClick={() => onSelect(`s:${s.name}`)}
-          className={clsx(
-            "-mx-2.5 flex cursor-pointer flex-col gap-1 rounded-[7px] px-2.5 py-[9px] text-left text-text",
-            selected === `s:${s.name}` ? "bg-accent/[0.08]" : "hover:bg-white/[0.03]",
-            s.state === "exited" && "opacity-50",
-          )}
-        >
-          <span className="flex w-full items-center gap-2">
-            <span className="size-[7px] flex-none rounded-full" style={{ background: color(s) }} />
-            <span className="min-w-0 flex-1 truncate font-mono text-[12.5px] leading-[1.2] font-medium">{s.name}</span>
-            <Pill tone={SESSION_TONE[s.state]}>{s.state.replace("_", " ")}</Pill>
-          </span>
-          <span className="pl-[15px] font-mono text-[10.5px] leading-[1.3] text-muted">
-            {prefix ? `${prefix(s)} · ` : ""}
-            {s.provider} · {s.model} · {s.role}
-            {s.task_id != null ? ` · #${s.task_id}` : ""}
-            {s.attached ? " · attached" : ""}
-          </span>
-          {(s.last_line || s.state === "rate_limited") && (
-            <span className="max-w-full truncate pl-[15px] font-mono text-[10.5px] leading-[1.3] text-text-2">
-              {s.state === "rate_limited" && s.rate_limit_reset_at ? `wakes ${rel(s.rate_limit_reset_at, now)}` : `› ${s.last_line}`}
+      {sorted.map((s) => {
+        const spawned = ageOf(marks.spawn.get(s.name), now) < 3000;
+        const st = marks.session.get(s.name);
+        const stateChanged = !!st?.from && st.to === s.state && ageOf(st.at, now) < 3000;
+        const lineAt = marks.line.get(s.name);
+        const lineNew = ageOf(lineAt, now) < 3000;
+        const working = s.state === "working" || s.state === "starting";
+        return (
+          <button
+            key={s.name}
+            onClick={() => onSelect(`s:${s.name}`)}
+            className={clsx(
+              "-mx-2.5 flex cursor-pointer flex-col gap-1 rounded-[7px] px-2.5 py-[9px] text-left text-text",
+              selected === `s:${s.name}` ? "bg-accent/[0.08]" : "hover:bg-white/[0.03]",
+              s.state === "exited" && "opacity-50",
+              spawned && "map-pop-in",
+            )}
+            style={{ "--pc": color(s) } as CSSProperties}
+          >
+            <span className="flex w-full items-center gap-2">
+              <span
+                key={lineAt ?? 0}
+                className={clsx("size-[7px] flex-none rounded-full", working && "map-heartbeat", lineNew && "map-blip")}
+                style={{ background: color(s) }}
+                title={working ? "working" : undefined}
+              />
+              <span className="min-w-0 flex-1 truncate font-mono text-[12.5px] leading-[1.2] font-medium">{s.name}</span>
+              <span key={s.state} className={clsx("flex", stateChanged && "map-phase-in")}>
+                <Pill tone={SESSION_TONE[s.state]}>{s.state.replace("_", " ")}</Pill>
+              </span>
             </span>
-          )}
-        </button>
-      ))}
+            <span className="pl-[15px] font-mono text-[10.5px] leading-[1.3] text-muted">
+              {prefix ? `${prefix(s)} · ` : ""}
+              {s.provider} · {s.model} · {s.role}
+              {s.task_id != null ? ` · #${s.task_id}` : ""}
+              {s.attached ? " · attached" : ""}
+            </span>
+            {(s.last_line || s.state === "rate_limited") && (
+              <span key={s.last_line ?? ""} className={clsx("max-w-full truncate pl-[15px] font-mono text-[10.5px] leading-[1.3] text-text-2", lineNew && s.state !== "rate_limited" && "map-line-in")}>
+                {s.state === "rate_limited" && s.rate_limit_reset_at ? `wakes ${rel(s.rate_limit_reset_at, now)}` : `› ${s.last_line}`}
+              </span>
+            )}
+          </button>
+        );
+      })}
     </div>
   );
 }

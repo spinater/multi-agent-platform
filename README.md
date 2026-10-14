@@ -291,6 +291,14 @@ all projects, read-only):
 - **Right:** "Needs you" (sessions waiting for input, signed out, asking to trust their folder, stalled or in error,
   and failed tasks), sessions with "+ New", and the event log. A session at the trust question shows the folder, and
   its card has **Trust this folder**.
+- **Live activity** (`frontend/lib/activity.ts`, from the WebSocket's `task` and `session` messages; a full load only
+  sets the baseline): when the orchestrator starts a worker, its links draw out from the task to the new session,
+  rings burst from both nodes, its row pops in and a toast says `Task #N → claude (sonnet) spawned`. A working
+  session's dot beats and each new pane line (`last_line`, pushed by the watcher; no extra polling) slides in and
+  blips its node. Tasks show a run · verify · audit · land · done bar; a phase change ripples in its colour, done
+  settles in green, failed shakes and flashes red. The "Live activity" list on the right and a ticker over the canvas
+  show the newest spawns, phase changes and results. With `prefers-reduced-motion` nothing moves, only colour and
+  opacity change; the canvas's "motion" toggle does the same for the canvas.
 - **All projects:** the providers column becomes one hub per project, and IDs read `<project> #<id>`. The left
   column lists projects with "Open →", and cards offer only "Open in <project> →".
 

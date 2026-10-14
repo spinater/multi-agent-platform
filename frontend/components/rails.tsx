@@ -1,13 +1,14 @@
 "use client";
 
 import clsx from "clsx";
-import { CircleDot, Flag, Hexagon } from "lucide-react";
+import { Activity as ActivityIcon, CircleDot, Flag, Hexagon } from "lucide-react";
 import type { ReactNode } from "react";
 
 import { providerColor } from "@/lib/colors";
 import type { Event } from "@/lib/generated/Event";
 import type { OrchestratorStatus } from "@/lib/generated/OrchestratorStatus";
 
+import { ActivityFeed } from "./activity";
 import type { Command } from "./command-data";
 import { Btn, Pill, SideTitle, TONE_TEXT } from "./command-ui";
 import { EventLog } from "./events";
@@ -232,6 +233,13 @@ export function RightColumn({
             </button>
           ))}
         </div>
+      </section>
+
+      <section className="flex flex-col gap-2.5">
+        <SideTitle glyph={<ActivityIcon className="size-3" />} note="newest first">
+          Live activity
+        </SideTitle>
+        <ActivityFeed cmd={cmd} now={now} onOpen={select} />
       </section>
 
       <section className="flex flex-col gap-2.5">

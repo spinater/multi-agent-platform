@@ -10,6 +10,7 @@ import { formatHash } from "@/lib/nav";
 import type { Connection } from "@/lib/use-dashboard";
 import { usePlans } from "@/lib/use-plans";
 
+import { ActivityTicker } from "../activity";
 import { useApp } from "../app-context";
 import { useCommand } from "../command-data";
 import { TONE_BG, type Tone } from "../command-ui";
@@ -366,6 +367,7 @@ export function CommandScreen() {
             theme={theme}
             controlsRef={controls}
           />
+          <ActivityTicker cmd={cmd} now={now} />
           <div className="pointer-events-none absolute inset-x-0 bottom-3 px-4 text-center font-mono text-[9.5px] leading-[1.4] font-medium tracking-[0.2em] text-muted/70">
             {all ? "ALL PROJECTS · READ-ONLY OVERVIEW · CLICK A NODE, THEN OPEN ITS PROJECT TO ACT" : HINTS[view]}
           </div>

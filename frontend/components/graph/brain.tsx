@@ -2,6 +2,8 @@
 
 import { useEffect, useRef, type RefObject } from "react";
 
+import { activityMarks, prefersReducedMotion } from "@/lib/activity";
+
 import type { Graph, GraphNode, NodeType } from "./model";
 import { depthStep, graphColumns, hash, layout, type View } from "./layouts";
 
@@ -89,6 +91,8 @@ class Engine {
   cleanup: (() => void)[] = [];
   born = performance.now();
   frames = 0;
+  /** The system asks for less motion: spawn bursts, ripples and shakes become fading rings in place. */
+  reduce = false;
 
   constructor(cv: HTMLCanvasElement, props: CanvasProps) {
     this.cv = cv;
@@ -107,6 +111,18 @@ class Engine {
       cv.width = Math.round(r.width * this.dpr);
       cv.height = Math.round(r.height * this.dpr);
     };
+    this.reduce = prefersReducedMotion();
+    let mq: MediaQueryList | null = null;
+    const onMotion = (e: MediaQueryListEvent) => {
+      this.reduce = e.matches;
+    };
+    try {
+      mq = window.matchMedia("(prefers-reduced-motion: reduce)");
+      mq.addEventListener("change", onMotion);
+    } catch {
+      // No matchMedia: keep the default.
+    }
+    this.cleanup.push(() => mq?.removeEventListener("change", onMotion));
     const ro = new ResizeObserver(resize);
     ro.observe(cv.parentElement!);
     resize();
@@ -319,6 +335,10 @@ class Engine {
     const view = p.view;
     const A = this.c("var(--accent)");
     const line = this.c("var(--text)");
+    // Live activity (lib/activity.ts): when each worker appeared, task and session changes, new output lines.
+    const M = activityMarks();
+    const wall = Date.now();
+    const still = !p.motion || this.reduce;
     ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
     ctx.clearRect(0, 0, W, H);
     for (const n of this.nodes.values()) {
@@ -449,10 +469,47 @@ class Engine {
     }
 
     const bez = gg > 0.5;
+    /** The point at `t` (0 at `a`, 1 at `b`) of the link as drawn: a horizontal S-curve in the graph view. */
+    const along = (a: Live, b: Live, t: number): [number, number] => {
+      if (!bez) return [a.sx + (b.sx - a.sx) * t, a.sy + (b.sy - a.sy) * t];
+      const mx = (a.sx + b.sx) / 2;
+      const u = 1 - t;
+      return [u * u * u * a.sx + 3 * u * u * t * mx + 3 * u * t * t * mx + t * t * t * b.sx, u * u * u * a.sy + 3 * u * u * t * a.sy + 3 * u * t * t * b.sy + t * t * t * b.sy];
+    };
+    /** A just-spawned session's links draw themselves towards it: from its task, and from its provider hub. */
+    const SPAWN_LINK = 1100;
+    const spawnAge = (id: string) => (id.startsWith("s:") ? wall - (M.spawn.get(id.slice(2)) ?? -1e12) : Infinity);
     for (const l of p.graph.links) {
       const a = this.nodes.get(l.a);
       const b = this.nodes.get(l.b);
       if (!a || !b || !a.vis || !b.vis) continue;
+      const toA = l.kind === "work";
+      const sa = toA ? spawnAge(l.a) : l.kind === "own" ? spawnAge(l.b) : Infinity;
+      if (sa < SPAWN_LINK && !still) {
+        const prog = 1 - (1 - sa / SPAWN_LINK) ** 3;
+        const col = this.c((toA ? a : b).color);
+        ctx.strokeStyle = col;
+        ctx.globalAlpha = 0.85 * Math.min(a.fa, b.fa);
+        ctx.lineWidth = 1.6;
+        ctx.beginPath();
+        const steps = 18;
+        for (let i = 0; i <= steps; i++) {
+          const f = (i / steps) * prog;
+          const [x, y] = along(a, b, toA ? 1 - f : f);
+          if (i) ctx.lineTo(x, y);
+          else ctx.moveTo(x, y);
+        }
+        ctx.stroke();
+        const [hx, hy] = along(a, b, toA ? 1 - prog : prog);
+        ctx.fillStyle = col;
+        ctx.shadowColor = col;
+        ctx.shadowBlur = 14;
+        ctx.beginPath();
+        ctx.arc(hx, hy, 2.6, 0, 7);
+        ctx.fill();
+        ctx.shadowBlur = 0;
+        continue;
+      }
       const touch = !!focusId && (l.a === focusId || l.b === focusId);
       let al = LINK_ALPHA[l.kind] * Math.min(a.a, b.a) * Math.min(a.fa, b.fa) * Math.min(a.da, b.da);
       if (touch) al = Math.min(1, al * 2.4 + 0.25);
@@ -480,17 +537,7 @@ class Engine {
         const col = l.kind === "stage" ? this.c("var(--info)") : l.kind === "hub" ? A : this.c(a.color);
         for (let j = 0; j < 2; j++) {
           const t = (time * 0.00032 + hash(l.id, 1) + j * 0.5) % 1;
-          let x: number;
-          let y: number;
-          if (bez) {
-            const mx = (a.sx + b.sx) / 2;
-            const u = 1 - t;
-            x = u * u * u * a.sx + 3 * u * u * t * mx + 3 * u * t * t * mx + t * t * t * b.sx;
-            y = u * u * u * a.sy + 3 * u * u * t * a.sy + 3 * u * t * t * b.sy + t * t * t * b.sy;
-          } else {
-            x = a.sx + (b.sx - a.sx) * t;
-            y = a.sy + (b.sy - a.sy) * t;
-          }
+          const [x, y] = along(a, b, t);
           ctx.globalAlpha = 0.95 * al;
           ctx.fillStyle = col;
           ctx.shadowColor = col;
@@ -531,11 +578,22 @@ class Engine {
       ctx.arc(x, y, r, 0, 7);
     };
     const bg = this.c("var(--inset)");
+    /** A ring that grows from `r0` to `r1` and fades over `dur` ms; with less motion it stays put and only fades. */
+    const burst = (shape: (x: number, y: number, r: number) => void, x: number, y: number, r0: number, r1: number, age: number, dur: number, col: string, alpha: number) => {
+      const t = age / dur;
+      if (t < 0 || t >= 1) return;
+      const e = 1 - (1 - t) ** 3;
+      ctx.globalAlpha = alpha * (1 - t);
+      ctx.strokeStyle = col;
+      ctx.lineWidth = 0.6 + 1.4 * (1 - t);
+      shape(x, y, Math.max(0.5, still ? (r0 + r1) / 2 : r0 + (r1 - r0) * e));
+      ctx.stroke();
+    };
     for (const n of list) {
       const al = n.a * n.fa * n.da;
       if (al < 0.01) continue;
       const s = n.ss;
-      const x = n.sx;
+      let x = n.sx;
       const y = n.sy;
       const color = this.c(n.color);
       ctx.globalAlpha = 1;
@@ -549,8 +607,19 @@ class Engine {
       }
       if (n.ref.kind === "session") {
         const se = n.ref.session;
-        const r = 4.6 * s;
+        const sa = wall - (M.spawn.get(se.name) ?? -1e12);
+        // A new agent pops out of its hub: a quick overshoot, then two rings in its provider's colour.
+        const r = 4.6 * s * (sa < 520 && !still ? 1 + 0.75 * Math.sin((Math.PI * sa) / 520) : 1);
         const tc = this.c(`var(${SESSION_TONE[se.state] ?? "--idle"})`);
+        if (sa < 1800) {
+          burst(circle, x, y, r, r + 36 * s, sa, 1500, color, 0.95 * al);
+          burst(circle, x, y, r, r + 22 * s, sa - 300, 1200, color, 0.6 * al);
+        }
+        const sm = M.session.get(se.name);
+        if (sm?.from && sm.to === se.state) burst(circle, x, y, r + 2, r + 16 * s, wall - sm.at, 1200, tc, 0.85 * al);
+        // The heartbeat: each new output line sends a small blip.
+        const lineAt = M.line.get(se.name);
+        if (lineAt !== undefined) burst(circle, x, y, r + 1, r + 8 * s, wall - lineAt, 650, tc, 0.6 * al);
         if (se.state === "exited") {
           ctx.globalAlpha = 0.6 * al;
           ctx.strokeStyle = color;
@@ -585,7 +654,29 @@ class Engine {
         if (p.names || n.match || n.id === focusId) labels.push({ n, x: x + r + 6, y: y + 3.5, font: this.mono(9.5), color: this.c("var(--text)"), alpha: 0.8 * al, align: "left" });
       } else if (n.ref.kind === "task") {
         const t = n.ref.task;
-        const r = 4.6 * s;
+        const tm = M.task.get(t.id);
+        const ta = tm && tm.to === t.status ? wall - tm.at : Infinity;
+        // Failed: a short shake and a red flash. Done: the diamond overshoots and settles inside a closing ring.
+        if (t.status === "failed" && ta < 700 && !still) x += Math.sin(ta * 0.075) * 5 * (1 - ta / 700);
+        const settle = t.status === "done" && ta < 900 && !still ? 0.6 * Math.exp(-ta / 220) * Math.cos(ta / 70) : 0;
+        const r = 4.6 * s * (1 + settle);
+        if (ta < 1800) {
+          const tone = t.status === "running" ? color : this.c(t.status === "failed" ? "var(--bad)" : t.status === "done" ? "var(--ok)" : t.status === "review" ? "var(--warn)" : "var(--info)");
+          if (t.status === "failed") {
+            ctx.globalAlpha = 0.35 * al * Math.max(0, 1 - ta / 1200);
+            ctx.fillStyle = tone;
+            circle(x, y, r + 9 * s);
+            ctx.fill();
+            burst(diamond, x, y, r, r + 26 * s, ta, 1200, tone, 0.9 * al);
+          } else if (t.status === "done") {
+            burst(diamond, x, y, r + 20 * s, r + 2, ta, 900, tone, 0.95 * al);
+            burst(circle, x, y, r, r + 30 * s, ta - 400, 1300, tone, 0.45 * al);
+          } else {
+            // A spawn (pending → running) ripples out of the task in its provider's colour; each phase in its tone.
+            burst(diamond, x, y, r, r + 40 * s, ta, 1500, tone, 0.95 * al);
+            burst(diamond, x, y, r, r + 24 * s, ta - 280, 1200, tone, 0.55 * al);
+          }
+        }
         let fill: string | null = null;
         let fillA = 1;
         let stroke: string | null = null;

@@ -2,18 +2,23 @@
 
 import clsx from "clsx";
 import { ExternalLink, GitBranch } from "lucide-react";
-import { useState } from "react";
+import { useState, type CSSProperties } from "react";
 
+import { activityMarks, ageOf, useActivity } from "@/lib/activity";
 import { api } from "@/lib/api";
+import { providerColor } from "@/lib/colors";
 import type { PipelineInfo } from "@/lib/generated/PipelineInfo";
 import type { ProviderInfo } from "@/lib/generated/ProviderInfo";
 import type { Task } from "@/lib/generated/Task";
 import type { TaskGit } from "@/lib/generated/TaskGit";
 
+import { PhaseBar } from "./activity";
+import { useApp } from "./app-context";
 import { Btn, Chip, Pill, TASK_TONE } from "./command-ui";
 import { Modal } from "./shell/page";
 
 const FINISHED = ["done", "failed", "cancelled"];
+const IN_PIPELINE = ["running", "verifying", "auditing", "landing", "review"];
 
 /** True when a pending task waits on a dependency that failed or was cancelled. */
 export function blocked(t: Task, tasks: Task[]): boolean {
@@ -25,12 +30,22 @@ export function blocked(t: Task, tasks: Task[]): boolean {
 
 /** The task queue of the left column (design: `taskRows`). */
 export function TaskRows({ tasks, label, selected, onSelect, projectOf }: { tasks: Task[]; label: (t: Task) => string; selected: string | null; onSelect: (id: string) => void; projectOf?: (t: Task) => string }) {
+  const { now, sessions } = useApp();
+  // Re-render on every live change; the marks say what changed and when.
+  useActivity();
+  const marks = activityMarks();
   if (tasks.length === 0) return <p className="font-mono text-[11px] text-muted">No tasks yet. Add one; with the orchestrator running it starts once its dependencies are done.</p>;
   return (
     <div className="flex flex-col gap-1.5">
       {tasks.map((t) => {
         const on = selected === `t:${t.id}`;
         const isBlocked = blocked(t, tasks);
+        // A status change: the row glows in the new tone (a spawn in its provider's colour), settles when done and
+        // shakes red when failed; the pill pops; the pipeline bar moves to the new step.
+        const mark = marks.task.get(t.id);
+        const age = ageOf(mark?.at, now);
+        const recent = mark?.to === t.status && age < 3000;
+        const color = providerColor((t.session && sessions.find((x) => x.name === t.session)?.provider) || t.provider);
         return (
           <button
             key={t.id}
@@ -39,7 +54,9 @@ export function TaskRows({ tasks, label, selected, onSelect, projectOf }: { task
               "grid cursor-pointer grid-cols-[minmax(30px,auto)_minmax(0,1fr)_auto] items-center gap-2 rounded-lg border px-2.5 py-[9px] text-left text-text",
               on ? "border-accent/45 bg-accent/[0.08]" : "border-line bg-surface hover:border-line-2",
               t.status === "cancelled" && "opacity-50",
+              recent && (t.status === "failed" ? "map-shake" : t.status === "done" ? "map-settle" : "map-glow"),
             )}
+            style={recent ? ({ "--pc": t.status === "running" ? color : `var(--${TASK_TONE[t.status]})` } as CSSProperties) : undefined}
           >
             <span className="font-mono text-[10.5px] leading-none text-muted">{label(t)}</span>
             <span className="flex min-w-0 flex-col gap-1">
@@ -52,7 +69,14 @@ export function TaskRows({ tasks, label, selected, onSelect, projectOf }: { task
                 {t.attempts > 1 ? ` · try ${t.attempts}` : ""}
               </span>
             </span>
-            <Pill tone={isBlocked ? "bad" : TASK_TONE[t.status]}>{isBlocked ? "blocked" : t.status}</Pill>
+            <span key={t.status} className={clsx("flex", recent && "map-phase-in")}>
+              <Pill tone={isBlocked ? "bad" : TASK_TONE[t.status]}>{isBlocked ? "blocked" : t.status}</Pill>
+            </span>
+            {(IN_PIPELINE.includes(t.status) || (t.status === "done" && age < 5000)) && (
+              <span className="col-span-3">
+                <PhaseBar status={t.status} color={color} />
+              </span>
+            )}
           </button>
         );
       })}
