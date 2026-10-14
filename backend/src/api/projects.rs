@@ -422,3 +422,20 @@ pub async fn savings(State(hub): State<Arc<Hub>>, Query(q): Query<SavingsQuery>)
     }
     Ok(Json(savings::load(&hub, project.as_deref(), q.hours.unwrap_or(24), chrono::Utc::now()).await?))
 }
+
+#[derive(Deserialize, Default)]
+#[serde(default)]
+pub struct EstimateRequest {
+    parallel: Option<u32>,
+    copy: Option<Vec<String>>,
+    setup: Option<Vec<String>>,
+}
+
+/// What running the project's tasks side by side in worktrees would cost (`worktree_estimate.rs`). The form's
+/// unsaved `copy` and `setup` lists stand in for the saved ones.
+pub async fn worktree_estimate(State(hub): State<Arc<Hub>>, UrlPath(slug): UrlPath<String>, Json(body): Json<EstimateRequest>) -> ApiResult<crate::model::WorktreeEstimate> {
+    let project = hub.store.project(&slug).await?.ok_or_else(|| not_found("project"))?;
+    let copy = body.copy.unwrap_or_else(|| project.settings.branches.copy.clone());
+    let setup = body.setup.unwrap_or_else(|| project.settings.branches.setup.clone());
+    Ok(Json(crate::worktree_estimate::estimate(&hub, &project, body.parallel, &copy, &setup).await))
+}

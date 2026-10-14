@@ -1,12 +1,14 @@
 "use client";
 
 import clsx from "clsx";
+import { ExternalLink, GitBranch } from "lucide-react";
 import { useState } from "react";
 
 import { api } from "@/lib/api";
 import type { PipelineInfo } from "@/lib/generated/PipelineInfo";
 import type { ProviderInfo } from "@/lib/generated/ProviderInfo";
 import type { Task } from "@/lib/generated/Task";
+import type { TaskGit } from "@/lib/generated/TaskGit";
 
 import { Btn, Chip, Pill, TASK_TONE } from "./command-ui";
 import { Modal } from "./shell/page";
@@ -42,6 +44,7 @@ export function TaskRows({ tasks, label, selected, onSelect, projectOf }: { task
             <span className="font-mono text-[10.5px] leading-none text-muted">{label(t)}</span>
             <span className="flex min-w-0 flex-col gap-1">
               <span className="text-[12.5px] leading-[1.25] font-medium text-pretty">{t.title}</span>
+              {t.git && <BranchChip git={t.git} />}
               <span className="font-mono text-[10px] leading-[1.2] text-muted">
                 {projectOf ? `${projectOf(t)} · ` : ""}
                 {t.depends_on.length ? `after ${t.depends_on.map((d) => `#${d}`).join(", ")}` : "no deps"}
@@ -57,11 +60,122 @@ export function TaskRows({ tasks, label, selected, onSelect, projectOf }: { task
   );
 }
 
-/** Retry, cancel and delete, as the detail card's buttons. Returns `null` while nothing applies. */
+/** `map/task-7 → main`, struck through once its worktree is gone. */
+export function BranchChip({ git }: { git: TaskGit }) {
+  return (
+    <span
+      title={git.worktree ? `worktree ${git.worktree}` : "worktree removed"}
+      className="inline-flex max-w-full items-center gap-1 self-start truncate rounded border border-line-2 px-1.5 py-px font-mono text-[10px] leading-[1.3] text-text-2"
+    >
+      <GitBranch className="size-2.5 flex-none" />
+      <span className="truncate">
+        {git.branch} → {git.base}
+      </span>
+    </span>
+  );
+}
+
+/** A task's branch and worktree in the detail card: where it is, what it landed as, and the owner's choices for a
+ * task in review (merge, pull request, send back with a note, discard). `actions: false` shows it read-only. */
+export function TaskGitPanel({ task: t, act, actions = true }: { task: Task; act: (what: string, run: () => Promise<unknown>) => void; actions?: boolean }) {
+  const [note, setNote] = useState<string | null>(null);
+  const g = t.git;
+  if (!g) return null;
+  const review = t.status === "review";
+  const discard = () =>
+    confirm(
+      `Discard task #${t.id}'s worktree${g.merged || g.pushed ? "" : ` and delete branch ${g.branch}`}?${review || t.status === "failed" ? " The task becomes cancelled." : ""}`,
+    ) && act(`Task #${t.id}: worktree removed`, () => api.taskAction(t.id, "discard"));
+  const row = "grid grid-cols-[92px_minmax(0,1fr)] items-baseline gap-3";
+  const key = "font-mono text-[10px] leading-[1.5] tracking-[0.08em] text-muted uppercase";
+  return (
+    <div className="flex flex-col gap-[7px] px-4 pb-3">
+      <div className={row}>
+        <span className={key}>Branch</span>
+        <BranchChip git={g} />
+      </div>
+      <div className={row}>
+        <span className={key}>Worktree</span>
+        <span className="font-mono text-[11.5px] break-all text-text/90">{g.worktree ?? "removed"}</span>
+      </div>
+      {(g.merged || g.pr_url || g.pushed || g.land) && (
+        <div className={row}>
+          <span className={key}>Landed</span>
+          <span className="flex flex-wrap items-baseline gap-x-2 text-[12.5px] text-text/90">
+            {g.merged && <span className="font-mono text-[11.5px]">merged as {g.merged.slice(0, 8)}</span>}
+            {g.pr_url && (
+              <a href={g.pr_url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-accent-soft hover:underline">
+                pull request <ExternalLink className="size-3" />
+              </a>
+            )}
+            {g.pushed && !g.pr_url && <span>pushed</span>}
+            {g.land && !g.merged && !g.pr_url && <span className="text-muted">you asked: {g.land.replace("_", " ")}</span>}
+          </span>
+        </div>
+      )}
+      {g.note && (
+        <div className={row}>
+          <span className={key}>Note</span>
+          <span className="text-[12.5px] leading-snug text-text/90">{g.note}</span>
+        </div>
+      )}
+      {actions && review && (
+        <div className="flex flex-col gap-2 rounded-lg border border-warn/35 bg-warn/[0.06] p-2.5">
+          <span className="text-[12px] leading-snug text-text-2">Passed verify and audit; the branch waits for you.</span>
+          <div className="flex flex-wrap gap-1.5">
+            <Btn kind="primary" onClick={() => act(`Task #${t.id}: merging into ${g.base}`, () => api.taskAction(t.id, "merge"))}>
+              Merge
+            </Btn>
+            <Btn onClick={() => act(`Task #${t.id}: opening a pull request`, () => api.taskAction(t.id, "pull_request"))}>Open pull request</Btn>
+            <Btn onClick={() => setNote(note === null ? "" : null)}>Send back</Btn>
+            <Btn kind="danger" onClick={discard}>
+              Discard
+            </Btn>
+          </div>
+          {note !== null && (
+            <div className="flex flex-col gap-1.5">
+              <textarea
+                autoFocus
+                rows={3}
+                value={note}
+                onChange={(e) => setNote(e.target.value)}
+                placeholder="Optional: what to change. It goes into the agent's next prompt."
+                aria-label="Note for the agent"
+                className={clsx(field, "resize-y px-2.5 py-2 font-mono text-[12px] leading-[1.5]")}
+              />
+              <div className="flex gap-1.5">
+                <Btn
+                  kind="primary"
+                  onClick={() => {
+                    act(`Task #${t.id} sent back to the agent`, () => api.taskAction(t.id, "send_back", note.trim() || undefined));
+                    setNote(null);
+                  }}
+                >
+                  Send back to the agent
+                </Btn>
+                <Btn onClick={() => setNote(null)}>Cancel</Btn>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+      {actions && FINISHED.includes(t.status) && g.worktree && (
+        <div>
+          <Btn kind="danger" onClick={discard}>
+            Remove worktree
+          </Btn>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Retry, cancel and delete, as the detail card's buttons. Returns `null` while nothing applies. A task in review
+ * has its own choices in `TaskGitPanel`. */
 export function taskActions(t: Task, act: (what: string, run: () => Promise<unknown>) => void) {
   const out: { label: string; kind: "primary" | "ghost" | "danger"; run: () => void }[] = [];
   if (t.status === "failed" || t.status === "cancelled") out.push({ label: "Retry", kind: "primary", run: () => act(`Task #${t.id} queued for retry`, () => api.taskAction(t.id, "retry")) });
-  if (!FINISHED.includes(t.status))
+  if (!FINISHED.includes(t.status) && t.status !== "review")
     out.push({ label: "Cancel", kind: "danger", run: () => confirm(`Cancel task #${t.id}?`) && act(`Task #${t.id} cancelled`, () => api.taskAction(t.id, "cancel")) });
   if (FINISHED.includes(t.status) || t.status === "pending")
     out.push({ label: "Delete", kind: "danger", run: () => confirm(`Delete task #${t.id}?`) && act(`Task #${t.id} deleted`, () => api.deleteTask(t.id)) });

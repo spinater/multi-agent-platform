@@ -59,18 +59,35 @@ impl Kind {
     pub const VERIFY_FAIL: Kind = k("decision.verify.fail", N::Verify, N::Retry, W, "command failed → retry or fail");
     pub const VERIFY_PASS: Kind = k("decision.verify.pass", N::Verify, N::Audit, S, "all exit 0 → audit");
     // finish() / audit().
-    pub const AUDIT_OFF: Kind = k("decision.audit.off", N::Audit, N::Post, I, "audit off → post_done");
+    pub const AUDIT_OFF: Kind = k("decision.audit.off", N::Audit, N::Land, I, "audit off → land");
     // finish(): the project's Reflex audit gate, before any auditor is asked.
-    pub const AUDIT_SKIPPED_REFLEX: Kind = k("decision.audit.skipped_reflex", N::Audit, N::Post, S, "Reflex: no audit needed → post_done");
+    pub const AUDIT_SKIPPED_REFLEX: Kind = k("decision.audit.skipped_reflex", N::Audit, N::Land, S, "Reflex: no audit needed → land");
     pub const AUDIT_REFLEX_SAID_AUDIT: Kind = k("decision.audit.reflex_said_audit", N::Audit, N::Audit, I, "Reflex: audit needed · asking an auditor");
     pub const AUDIT_REFLEX_ABSTAINED: Kind = k("decision.audit.reflex_abstained", N::Audit, N::Audit, I, "Reflex unsure or not running · asking an auditor");
     pub const AUDIT_ASK: Kind = k("decision.audit.ask", N::Audit, N::Audit, I, "asking an auditor");
     pub const AUDIT_UNAVAILABLE: Kind = k("decision.audit.unavailable", N::Audit, N::Audit, W, "auditor unavailable · next in chain");
-    pub const AUDIT_PASS: Kind = k("decision.audit.pass", N::Audit, N::Post, S, "VERDICT: PASS → post_done");
+    pub const AUDIT_PASS: Kind = k("decision.audit.pass", N::Audit, N::Land, S, "VERDICT: PASS → land");
     pub const AUDIT_FAIL: Kind = k("decision.audit.fail", N::Audit, N::Retry, W, "VERDICT: FAIL → retry or fail");
-    pub const AUDIT_SKIPPED: Kind = k("decision.audit.skipped", N::Audit, N::Post, W, "no auditor · accepted on verification → post_done");
+    pub const AUDIT_SKIPPED: Kind = k("decision.audit.skipped", N::Audit, N::Land, W, "no auditor · accepted on verification → land");
     pub const AUDIT_NO_AUDITOR: Kind = k("decision.audit.no_auditor", N::Audit, N::Retry, W, "no auditor and audit required → retry or fail");
     // finish(): post_done hooks.
+    // worktrees.rs: a branch and worktree per task, made at launch and landed after the audit.
+    pub const PREP_READY: Kind = k("decision.launch.worktree", N::Launch, N::Launch, I, "worktree ready on the task's branch");
+    pub const PREP_FAILED: Kind = k("decision.launch.worktree_failed", N::Launch, N::Retry, W, "worktree or setup failed → retry or fail");
+    pub const PREP_FATAL: Kind = k("decision.launch.worktree_fatal", N::Launch, N::Failed, E, "the project cannot have worktrees → failed (a person decides)");
+    pub const LAND_SHARED: Kind = k("decision.land.shared", N::Land, N::Post, I, "shared folder · nothing to land → post_done");
+    pub const LAND_COMMITTED: Kind = k("decision.land.committed", N::Land, N::Land, I, "committed what the worker left");
+    pub const LAND_REBASED: Kind = k("decision.land.rebased", N::Land, N::Land, I, "base moved on · rebased · verifying again");
+    pub const LAND_REVERIFY_FAIL: Kind = k("decision.land.reverify_fail", N::Land, N::Retry, W, "verify failed after the rebase → retry or fail");
+    pub const LAND_CONFLICT: Kind = k("decision.land.conflict", N::Land, N::Retry, W, "rebase conflict → the agent resolves it");
+    pub const LAND_NOTHING: Kind = k("decision.land.nothing", N::Land, N::Post, I, "no commits beyond the base → post_done");
+    pub const LAND_MERGED: Kind = k("decision.land.merged", N::Land, N::Post, S, "fast-forwarded the base → post_done");
+    pub const LAND_PUSHED: Kind = k("decision.land.pushed", N::Land, N::Post, S, "pushed · pull request → post_done");
+    pub const LAND_KEEP: Kind = k("decision.land.keep", N::Land, N::Review, I, "land = keep → the owner reviews it");
+    pub const LAND_BLOCKED: Kind = k("decision.land.blocked", N::Land, N::Review, W, "cannot land without a person → review");
+    pub const REVIEW_LAND: Kind = k("decision.review.land", N::Review, N::Land, I, "the owner lands it");
+    pub const REVIEW_SEND_BACK: Kind = k("decision.review.send_back", N::Review, N::Ready, W, "the owner sends it back to an agent");
+
     pub const POST_CMD_PASS: Kind = k("decision.post.cmd_pass", N::Post, N::Post, I, "hook passed · next");
     pub const POST_PASS: Kind = k("decision.post.pass", N::Post, N::End, I, "hooks ok → end decision");
     pub const POST_FAIL: Kind = k("decision.post.fail", N::Post, N::Failed, E, "hook failed → failed (a person decides)");
@@ -127,6 +144,21 @@ pub const ALL: &[Kind] = &[
     Kind::AUDIT_FAIL,
     Kind::AUDIT_SKIPPED,
     Kind::AUDIT_NO_AUDITOR,
+    Kind::PREP_READY,
+    Kind::PREP_FAILED,
+    Kind::PREP_FATAL,
+    Kind::LAND_SHARED,
+    Kind::LAND_COMMITTED,
+    Kind::LAND_REBASED,
+    Kind::LAND_REVERIFY_FAIL,
+    Kind::LAND_CONFLICT,
+    Kind::LAND_NOTHING,
+    Kind::LAND_MERGED,
+    Kind::LAND_PUSHED,
+    Kind::LAND_KEEP,
+    Kind::LAND_BLOCKED,
+    Kind::REVIEW_LAND,
+    Kind::REVIEW_SEND_BACK,
     Kind::POST_CMD_PASS,
     Kind::POST_PASS,
     Kind::POST_FAIL,
@@ -217,6 +249,8 @@ pub fn model(hub: &Hub, tick_secs: u64) -> DecisionModel {
         point(N::Watch, "Watch", "What has the worker reported?", "$MAP_RESULT_FILE status done | failed; session exited or needs_auth; started > task_timeout_minutes ago; needs_trust waits for the owner (no timeout)", "check_running() · orchestrator.task_timeout_minutes", false),
         point(N::Verify, "Verify", "Does every verify command exit 0?", "each cfg.verify command, in order, exits 0 (30m limit each)", "finish() · orchestrator.verify", false),
         point(N::Audit, "Audit", "Does the change need an audit, and what does the auditor answer?", "with the project's audit gate on, a confident Reflex `needs_audit` = no accepts the task on verification; otherwise (yes, unsure, Reflex not running) the first auditor in audit.chain with a VERDICT line: PASS | FAIL; none → audit.required decides", "audit_gate() · audit() · orchestrator.audit · project reflex_gates", false),
+        point(N::Land, "Land", "Where does the task's branch go?", "shared folder: nothing to land; else commit what the worker left, then by branches.land: merge (rebase onto the base, verify again if it moved, fast-forward the base; a conflict goes back to the agent) | pull_request (push, open a PR with gh or glab) | keep (the owner reviews)", "finish() · worktrees.rs · project branches", false),
+        point(N::Review, "Review", "Waiting for the owner to land it.", "land = keep, the project folder has changes in the way, or a push failed; the owner merges, opens a pull request, sends it back or discards it", "TaskStatus::Review · PATCH /api/tasks/{id}", false),
         point(N::Post, "post_done", "Do the post_done hooks pass?", "each cfg.post_done command exits 0; a failure fails the task without a retry", "finish() · orchestrator.post_done", false),
         point(N::End, "End decision", "Can the worker session be closed?", "End unless a tmux client is attached or the input line has text", "detect::end_decision(clients, pane)", false),
         point(N::Retry, "Retry or fail", "Is there an attempt left?", "attempts < max_attempts → pending again with the failure in the prompt; a person in the session keeps it running", "retry_or_fail() · orchestrator.max_attempts", false),
@@ -234,7 +268,13 @@ pub fn model(hub: &Hub, tick_secs: u64) -> DecisionModel {
         edge(N::Watch, N::Retry, "failed · exited · auth · timeout"),
         edge(N::Verify, N::Audit, "all pass"),
         edge(N::Verify, N::Retry, "command failed"),
-        edge(N::Audit, N::Post, "PASS · off · skipped · Reflex: no audit"),
+        edge(N::Launch, N::Failed, "no worktree possible"),
+        edge(N::Audit, N::Land, "PASS · off · skipped · Reflex: no audit"),
+        edge(N::Land, N::Post, "merged · pushed · nothing · shared"),
+        edge(N::Land, N::Review, "keep · blocked"),
+        edge(N::Land, N::Retry, "conflict · verify failed after rebase"),
+        edge(N::Review, N::Land, "owner: merge or PR"),
+        edge(N::Review, N::Ready, "owner: send back"),
         edge(N::Audit, N::Retry, "FAIL"),
         edge(N::Post, N::End, "hooks ok"),
         edge(N::Post, N::Failed, "hook failed"),

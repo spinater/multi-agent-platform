@@ -28,6 +28,8 @@ mod trust;
 mod updates;
 mod usage;
 mod watcher;
+mod worktree_estimate;
+mod worktrees;
 
 use std::net::SocketAddr;
 use std::path::PathBuf;

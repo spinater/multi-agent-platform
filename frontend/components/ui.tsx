@@ -104,6 +104,8 @@ const taskTone: Record<TaskStatus, Tone> = {
   running: "ok",
   verifying: "info",
   auditing: "info",
+  landing: "info",
+  review: "warn",
   done: "accent",
   failed: "bad",
   cancelled: "idle",
@@ -111,7 +113,7 @@ const taskTone: Record<TaskStatus, Tone> = {
 
 export function TaskBadge({ status }: { status: TaskStatus }) {
   return (
-    <Badge tone={taskTone[status]} pulse={status === "running" || status === "verifying" || status === "auditing"}>
+    <Badge tone={taskTone[status]} pulse={status === "running" || status === "verifying" || status === "auditing" || status === "landing"}>
       {status}
     </Badge>
   );

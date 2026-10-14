@@ -592,7 +592,8 @@ class Engine {
         let strokeA = 1;
         if (t.status === "pending") stroke = this.c("var(--text-2)");
         else if (t.status === "running") fill = color;
-        else if (t.status === "verifying" || t.status === "auditing") fill = this.c("var(--info)");
+        else if (t.status === "verifying" || t.status === "auditing" || t.status === "landing") fill = this.c("var(--info)");
+        else if (t.status === "review") fill = this.c("var(--warn)");
         else if (t.status === "done") {
           fill = color;
           fillA = 0.5;
@@ -613,7 +614,7 @@ class Engine {
           ctx.lineWidth = 1.2;
           ctx.stroke();
         }
-        if (t.status === "running" || t.status === "verifying" || t.status === "auditing") {
+        if (t.status === "running" || t.status === "verifying" || t.status === "auditing" || t.status === "landing") {
           const pr = r + 2.5 + 2 * (0.5 + 0.5 * Math.sin(time * 0.005 + hash(n.id, 3) * 6));
           ctx.globalAlpha = 0.4 * al;
           ctx.strokeStyle = t.status === "running" ? color : this.c("var(--info)");

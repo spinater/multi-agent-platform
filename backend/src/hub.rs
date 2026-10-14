@@ -36,6 +36,9 @@ pub struct Hub {
     pub usage: crate::usage::UsageState,
     /// The latest update check of the agent CLIs (`updates.rs`).
     pub updates: crate::updates::UpdatesState,
+    /// Tasks whose verify/audit/land step is running in the background (the orchestrator loop and the owner's
+    /// Merge button share it, so a task is never finished twice at once).
+    pub finishing: Arc<Mutex<std::collections::HashSet<i64>>>,
 }
 
 pub struct LaunchRequest {
@@ -72,6 +75,7 @@ impl Hub {
             http: reqwest::Client::new(),
             usage,
             updates,
+            finishing: Default::default(),
         })
     }
 
@@ -181,6 +185,14 @@ impl Hub {
         match self.store.project(slug).await {
             Ok(Some(p)) => self.workspace_of(&p),
             _ => self.project_dir(slug).join("workspace"),
+        }
+    }
+
+    /// Where `task` runs: its worktree while it has one (`branches.mode = worktree`), else [`Hub::work_dir`].
+    pub async fn task_dir(&self, task: &crate::model::Task) -> PathBuf {
+        match task.git.as_ref().and_then(|g| g.worktree.as_deref()).map(PathBuf::from) {
+            Some(wt) if wt.is_dir() => wt,
+            _ => self.work_dir(task.project.as_deref()).await,
         }
     }
 
@@ -500,7 +512,14 @@ impl Hub {
             std::fs::set_permissions(&script_path, std::fs::Permissions::from_mode(0o700))?;
         }
 
-        let cwd = self.work_dir(req.project.as_deref()).await;
+        // A task's worker runs in the task's worktree when it has one.
+        let cwd = match req.task_id {
+            Some(id) => match self.store.task(id).await? {
+                Some(task) => self.task_dir(&task).await,
+                None => self.work_dir(req.project.as_deref()).await,
+            },
+            None => self.work_dir(req.project.as_deref()).await,
+        };
         if !cwd.is_dir() {
             bail!("workspace {} does not exist", cwd.display());
         }

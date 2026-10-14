@@ -5,7 +5,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { DecisionModel } from "@/lib/generated/DecisionModel";
 import type { DecisionNode } from "@/lib/generated/DecisionNode";
 
-import { LAYOUT, edgeKey, isFailEdge, nodeTone, tint } from "./model";
+import { COLUMNS, LAYOUT, edgeKey, isFailEdge, nodeTone, tint } from "./model";
 import type { Pulse } from "./use-decisions";
 
 export type Token = {
@@ -28,12 +28,12 @@ type Path = { p0: Pt; p3: Pt; h: boolean; c1?: Pt; c2?: Pt };
 const LABEL_T: Record<string, number> = { "watch>retry": 0.3, "retry>watch": 0.3, "audit>retry": 0.35 };
 
 const HEIGHT = 470;
-const MIN_WIDTH = 1040;
+const MIN_WIDTH = 1140;
 const NODE_H = 66;
 
 function geometry(width: number) {
-  const nodeW = Math.min(124, (width - 48) / 9 - 12);
-  const step = (width - 48 - nodeW) / 8;
+  const nodeW = Math.min(124, (width - 48) / COLUMNS - 12);
+  const step = (width - 48 - nodeW) / (COLUMNS - 1);
   const pos = {} as Record<DecisionNode, Geo>;
   for (const [k, { c, r }] of Object.entries(LAYOUT) as [DecisionNode, { c: number; r: number }][]) {
     const x = 24 + c * step;
@@ -51,7 +51,7 @@ function anchors(a: DecisionNode, b: DecisionNode, pos: Record<DecisionNode, Geo
   if (a === "retry" && b === "ready") return { p0: [A.x, A.cy], p3: [B.cx + 10, B.y + B.h], h: false, c1: [A.x - 120, A.cy], c2: [B.cx + 10, B.y + B.h + 60] };
   if (a === "retry" && b === "watch") return { p0: [A.cx - 18, A.y], p3: [B.cx + 14, B.y + B.h], h: false };
   const off: Partial<Record<DecisionNode, number>> = { launch: 6, watch: -14, ready: -10 };
-  const inOff: Partial<Record<DecisionNode, number>> = { launch: -30, watch: -6, verify: 14, audit: 30 };
+  const inOff: Partial<Record<DecisionNode, number>> = { launch: -30, watch: -6, verify: 14, audit: 30, land: 40 };
   return { p0: [A.cx + (off[a] ?? 0), A.y + A.h], p3: [B.cx + (inOff[a] ?? 0), B.y], h: false };
 }
 
@@ -134,7 +134,7 @@ export function DecisionGraph({
   for (const t of [...tokens].sort((a, b) => a.id - b.id)) here.set(t.node, [...(here.get(t.node) ?? []), t]);
 
   return (
-    <div ref={box} className="relative h-[470px] min-w-[1040px]">
+    <div ref={box} className="relative h-[470px] min-w-[1140px]">
       <svg width={width} height={HEIGHT} className="absolute inset-0 block select-none" role="img" aria-label="Orchestrator decision graph">
         <text x={24} y={14} style={{ font: `500 9px ${MONO}`, letterSpacing: "2px", fill: "var(--muted)" }}>
           HAPPY PATH →
@@ -160,14 +160,18 @@ export function DecisionGraph({
           let [lx, ly] = [mid[0], g.h ? (LAYOUT[e.from].r === 0 ? pos.ready.y - 13 : mid[1] - 10) : mid[1]];
           if (e.from === "retry" && e.to === "ready") [lx, ly] = [pos.retry.x - 150, pos.retry.cy + 20];
           const count = `×${n}`;
-          const bw = (e.label.length + count.length) * 5.5 + 20;
+          // A top-row label wider than the gap between columns is cut short; the full text is the edge's tooltip.
+          const room = g.h ? Math.floor((pos.pick.x - pos.ready.x - 24) / 5.5) - count.length : Infinity;
+          const text = e.label.length > room ? `${e.label.slice(0, Math.max(4, room - 1))}…` : e.label;
+          const bw = (text.length + count.length) * 5.5 + 20;
           return (
             <g key={key}>
+              {text !== e.label && <title>{e.label}</title>}
               <path d={d(g)} fill="none" strokeDasharray={!n && !onPath ? "3 4" : undefined} style={{ stroke: tint(color, alpha), strokeWidth: onPath ? 2 : 1.2 }} />
               <path d={head} style={{ fill: tint(color, Math.min(100, alpha + 20)) }} />
               <rect x={lx - bw / 2} y={ly - 8} width={bw} height={16} rx={4} style={{ fill: tint("var(--inset)", 92) }} />
               <text x={lx - bw / 2 + 6} y={ly + 3} style={{ font: `400 9px ${MONO}`, fill: onPath ? "var(--accent-soft)" : tint("var(--text-2)", n ? 95 : 60) }}>
-                {e.label}
+                {text}
               </text>
               <text x={lx + bw / 2 - 6} y={ly + 3} textAnchor="end" style={{ font: `600 9px ${MONO}`, fill: onPath ? "var(--accent)" : fail && n ? "var(--bad)" : n ? "var(--text)" : "var(--muted)" }}>
                 {count}
@@ -187,9 +191,9 @@ export function DecisionGraph({
           const isSel = selNode === n.id || selTask?.node === n.id;
           const hov = hover?.type === "node" && hover.id === n.id;
           const tone = nodeTone(n.id);
-          const fill = n.id === "done" ? tint("var(--accent)", 12) : n.id === "failed" ? tint("var(--bad)", 10) : n.id === "blocked" ? tint("var(--warn)", 8) : "var(--menu)";
+          const fill = n.id === "done" ? tint("var(--accent)", 12) : n.id === "failed" ? tint("var(--bad)", 10) : n.id === "blocked" || n.id === "review" ? tint("var(--warn)", 8) : "var(--menu)";
           const stroke = isSel ? "var(--accent)" : hov ? tint("var(--text)", 50) : list.length ? tint(tone, 55) : "var(--line-3)";
-          const titleColor = n.id === "done" ? "var(--accent-soft)" : n.id === "failed" ? "var(--bad)" : n.id === "blocked" ? "var(--warn)" : "var(--text)";
+          const titleColor = n.id === "done" ? "var(--accent-soft)" : n.id === "failed" ? "var(--bad)" : n.id === "blocked" || n.id === "review" ? "var(--warn)" : "var(--text)";
           const fn = n.source.split(" ·")[0];
           return (
             <g

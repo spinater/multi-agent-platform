@@ -13,7 +13,8 @@ import { providerColor } from "@/lib/colors";
 export const DECISION_PREFIX = "decision.";
 export const isDecision = (e: Event) => e.kind.startsWith(DECISION_PREFIX) && e.task_id !== null;
 
-/** Grid position of each node: column, row (0 happy path, 1 recovery). */
+/** Grid position of each node: column, row (0 happy path, 1 recovery). Review sits under Land, the only way in;
+ * Failed sits between Retry and Review so the Retry → Failed edge crosses no node. */
 export const LAYOUT: Record<DecisionNode, { c: number; r: number }> = {
   ready: { c: 0, r: 0 },
   pick: { c: 1, r: 0 },
@@ -21,18 +22,22 @@ export const LAYOUT: Record<DecisionNode, { c: number; r: number }> = {
   watch: { c: 3, r: 0 },
   verify: { c: 4, r: 0 },
   audit: { c: 5, r: 0 },
-  post: { c: 6, r: 0 },
-  end: { c: 7, r: 0 },
-  done: { c: 8, r: 0 },
+  land: { c: 6, r: 0 },
+  post: { c: 7, r: 0 },
+  end: { c: 8, r: 0 },
+  done: { c: 9, r: 0 },
   blocked: { c: 0, r: 1 },
   retry: { c: 3.5, r: 1 },
-  failed: { c: 6.5, r: 1 },
+  failed: { c: 5.5, r: 1 },
+  review: { c: 7, r: 1 },
 };
+/** Columns of `LAYOUT`. */
+export const COLUMNS = Math.max(...Object.values(LAYOUT).map((p) => p.c)) + 1;
 
 /** List order: the furthest along first. */
-export const ORDER: DecisionNode[] = ["ready", "pick", "launch", "watch", "verify", "audit", "post", "end", "retry", "blocked", "failed", "done"];
+export const ORDER: DecisionNode[] = ["ready", "pick", "launch", "watch", "verify", "audit", "land", "post", "end", "retry", "blocked", "review", "failed", "done"];
 /** The chips row above the canvas. */
-export const CHIPS: DecisionNode[] = ["watch", "verify", "audit", "pick", "ready", "retry", "blocked", "failed", "done"];
+export const CHIPS: DecisionNode[] = ["watch", "verify", "audit", "land", "review", "pick", "ready", "retry", "blocked", "failed", "done"];
 
 export const edgeKey = (from: DecisionNode, to: DecisionNode) => `${from}>${to}`;
 export const isFailEdge = (to: DecisionNode) => to === "retry" || to === "failed" || to === "blocked";
@@ -40,9 +45,9 @@ export const isFailEdge = (to: DecisionNode) => to === "retry" || to === "failed
 export function nodeTone(n: DecisionNode): string {
   if (n === "done") return "var(--accent)";
   if (n === "failed") return "var(--bad)";
-  if (n === "blocked" || n === "retry") return "var(--warn)";
+  if (n === "blocked" || n === "retry" || n === "review") return "var(--warn)";
   if (n === "watch") return "var(--ok)";
-  if (n === "verify" || n === "audit") return "var(--info)";
+  if (n === "verify" || n === "audit" || n === "land") return "var(--info)";
   if (n === "pick" || n === "ready") return "var(--idle)";
   return "var(--text-2)";
 }
@@ -64,7 +69,7 @@ export type KindMap = Map<string, DecisionKind>;
 export const kindMap = (model: DecisionModel | null): KindMap => new Map((model?.kinds ?? []).map((k) => [k.kind, k]));
 
 /** Where the task is now: its status, refined by its newest decision (post_done and the end decision run while the
- * status still reads verifying/auditing). `null` hides cancelled tasks. */
+ * status still reads verifying/auditing/landing). `null` hides cancelled tasks. */
 export function nodeOf(task: Task, last: Event | undefined, kinds: KindMap): DecisionNode | null {
   const to = last ? kinds.get(last.kind)?.to : undefined;
   switch (task.status) {
@@ -80,10 +85,13 @@ export function nodeOf(task: Task, last: Event | undefined, kinds: KindMap): Dec
       return "ready";
     case "running":
       return "watch";
+    case "review":
+      return "review";
     case "verifying":
     case "auditing":
-      if (to && ["verify", "audit", "post", "end"].includes(to)) return to;
-      return task.status === "verifying" ? "verify" : "audit";
+    case "landing":
+      if (to && ["verify", "audit", "land", "post", "end"].includes(to)) return to;
+      return task.status === "verifying" ? "verify" : task.status === "auditing" ? "audit" : "land";
   }
 }
 
@@ -234,6 +242,24 @@ export function nowChecks(args: {
         ...(gate ? [{ mark: "·", color: INFO, text: `Reflex gate · ${gate.message}` }] : []),
         ...model.audit_chain.map((p) => status.get(p) ?? { mark: "·", color: IDLE, text: `${p} · next in chain` }),
         { mark: "·", color: IDLE, text: `audit.required = ${model.audit_required}` },
+      ];
+    }
+    case "land": {
+      const g = task.git;
+      if (!g) return [{ mark: "·", color: IDLE, text: "shared folder · nothing to land" }];
+      const steps = attempt.filter((e) => e.kind.startsWith("decision.land."));
+      return [
+        { mark: "·", color: IDLE, text: `${g.branch} → ${g.base}${g.land ? ` · ${g.land.replace("_", " ")} (asked by the owner)` : ""}` },
+        ...steps.map((e): Check => ({ mark: e.level === "error" ? "✕" : e.level === "warning" ? "!" : "✓", color: e.level === "error" ? BAD : e.level === "warning" ? WARN : OK, text: e.message })),
+        ...(steps.length ? [] : [{ mark: "▸", color: INFO, text: "committing and landing the branch" }]),
+      ];
+    }
+    case "review": {
+      const g = task.git;
+      return [
+        { mark: "!", color: WARN, text: task.result?.split("\n")[0] ?? "passed; waiting for the owner" },
+        ...(g ? [{ mark: "·", color: IDLE, text: `${g.branch} → ${g.base}${g.worktree ? ` · ${g.worktree}` : ""}` }] : []),
+        { mark: "·", color: IDLE, text: "Merge, Open pull request, Send back or Discard on the task card" },
       ];
     }
     case "post":

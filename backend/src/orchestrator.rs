@@ -15,7 +15,7 @@ use tokio::process::Command;
 use crate::decisions::{self as dec, Kind, record};
 use crate::detect::EndDecision;
 use crate::hub::{Hub, LaunchRequest, quote};
-use crate::model::{Level, Role, SessionState, Task, TaskStatus};
+use crate::model::{LandMode, Level, Role, SessionState, Task, TaskStatus};
 
 pub(crate) const TICK: Duration = Duration::from_secs(5);
 const OUTPUT_TAIL: usize = 4000;
@@ -72,6 +72,11 @@ async fn run_captured(mut cmd: Command, timeout: Duration) -> Result<(bool, Stri
     Ok((out.status.success(), tail(&text, OUTPUT_TAIL)))
 }
 
+/// A commit's first 10 characters.
+fn short(sha: &str) -> &str {
+    &sha[..sha.len().min(10)]
+}
+
 fn looks_like_quota(output: &str) -> bool {
     let lower = output.to_lowercase();
     crate::detect::rate_limit_line(output).is_some() || lower.contains("credit balance is too low") || lower.contains("quota")
@@ -79,7 +84,8 @@ fn looks_like_quota(output: &str) -> bool {
 
 impl Orchestrator {
     pub fn new(hub: Arc<Hub>) -> Self {
-        Self { hub, finishing: Arc::new(Mutex::new(HashSet::new())) }
+        let finishing = Arc::clone(&hub.finishing);
+        Self { hub, finishing }
     }
 
     pub async fn tick(&mut self) -> Result<()> {
@@ -90,12 +96,12 @@ impl Orchestrator {
             }
         }
         // Verify/audit steps lost to a restart are picked up again.
-        for task in tasks.iter().filter(|t| matches!(t.status, TaskStatus::Verifying | TaskStatus::Auditing)) {
+        for task in tasks.iter().filter(|t| matches!(t.status, TaskStatus::Verifying | TaskStatus::Auditing | TaskStatus::Landing)) {
             self.spawn_finish(task.clone());
         }
 
         let tasks = self.hub.store.tasks().await?;
-        let mut active = tasks.iter().filter(|t| matches!(t.status, TaskStatus::Running | TaskStatus::Verifying | TaskStatus::Auditing)).count();
+        let mut active = tasks.iter().filter(|t| matches!(t.status, TaskStatus::Running | TaskStatus::Verifying | TaskStatus::Auditing | TaskStatus::Landing)).count();
         let paused = crate::project_settings::paused(&self.hub).await;
         for task in tasks.iter().filter(|t| t.status == TaskStatus::Pending && !crate::project_settings::is_paused(&paused, t)) {
             if active >= self.hub.config.orchestrator.max_parallel {
@@ -141,6 +147,15 @@ impl Orchestrator {
         p.push_str("  If you cannot finish, write {\"status\": \"failed\", \"summary\": \"<why>\"} instead.\n");
         if !verify.is_empty() {
             p.push_str(&format!("- After you report done, the orchestrator runs: {}. Run them yourself first.\n", verify.join(" && ")));
+        }
+        if let Some(git) = &task.git {
+            p.push_str(&format!(
+                "- You work in your own git worktree on branch `{branch}`, made from `{base}`; other agents work on other branches at the same time. \
+                 Commit your work on `{branch}` (MAP commits anything you leave uncommitted). Do not switch branches, push, or touch other worktrees or `{base}`: \
+                 after the checks pass MAP lands the branch on `{base}`.\n",
+                branch = git.branch,
+                base = git.base
+            ));
         }
         if let Some(slug) = &task.project {
             p.push_str(&format!(
@@ -228,6 +243,29 @@ impl Orchestrator {
         let model = self.tier_gate(&task, &provider).await.or(usual);
         record(&self.hub, Kind::PICK_CHOSEN, &task, dec::pick_detail(&self.hub, &task, Some(&provider)).await).await;
         task.attempts += 1;
+        // `branches.mode = worktree`: the task's own branch and worktree, saved before the launch reads it.
+        match crate::worktrees::prepare(&self.hub, &mut task).await {
+            Ok(false) => {}
+            Ok(true) => {
+                let git = task.git.clone().unwrap_or_default();
+                record(&self.hub, Kind::PREP_READY, &task, format!("{} from {} · {}", git.branch, git.base, git.worktree.unwrap_or_default())).await;
+                self.hub.put_task(&mut task).await?;
+            }
+            Err(crate::worktrees::PrepareError::Retry(why)) => {
+                record(&self.hub, Kind::PREP_FAILED, &task, dec::last_line(&why)).await;
+                self.hub.put_task(&mut task).await?;
+                self.retry_or_fail(task, &why).await?;
+                return Ok(false);
+            }
+            Err(crate::worktrees::PrepareError::Fatal(why)) => {
+                record(&self.hub, Kind::PREP_FATAL, &task, &why).await;
+                task.status = TaskStatus::Failed;
+                task.result = Some(why.clone());
+                self.hub.put_task(&mut task).await?;
+                self.hub.event(Level::Error, "task.failed", None, Some(task.id), format!("Failed: {why}")).await;
+                return Ok(false);
+            }
+        }
         let session = format!("{}task-{}-{}", self.hub.config.workspace.session_prefix, task.id, task.attempts);
         let previous_failure = if task.attempts > 1 { task.result.clone() } else { None };
         let prompt = self.build_prompt(&task, &session, previous_failure.as_deref(), &crate::project_settings::verify(&self.hub, &task).await);
@@ -382,25 +420,34 @@ impl Orchestrator {
         });
     }
 
+    /// Runs the task's verify commands in `dir`; the failure (command and output) when one fails.
+    async fn verify(&self, task: &Task, dir: &std::path::Path) -> Result<Option<String>> {
+        let hub = &self.hub;
+        let verify = crate::project_settings::verify(hub, task).await;
+        for (i, command) in verify.iter().enumerate() {
+            let of = format!("{} of {}", i + 1, verify.len());
+            record(hub, Kind::VERIFY_CMD_START, task, format!("`{command}` · {of}")).await;
+            let started = std::time::Instant::now();
+            let (ok, output) = shell(hub, dir, command, Duration::from_secs(30 * 60)).await?;
+            if !ok {
+                record(hub, Kind::VERIFY_FAIL, task, format!("`{command}` failed · {of} · {}", dec::last_line(&output))).await;
+                return Ok(Some(format!("`{command}` failed:\n{output}")));
+            }
+            record(hub, Kind::VERIFY_CMD_PASS, task, format!("`{command}` exit 0 · {of} · {}", dec::secs(started.elapsed()))).await;
+        }
+        record(hub, Kind::VERIFY_PASS, task, if verify.is_empty() { "no verify commands".to_string() } else { format!("all {} exit 0", verify.len()) }).await;
+        Ok(None)
+    }
+
     async fn finish(&self, mut task: Task) -> Result<()> {
         let hub = &self.hub;
         let cfg = &hub.config.orchestrator;
-        let dir = hub.work_dir(task.project.as_deref()).await;
+        let dir = hub.task_dir(&task).await;
 
         if task.status == TaskStatus::Verifying {
-            let verify = crate::project_settings::verify(hub, &task).await;
-            for (i, command) in verify.iter().enumerate() {
-                let of = format!("{} of {}", i + 1, verify.len());
-                record(hub, Kind::VERIFY_CMD_START, &task, format!("`{command}` · {of}")).await;
-                let started = std::time::Instant::now();
-                let (ok, output) = shell(hub, &dir, command, Duration::from_secs(30 * 60)).await?;
-                if !ok {
-                    record(hub, Kind::VERIFY_FAIL, &task, format!("`{command}` failed · {of} · {}", dec::last_line(&output))).await;
-                    return self.retry_or_fail(task, &format!("`{command}` failed:\n{output}")).await;
-                }
-                record(hub, Kind::VERIFY_CMD_PASS, &task, format!("`{command}` exit 0 · {of} · {}", dec::secs(started.elapsed()))).await;
+            if let Some(failure) = self.verify(&task, &dir).await? {
+                return self.retry_or_fail(task, &failure).await;
             }
-            record(hub, Kind::VERIFY_PASS, &task, if verify.is_empty() { "no verify commands".to_string() } else { format!("all {} exit 0", verify.len()) }).await;
             if crate::project_settings::audit_enabled(hub, &task).await {
                 task.status = TaskStatus::Auditing;
                 hub.put_task(&mut task).await?;
@@ -430,6 +477,14 @@ impl Orchestrator {
             };
         }
 
+        if task.status != TaskStatus::Landing {
+            task.status = TaskStatus::Landing;
+            hub.put_task(&mut task).await?;
+        }
+        if !self.land(&mut task, &dir).await? {
+            return Ok(());
+        }
+
         for template in &cfg.post_done {
             let command = template.replace("{id}", &task.id.to_string()).replace("{title}", &quote(&task.title)?);
             let (ok, output) = shell(hub, &dir, &command, Duration::from_secs(10 * 60)).await?;
@@ -446,18 +501,129 @@ impl Orchestrator {
         }
         record(hub, Kind::POST_PASS, &task, if cfg.post_done.is_empty() { "no post_done hooks".to_string() } else { format!("all {} hooks exit 0", cfg.post_done.len()) }).await;
 
-        if let Some(name) = task.session.clone()
+        let closed = if let Some(name) = task.session.clone()
             && hub.store.session(&name).await?.is_some_and(|s| s.state.is_live())
             && hub.close_session(&name, false, "Task done").await? != EndDecision::End
         {
             hub.event(Level::Info, "task.kept", Some(&name), Some(task.id), "Task done; session left open because a person is using it").await;
             record(hub, Kind::END_KEPT, &task, format!("a client is attached or the input line has text · {name} left open")).await;
+            false
         } else {
             record(hub, Kind::END_CLOSED, &task, "no client attached · input line empty · worker session ended").await;
+            true
+        };
+        // The branch landed (or had nothing): its worktree goes, unless a person is still in the session. A pushed
+        // branch stays for its pull request.
+        if closed && let Some(l) = crate::worktrees::Lander::of(hub, &task).await {
+            let pushed = task.git.as_ref().is_some_and(|g| g.pushed);
+            l.remove(!pushed).await;
+            if let Some(git) = task.git.as_mut() {
+                git.worktree = None;
+            }
         }
         task.status = TaskStatus::Done;
         hub.put_task(&mut task).await?;
         hub.event(Level::Success, "task.done", task.session.as_deref(), Some(task.id), format!("Task #{} done: {}", task.id, task.title)).await;
+        Ok(())
+    }
+
+    /// Lands the task's branch (`worktrees.rs`); `Ok(true)` goes on to post_done. A conflict or a failed verify
+    /// after the rebase goes back to the agent; keep or a block parks the task in `review`.
+    async fn land(&self, task: &mut Task, dir: &std::path::Path) -> Result<bool> {
+        use crate::worktrees::{Landed, Lander, land_lock};
+        let hub = &self.hub;
+        let Some(l) = Lander::of(hub, task).await else {
+            let why = if task.git.is_some() { "the task's worktree is gone · nothing to land" } else { "no worktree · the task ran in the project folder" };
+            record(hub, Kind::LAND_SHARED, task, why).await;
+            return Ok(true);
+        };
+        let _one_at_a_time = land_lock(task.project.as_deref().unwrap_or_default()).await;
+        if let Some(sha) = l.commit(task).await? {
+            record(hub, Kind::LAND_COMMITTED, task, format!("{} {}", l.branch, short(&sha))).await;
+        }
+        if l.ahead().await? == 0 {
+            record(hub, Kind::LAND_NOTHING, task, format!("{} has no commits beyond {}", l.branch, l.base)).await;
+            self.note(task, format!("nothing to land: `{}` has no commits beyond `{}`", l.branch, l.base)).await?;
+            return Ok(true);
+        }
+        let landed = match l.mode {
+            LandMode::Keep => Landed::Keep,
+            LandMode::PullRequest => l.push(hub, task).await?,
+            LandMode::Merge => match l.rebase().await? {
+                Err(conflict) => conflict,
+                Ok(rebased) => {
+                    if rebased {
+                        record(hub, Kind::LAND_REBASED, task, format!("{} rebased onto {}", l.branch, l.base)).await;
+                        if let Some(failure) = self.verify(task, dir).await? {
+                            record(hub, Kind::LAND_REVERIFY_FAIL, task, dec::last_line(&failure)).await;
+                            let why = format!("After MAP rebased `{}` onto `{}` (it moved on while you worked), {failure}", l.branch, l.base);
+                            self.retry_or_fail(task.clone(), &why).await?;
+                            return Ok(false);
+                        }
+                    }
+                    l.fast_forward().await?
+                }
+            },
+        };
+        match landed {
+            Landed::Merged(sha) => {
+                record(hub, Kind::LAND_MERGED, task, format!("{} → {} at {}", l.branch, l.base, short(&sha))).await;
+                if let Some(git) = task.git.as_mut() {
+                    git.merged = Some(sha.clone());
+                }
+                self.note(task, format!("merged into `{}` at {}", l.base, short(&sha))).await?;
+                hub.event(Level::Success, "task.merged", task.session.as_deref(), Some(task.id), format!("Task #{} merged into {}", task.id, l.base)).await;
+                Ok(true)
+            }
+            Landed::Pushed { pr_url, note } => {
+                record(hub, Kind::LAND_PUSHED, task, &note).await;
+                if let Some(git) = task.git.as_mut() {
+                    git.pushed = true;
+                    git.pr_url = pr_url;
+                }
+                self.note(task, note.clone()).await?;
+                hub.event(Level::Success, "task.pushed", task.session.as_deref(), Some(task.id), note).await;
+                Ok(true)
+            }
+            Landed::Conflict(why) => {
+                record(hub, Kind::LAND_CONFLICT, task, dec::last_line(&why)).await;
+                self.retry_or_fail(task.clone(), &why).await?;
+                Ok(false)
+            }
+            Landed::Keep => {
+                self.review(task, Kind::LAND_KEEP, format!("land = keep: `{}` waits for you to merge it into `{}`", l.branch, l.base)).await?;
+                Ok(false)
+            }
+            Landed::Blocked(why) => {
+                self.review(task, Kind::LAND_BLOCKED, why).await?;
+                Ok(false)
+            }
+        }
+    }
+
+    async fn note(&self, task: &mut Task, note: String) -> Result<()> {
+        if let Some(git) = task.git.as_mut() {
+            git.note = Some(note);
+        }
+        self.hub.put_task(task).await
+    }
+
+    /// Parks the task in `review` for the owner, ending its worker session unless a person is using it.
+    async fn review(&self, task: &mut Task, kind: Kind, why: String) -> Result<()> {
+        let hub = &self.hub;
+        record(hub, kind, task, &why).await;
+        if let Some(name) = task.session.clone()
+            && hub.store.session(&name).await?.is_some_and(|s| s.state.is_live())
+        {
+            hub.close_session(&name, false, "Task waits for review").await?;
+        }
+        task.status = TaskStatus::Review;
+        if let Some(git) = task.git.as_mut() {
+            git.note = Some(why.clone());
+            git.land = None;
+        }
+        hub.put_task(task).await?;
+        hub.event(Level::Warning, "task.review", task.session.as_deref(), Some(task.id), format!("Task #{} waits for review: {why}", task.id)).await;
         Ok(())
     }
 
@@ -466,8 +632,16 @@ impl Orchestrator {
         let prompt = format!(
             "You are a strict code auditor. Task #{id} \"{title}\" was just completed in this repository and passed its verification commands.\n\
              Task description:\n{body}\n\nWorker summary:\n{summary}\n\n\
-             Inspect the working tree and recent changes (git status, git diff, git log -5). Check that the change does what the task asks, \
+             {changes} Check that the change does what the task asks, \
              has tests, and leaves nothing broken or half-done.\nAnswer with exactly one final line:\nVERDICT: PASS\nor\nVERDICT: FAIL: <reason>",
+            changes = match &task.git {
+                Some(g) => format!(
+                    "The work is on branch `{b}`, made from `{base}`: inspect `git log {base}..HEAD`, `git diff $(git merge-base {base} HEAD)` and git status (uncommitted changes count too).",
+                    b = g.branch,
+                    base = g.base
+                ),
+                None => "Inspect the working tree and recent changes (git status, git diff, git log -5).".to_string(),
+            },
             id = task.id,
             title = task.title,
             body = task.prompt.trim(),
@@ -489,7 +663,7 @@ impl Orchestrator {
                 .map(|a| a.replace("{binary}", &spec.binary).replace("{model}", &spec.default_model).replace("{session}", "audit").replace("{prompt}", &prompt))
                 .collect();
             let mut cmd = Command::new(&argv[0]);
-            cmd.args(&argv[1..]).current_dir(hub.work_dir(task.project.as_deref()).await).envs(hub.provider_env(provider)).envs(hub.command_env());
+            cmd.args(&argv[1..]).current_dir(hub.task_dir(task).await).envs(hub.provider_env(provider)).envs(hub.command_env());
             hub.event(Level::Info, "task.audit", None, Some(task.id), format!("Auditing with {provider}")).await;
             record(hub, Kind::AUDIT_ASK, task, format!("{provider} · reviewing git status, git diff, git log -5")).await;
             let (ok, output) = run_captured(cmd, Duration::from_secs(hub.config.orchestrator.audit.timeout_secs)).await?;
@@ -535,6 +709,75 @@ impl Orchestrator {
         task.status = TaskStatus::Cancelled;
         hub.put_task(&mut task).await?;
         hub.event(Level::Warning, "task.cancelled", task.session.as_deref(), Some(id), format!("Task #{id} cancelled")).await;
+        Ok(task)
+    }
+
+    async fn in_review(hub: &Hub, id: i64) -> Result<Task> {
+        let task = hub.store.task(id).await?.context("unknown task")?;
+        if task.status != TaskStatus::Review {
+            bail!("task #{id} is {}, not waiting for review", task.status.as_str());
+        }
+        Ok(task)
+    }
+
+    /// The owner lands a task from `review` (`mode` instead of the project's `branches.land`); it runs in the
+    /// background like the orchestrator's own landing, paused orchestrator or not.
+    pub async fn land_now(hub: &Arc<Hub>, id: i64, mode: LandMode) -> Result<Task> {
+        let mut task = Self::in_review(hub, id).await?;
+        let Some(git) = task.git.as_mut() else { bail!("task #{id} has no branch to land") };
+        if git.worktree.as_deref().is_none_or(|w| !std::path::Path::new(w).join(".git").exists()) {
+            bail!("task #{id}'s worktree is gone; send it back to an agent instead");
+        }
+        git.land = Some(mode);
+        let word = if mode == LandMode::PullRequest { "push and open a pull request" } else { "merge" };
+        let detail = format!("owner: {word} {} into {}", git.branch, git.base);
+        record(hub, Kind::REVIEW_LAND, &task, detail).await;
+        task.status = TaskStatus::Landing;
+        hub.put_task(&mut task).await?;
+        Orchestrator::new(Arc::clone(hub)).spawn_finish(task.clone());
+        Ok(task)
+    }
+
+    /// Back to an agent from `review`, on the same branch, with the owner's note in its prompt.
+    pub async fn send_back(hub: &Hub, id: i64, note: Option<&str>) -> Result<Task> {
+        let mut task = Self::in_review(hub, id).await?;
+        let note = note.map(str::trim).filter(|n| !n.is_empty()).unwrap_or("Look at the change again and improve it.");
+        record(hub, Kind::REVIEW_SEND_BACK, &task, dec::last_line(note)).await;
+        task.status = TaskStatus::Pending;
+        // The next attempt's prompt carries `result` as what to fix first (it does from the second attempt on).
+        task.attempts = task.attempts.max(1);
+        task.result = Some(format!("The owner reviewed your branch and sent it back:\n{note}"));
+        if let Some(git) = task.git.as_mut() {
+            git.land = None;
+        }
+        hub.put_task(&mut task).await?;
+        hub.event(Level::Info, "task.sent_back", None, Some(id), format!("Task #{id} sent back to an agent")).await;
+        Ok(task)
+    }
+
+    /// Removes the task's worktree and its branch (unless pushed); a task in review or failed is cancelled.
+    pub async fn discard(hub: &Hub, id: i64) -> Result<Task> {
+        let mut task = hub.store.task(id).await?.context("unknown task")?;
+        if !matches!(task.status, TaskStatus::Review | TaskStatus::Done | TaskStatus::Failed | TaskStatus::Cancelled) {
+            bail!("task #{id} is {}: cancel it before discarding its branch", task.status.as_str());
+        }
+        if task.git.is_none() {
+            bail!("task #{id} has no branch or worktree");
+        }
+        crate::worktrees::discard(hub, &mut task).await;
+        if matches!(task.status, TaskStatus::Review | TaskStatus::Failed) {
+            if let Some(name) = task.session.clone()
+                && hub.store.session(&name).await?.is_some_and(|s| s.state.is_live())
+            {
+                hub.close_session(&name, true, "Task discarded").await?;
+            }
+            task.status = TaskStatus::Cancelled;
+        }
+        if let Some(git) = task.git.as_mut() {
+            git.note = Some(if git.pushed { "worktree removed; the pushed branch stays on the remote".into() } else { "worktree and branch removed".into() });
+        }
+        hub.put_task(&mut task).await?;
+        hub.event(Level::Warning, "task.discarded", None, Some(id), format!("Task #{id}: worktree removed")).await;
         Ok(task)
     }
 }
@@ -684,6 +927,192 @@ mod tests {
         assert!(prompt.contains("$MAP_DECIDE_URL"), "{prompt}");
     }
 
+    // ---- a branch and worktree per task (worktrees.rs)
+
+    fn git(dir: &Path, args: &[&str]) -> String {
+        let out = std::process::Command::new("git").args(["-c", "user.name=T", "-c", "user.email=t@t"]).args(args).current_dir(dir).output().unwrap();
+        assert!(out.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&out.stderr));
+        String::from_utf8_lossy(&out.stdout).trim().to_string()
+    }
+
+    /// A project on a git folder (`main`, one commit of README) with `branches` set; two workers at once, no audit.
+    async fn worktree_project(land: &str, max_attempts: u32) -> (Arc<Hub>, Arc<FakeTerminal>, tempfile::TempDir, std::path::PathBuf, String) {
+        let extra = format!("max_parallel = 2\nmax_attempts = {max_attempts}\nverify = [\"test -f README\"]\n[orchestrator.audit]\nenabled = false");
+        let (hub, term, dir) = setup(&extra).await;
+        let folder = dir.path().join("app");
+        std::fs::create_dir_all(&folder).unwrap();
+        git(&folder, &["init", "-q", "-b", "main"]);
+        std::fs::write(folder.join("README"), "one\ntwo\nthree\n").unwrap();
+        git(&folder, &["add", "."]);
+        git(&folder, &["commit", "-q", "-m", "first"]);
+        let land = serde_json::from_value(serde_json::json!(land)).unwrap();
+        let settings = crate::model::ProjectSettings {
+            source: crate::model::ProjectSource { kind: crate::model::SourceKind::Local, location: Some(folder.display().to_string()), ..Default::default() },
+            branches: crate::model::ProjectBranches { mode: crate::model::BranchMode::Worktree, land, ..Default::default() },
+            ..Default::default()
+        };
+        let new = crate::projects::NewProject { name: "App".into(), slug: None, description: String::new(), fallback: Some("none".into()), model: None };
+        let slug = crate::projects::create_with(&hub, new, settings).await.unwrap().0.slug;
+        (hub, term, dir, folder, slug)
+    }
+
+    /// The task's worktree, after the worker has changed `file` there and reported done.
+    async fn work(hub: &Hub, id: i64, file: &str, text: &str) -> std::path::PathBuf {
+        let t = hub.store.task(id).await.unwrap().unwrap();
+        let wt = std::path::PathBuf::from(t.git.as_ref().unwrap().worktree.clone().unwrap());
+        std::fs::write(wt.join(file), text).unwrap();
+        std::fs::write(hub.result_file(t.session.as_ref().unwrap()), format!(r#"{{"status":"done","summary":"changed {file}"}}"#)).unwrap();
+        wt
+    }
+
+    async fn settle_all(orch: &mut Orchestrator) {
+        for _ in 0..3 {
+            settle(orch).await;
+        }
+    }
+
+    #[tokio::test]
+    async fn two_tasks_run_side_by_side_on_their_own_branches_and_both_land() {
+        let (hub, term, _dir, folder, slug) = worktree_project("merge", 2).await;
+        let a = hub.store.create_task(NewTask { project: Some(slug.clone()), ..new_task("a", vec![]) }).await.unwrap();
+        let b = hub.store.create_task(NewTask { project: Some(slug.clone()), ..new_task("b", vec![]) }).await.unwrap();
+        let mut orch = Orchestrator::new(hub.clone());
+        orch.tick().await.unwrap();
+        let (ta, tb) = (hub.store.task(a.id).await.unwrap().unwrap(), hub.store.task(b.id).await.unwrap().unwrap());
+        assert_eq!((ta.status, tb.status), (TaskStatus::Running, TaskStatus::Running));
+        let (ga, gb) = (ta.git.clone().unwrap(), tb.git.clone().unwrap());
+        assert_eq!((ga.branch.as_str(), ga.base.as_str()), (format!("map/task-{}", a.id).as_str(), "main"));
+        assert_ne!(ga.worktree, gb.worktree);
+        // The worker starts in its worktree and is told about its branch.
+        let cwd = term.sessions.lock().unwrap()[ta.session.as_ref().unwrap()].cwd.clone();
+        assert_eq!(cwd.display().to_string(), ga.worktree.clone().unwrap());
+        let prompt = std::fs::read_to_string(hub.run_dir(ta.session.as_ref().unwrap()).join("prompt.md")).unwrap();
+        assert!(prompt.contains(&format!("branch `{}`", ga.branch)), "{prompt}");
+
+        // The workers leave their changes uncommitted; MAP commits and lands both, the second after a rebase.
+        work(&hub, a.id, "a.txt", "from a\n").await;
+        work(&hub, b.id, "b.txt", "from b\n").await;
+        settle_all(&mut orch).await;
+        for id in [a.id, b.id] {
+            let t = hub.store.task(id).await.unwrap().unwrap();
+            assert_eq!(t.status, TaskStatus::Done, "{:?} {:?}", t.result, t.git);
+            let g = t.git.unwrap();
+            assert!(g.merged.is_some() && g.worktree.is_none(), "{g:?}");
+            assert!(!std::path::Path::new(&crate::worktrees::worktree_path(&hub, &slug, id)).exists());
+        }
+        // The project folder has main checked out, now with both changes and the owner's history.
+        assert_eq!(std::fs::read_to_string(folder.join("a.txt")).unwrap(), "from a\n");
+        assert_eq!(std::fs::read_to_string(folder.join("b.txt")).unwrap(), "from b\n");
+        assert_eq!(git(&folder, &["rev-list", "--count", "main"]), "3");
+        assert_eq!(git(&folder, &["branch", "--list", "map/*"]), "", "landed branches are deleted");
+        assert!(git(&folder, &["log", "-1", "--format=%B"]).contains("MAP-Task:"));
+        let kinds = decisions_of(&hub, b.id).await;
+        assert!(kinds.iter().any(|k| k == "land.merged"), "{kinds:?}");
+    }
+
+    #[tokio::test]
+    async fn a_conflict_goes_back_to_the_agent_on_the_same_branch() {
+        let (hub, _term, _dir, folder, slug) = worktree_project("merge", 3).await;
+        let a = hub.store.create_task(NewTask { project: Some(slug.clone()), ..new_task("a", vec![]) }).await.unwrap();
+        let b = hub.store.create_task(NewTask { project: Some(slug.clone()), ..new_task("b", vec![]) }).await.unwrap();
+        let mut orch = Orchestrator::new(hub.clone());
+        orch.tick().await.unwrap();
+        work(&hub, a.id, "README", "one\nTWO from a\nthree\n").await;
+        settle_all(&mut orch).await;
+        assert_eq!(hub.store.task(a.id).await.unwrap().unwrap().status, TaskStatus::Done);
+        let wt = work(&hub, b.id, "README", "one\nTWO from b\nthree\n").await;
+        settle(&mut orch).await;
+        let tb = hub.store.task(b.id).await.unwrap().unwrap();
+        assert_eq!(tb.status, TaskStatus::Pending, "{:?}", tb.result);
+        assert!(tb.result.as_deref().unwrap().contains("conflicts (README)"), "{:?}", tb.result);
+        assert!(wt.join(".git").exists(), "the worktree stays for the next attempt");
+        assert!(std::fs::read_to_string(folder.join("README")).unwrap().contains("from a"));
+
+        // The next attempt runs in the same worktree, with the conflict in its prompt.
+        orch.tick().await.unwrap();
+        let tb = hub.store.task(b.id).await.unwrap().unwrap();
+        assert_eq!((tb.status, tb.git.as_ref().unwrap().worktree.clone()), (TaskStatus::Running, Some(wt.display().to_string())));
+        let prompt = std::fs::read_to_string(hub.run_dir(tb.session.as_ref().unwrap()).join("prompt.md")).unwrap();
+        assert!(prompt.contains("git rebase main"), "{prompt}");
+    }
+
+    #[tokio::test]
+    async fn keep_waits_for_the_owner_who_merges_or_discards() {
+        let (hub, _term, _dir, folder, slug) = worktree_project("keep", 2).await;
+        let a = hub.store.create_task(NewTask { project: Some(slug.clone()), ..new_task("a", vec![]) }).await.unwrap();
+        let b = hub.store.create_task(NewTask { project: Some(slug.clone()), ..new_task("b", vec![]) }).await.unwrap();
+        let mut orch = Orchestrator::new(hub.clone());
+        orch.tick().await.unwrap();
+        work(&hub, a.id, "a.txt", "a\n").await;
+        let wt_b = work(&hub, b.id, "b.txt", "b\n").await;
+        settle_all(&mut orch).await;
+        for id in [a.id, b.id] {
+            assert_eq!(hub.store.task(id).await.unwrap().unwrap().status, TaskStatus::Review);
+        }
+        assert!(!folder.join("a.txt").exists(), "nothing lands without the owner");
+
+        Orchestrator::land_now(&hub, a.id, LandMode::Merge).await.unwrap();
+        for _ in 0..100 {
+            if hub.finishing.lock().unwrap().is_empty() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        assert_eq!(hub.store.task(a.id).await.unwrap().unwrap().status, TaskStatus::Done);
+        assert!(folder.join("a.txt").exists());
+
+        let tb = Orchestrator::discard(&hub, b.id).await.unwrap();
+        assert_eq!(tb.status, TaskStatus::Cancelled);
+        assert!(!wt_b.exists());
+        assert_eq!(git(&folder, &["branch", "--list", &format!("map/task-{}", b.id)]), "");
+        assert!(Orchestrator::land_now(&hub, b.id, LandMode::Merge).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn changes_in_the_project_folder_park_the_task_in_review() {
+        let (hub, _term, _dir, folder, slug) = worktree_project("merge", 2).await;
+        let a = hub.store.create_task(NewTask { project: Some(slug.clone()), ..new_task("a", vec![]) }).await.unwrap();
+        let mut orch = Orchestrator::new(hub.clone());
+        orch.tick().await.unwrap();
+        // The owner edits README in the project folder while the agent changes it on its branch.
+        std::fs::write(folder.join("README"), "one\nmine\nthree\n").unwrap();
+        work(&hub, a.id, "README", "one\nagent\nthree\n").await;
+        settle_all(&mut orch).await;
+        let t = hub.store.task(a.id).await.unwrap().unwrap();
+        assert_eq!(t.status, TaskStatus::Review, "{:?}", t.git);
+        assert!(t.git.as_ref().unwrap().note.as_deref().unwrap().contains("Commit or stash"), "{:?}", t.git);
+        assert_eq!(std::fs::read_to_string(folder.join("README")).unwrap(), "one\nmine\nthree\n", "the owner's edit is untouched");
+
+        // Sent back, it runs again on the same branch with the owner's note.
+        let t = Orchestrator::send_back(&hub, a.id, Some("keep my wording")).await.unwrap();
+        assert_eq!(t.status, TaskStatus::Pending);
+        orch.tick().await.unwrap();
+        let t = hub.store.task(a.id).await.unwrap().unwrap();
+        let prompt = std::fs::read_to_string(hub.run_dir(t.session.as_ref().unwrap()).join("prompt.md")).unwrap();
+        assert!(prompt.contains("keep my wording"), "{prompt}");
+    }
+
+    #[tokio::test]
+    async fn a_folder_that_is_not_a_repo_fails_the_task_with_a_reason() {
+        let (hub, _term, dir) = setup("").await;
+        let folder = dir.path().join("plain");
+        std::fs::create_dir_all(&folder).unwrap();
+        let settings = crate::model::ProjectSettings {
+            source: crate::model::ProjectSource { kind: crate::model::SourceKind::Local, location: Some(folder.display().to_string()), ..Default::default() },
+            branches: crate::model::ProjectBranches { mode: crate::model::BranchMode::Worktree, ..Default::default() },
+            ..Default::default()
+        };
+        let new = crate::projects::NewProject { name: "Plain".into(), slug: None, description: String::new(), fallback: Some("none".into()), model: None };
+        let slug = crate::projects::create_with(&hub, new, settings).await.unwrap().0.slug;
+        // Creating a local project may have made it a repo; make sure it has no commit.
+        let _ = std::fs::remove_dir_all(folder.join(".git"));
+        let t = hub.store.create_task(NewTask { project: Some(slug), ..new_task("a", vec![]) }).await.unwrap();
+        Orchestrator::new(hub.clone()).tick().await.unwrap();
+        let t = hub.store.task(t.id).await.unwrap().unwrap();
+        assert_eq!(t.status, TaskStatus::Failed);
+        assert!(t.result.as_deref().unwrap().contains("not a git repo with a commit"), "{:?}", t.result);
+    }
+
     // ---- orchestrator decisions
 
     /// The task's decision kinds, oldest first, without the `decision.` prefix.
@@ -717,6 +1146,7 @@ mod tests {
                 "verify.cmd_pass",
                 "verify.pass",
                 "audit.off",
+                "land.shared",
                 "post.pass",
                 "end.closed"
             ]
@@ -841,7 +1271,7 @@ mod tests {
         let (t, kinds) = run_task(&hub, project_task(&slug)).await;
         assert_eq!(t.status, TaskStatus::Done, "{:?}", t.result);
         assert_eq!(&kinds[..3], ["ready.go", "pick.chosen", "launch.started"]);
-        assert_eq!(after_verify(&kinds), ["audit.ask", "audit.pass", "post.pass", "end.closed"]);
+        assert_eq!(after_verify(&kinds), ["audit.ask", "audit.pass", "land.shared", "post.pass", "end.closed"]);
         assert_eq!(hub.store.session(t.session.as_deref().unwrap()).await.unwrap().unwrap().model, "sonnet");
         assert!(reflex.bodies.lock().unwrap().is_empty(), "Reflex is never asked");
         assert!(hub.store.decisions(&slug, 10).await.unwrap().is_empty());
@@ -853,7 +1283,7 @@ mod tests {
         let reflex = reflex_answering(&hub, &slug, vec![no_audit(0.9)]).await;
         let (t, kinds) = run_task(&hub, project_task(&slug)).await;
         assert_eq!(t.status, TaskStatus::Done, "{:?}", t.result);
-        assert_eq!(after_verify(&kinds), ["audit.skipped_reflex", "post.pass", "end.closed"]);
+        assert_eq!(after_verify(&kinds), ["audit.skipped_reflex", "land.shared", "post.pass", "end.closed"]);
         let trace = hub.store.decision_events(t.id, 50).await.unwrap();
         let skipped = trace.iter().find(|e| e.kind == "decision.audit.skipped_reflex").unwrap();
         assert!(skipped.message.starts_with("needs_audit: no · confidence 9.0e-1 ≥ 5.0e-1 · decision #"), "{}", skipped.message);
@@ -869,7 +1299,7 @@ mod tests {
         assert!(rows[0].state.contains("Worker summary"));
         let counts = crate::decisions::counts(&hub, Utc::now() - chrono::Duration::hours(1), None).await.unwrap();
         use crate::model::DecisionNode as N;
-        assert!(counts.edges.iter().any(|e| e.from == N::Audit && e.to == N::Post && e.count == 1));
+        assert!(counts.edges.iter().any(|e| e.from == N::Audit && e.to == N::Land && e.count == 1));
     }
 
     #[tokio::test]
@@ -894,7 +1324,7 @@ mod tests {
             }
             let (t, kinds) = run_task(&hub, project_task(&slug)).await;
             assert_eq!(t.status, TaskStatus::Done, "case {i}: {:?}", t.result);
-            assert_eq!(after_verify(&kinds), [kind, "audit.ask", "audit.pass", "post.pass", "end.closed"], "case {i}");
+            assert_eq!(after_verify(&kinds), [kind, "audit.ask", "audit.pass", "land.shared", "post.pass", "end.closed"], "case {i}");
             let message = hub.store.decision_events(t.id, 50).await.unwrap().into_iter().find(|e| e.kind == format!("decision.{kind}")).unwrap().message;
             let expect = ["needs_audit: yes · confidence 9.0e-1", "needs_audit: Reflex abstained", "below the threshold", "Reflex is not reachable", "Reflex is error, not running"][i];
             assert!(message.contains(expect), "case {i}: {message}");

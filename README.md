@@ -649,17 +649,48 @@ one of the task's last two is not logged again, so a task parked at a branch doe
 | `decision.watch.trust` | stays (progress) | `check_running`: the worker is at its CLI's folder-trust question; it waits for the owner (no retry, no timeout) |
 | `decision.verify.cmd_start` / `.cmd_pass` | stays (progress) | `finish`: each `verify` command, `` `cmd` · 2 of 4 `` |
 | `decision.verify.pass` / `.fail` | verify → audit / retry | `finish` |
-| `decision.audit.off` / `.pass` / `.skipped` | audit → post | `finish` (`audit.enabled`, verdict, no auditor and not required) |
-| `decision.audit.skipped_reflex` | audit → post | `finish` (`audit_gate`): Reflex is sure the change needs no audit |
+| `decision.audit.off` / `.pass` / `.skipped` | audit → land | `finish` (`audit.enabled`, verdict, no auditor and not required) |
+| `decision.audit.skipped_reflex` | audit → land | `finish` (`audit_gate`): Reflex is sure the change needs no audit |
 | `decision.audit.reflex_said_audit` / `.reflex_abstained` | stays (progress) | `audit_gate`: Reflex said yes, or was unsure or not running; the audit runs |
 | `decision.audit.fail` / `.no_auditor` | audit → retry | `finish` |
 | `decision.audit.ask` / `.unavailable` | stays (progress) | `audit`: each auditor of `audit.chain` |
+| `decision.launch.worktree` / `.worktree_failed` / `.worktree_fatal` | stays / retry / failed | `start` (`worktrees::prepare`): the task's branch and worktree, a failed setup command, a folder that cannot have worktrees |
+| `decision.land.shared` / `.nothing` / `.merged` / `.pushed` | land → post | `land`: no worktree, no commits beyond the base, base fast-forwarded, branch pushed (and a pull request) |
+| `decision.land.committed` / `.rebased` | stays (progress) | `land`: MAP committed what the worker left; the base moved on, so the branch was rebased and is verified again |
+| `decision.land.conflict` / `.reverify_fail` | land → retry | `land`: the rebase hit conflicts, or verify failed after it; the agent gets it back on the same branch |
+| `decision.land.keep` / `.blocked` | land → review | `land`: `land = keep`, or a person must act (changes in the project folder, no remote, a failed push) |
+| `decision.review.land` / `.send_back` | review → land / ready | the owner's Merge or Open pull request, or Send back with a note |
 | `decision.post.cmd_pass` | stays (progress) | `finish`: each `post_done` hook |
 | `decision.post.pass` / `.fail` | post → end / failed | `finish` |
 | `decision.end.closed` / `.kept` | end → done | `finish` (`detect::end_decision` via `close_session`) |
 | `decision.retry.again` / `.failed` / `.kept` | retry → ready / failed / watch | `retry_or_fail`, and `start` after a launch error |
 
 The older `task.*` events (`task.started`, `task.retry`, `task.done`…) are still sent.
+
+## Branches and worktrees
+
+A project's **Branches** settings choose where its tasks run. **Shared folder** (the default) runs every task in the
+project folder on whatever is checked out: safe one task at a time. **Branch + worktree per task** gives task N the
+branch `map/task-N`, made from the base branch (`base`, or the branch checked out), in its own git worktree under
+`<data_dir>/projects/<slug>/worktrees/task-N`. The worker, verify, audit and `post_done` all run there, so up to
+`[orchestrator] max_parallel` tasks of one project work at once without touching each other's files.
+
+- **setup** commands run in each new worktree before the agent starts (`bun install`); **copy** lists untracked files
+  copied in from the project folder (`.env`), never committed.
+- After the audit MAP commits what the worker left uncommitted (`Task #N: <title>`, trailer `MAP-Task: N`), then
+  lands the branch by **land**: `merge` rebases onto the base (verifying again if the base moved on) and
+  fast-forwards it, one landing at a time per project (where the base is checked out, as a `merge --ff-only` there,
+  so the owner's own uncommitted edits are never overwritten: a clash parks the task in `review`); a rebase conflict
+  goes back to the agent on the same branch. `pull_request` pushes the branch (`--force-with-lease`, it is MAP's) and
+  opens a pull request with `gh` or a merge request with `glab`. `keep` leaves it in `review`.
+- A task in `review` waits for the owner: Merge, Open pull request, Send back (with a note for the agent) or Discard.
+  Retries and send-backs reuse the worktree. Landed worktrees are removed, and merged branches deleted; a pushed
+  branch stays for its pull request.
+- Choosing the mode shows what it costs the machine (`POST /api/projects/{slug}/worktree-estimate`): the checkout and
+  the ignored build folders each worktree repeats, the agent CLIs' memory (measured from running ones), a rule of
+  thumb for the verify build, CPU at peak, how many tasks at once fit and what limits it, how many rounds the open
+  tasks take one at a time and N at a time, and the drawbacks: conflicts and reruns, plan limits reached N× sooner,
+  builds competing for the CPU, cold worktrees, shared ports and services.
 
 ## Reflex gates
 
@@ -722,7 +753,6 @@ All routes are under `/api`. When `server.api_token` is set, send `Authorization
 | POST | `/sessions/{name}/key` | One allow-listed key (`C-c`, `Escape`, `Enter`, `Up`, `Down`, `Tab`, `BTab`, `y`, `n`) |
 | POST | `/sessions/{name}/trust` | `{}`: answer the CLI's folder-trust question (409 unless it is on screen and nobody is attached or typing): records the folder, moves the selection to the trust option, presses Enter; returns `folder`, `recorded`, `keys`, `answered` |
 | GET/POST | `/tasks` | List, or create (`title`, `prompt`, `depends_on`, `provider`, `model`) |
-| PATCH | `/tasks/{id}` | `{"action": "retry"}` or `{"action": "cancel"}` |
 | DELETE | `/tasks/{id}` | Delete a pending or finished task |
 | GET/POST | `/orchestrator` | Status, or `{"running": true}` |
 | GET | `/pipeline` | `provider_order`, `verify`, audit, `post_done` and retry settings from `[orchestrator]` |
@@ -745,6 +775,8 @@ All routes are under `/api`. When `server.api_token` is set, send `Authorization
 | PUT | `/git/identity` | `{"name", "email"}` (both empty: none) |
 | GET | `/projects/{slug}/git` | The folder's `is_repo`, branch, upstream, origin, ahead/behind, dirty count, last fetch and commit, `busy` |
 | POST | `/projects/{slug}/git/fetch`, `…/pull`, `…/push` | `{}`: run it; returns `ok`, commands, output, new status (409 with the reason when refused) |
+| POST | `/projects/{slug}/worktree-estimate` | `{"parallel"?, "copy"?, "setup"?}`: what N tasks in worktrees would cost this machine (`WorktreeEstimate`) |
+| PATCH | `/tasks/{id}` | `{"action": "retry" \| "cancel" \| "merge" \| "pull_request" \| "send_back" \| "discard", "note"?}`; merge / pull_request / send_back from `review` only (409 otherwise) |
 | POST | `/projects/{slug}/git/remote` | `{"url"}`: set or replace `origin` (`git init -b main` first when not a repo) |
 | GET/POST | `/providers/{name}/login` | Sign-in state (parsed URL, one-time code, credential check), or start the helper login session |
 | GET | `/projects/{slug}/repos/corpus` | Files and recent commits |

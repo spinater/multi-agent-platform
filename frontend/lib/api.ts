@@ -43,6 +43,7 @@ import type { SkillsOverview } from "./generated/SkillsOverview";
 import type { Task } from "./generated/Task";
 import type { TemplateInfo } from "./generated/TemplateInfo";
 import type { TrustAnswer } from "./generated/TrustAnswer";
+import type { WorktreeEstimate } from "./generated/WorktreeEstimate";
 // Reflex screen.
 import type { ArchiveResult } from "./generated/ArchiveResult";
 import type { DecisionFeedback } from "./generated/DecisionFeedback";
@@ -116,7 +117,8 @@ export const api = {
   trustSession: (name: string) => request<TrustAnswer>("POST", `/sessions/${encodeURIComponent(name)}/trust`, {}),
   createTask: (body: { title: string; prompt: string; depends_on: number[]; provider?: string; model?: string; project?: string }) =>
     request<Task>("POST", "/tasks", body),
-  taskAction: (id: number, action: "retry" | "cancel") => request<Task>("PATCH", `/tasks/${id}`, { action }),
+  /** `note` (send_back only) goes into the agent's next prompt. 409 with the reason when the task's status refuses it. */
+  taskAction: (id: number, action: TaskAction, note?: string) => request<Task>("PATCH", `/tasks/${id}`, note ? { action, note } : { action }),
   deleteTask: (id: number) => request("DELETE", `/tasks/${id}`),
   setOrchestrator: (running: boolean) => request("POST", "/orchestrator", { running }),
   /** The orchestrator's verify / audit / post_done settings (command centre). */
@@ -161,6 +163,9 @@ export const api = {
   // ---- project settings and provider sign-in
   projectDefaults: () => request<ProjectDefaults>("GET", "/projects/defaults"),
   /** Whether each installed CLI trusts the project's folder; `trustProject` marks it (as creating the project does). */
+  /** What running `parallel` tasks side by side in worktrees would cost; `copy`/`setup` are the form's unsaved lists. */
+  worktreeEstimate: (slug: string, body: { parallel?: number; copy?: string[]; setup?: string[] }) =>
+    request<WorktreeEstimate>("POST", `/projects/${slug}/worktree-estimate`, body),
   projectTrust: (slug: string) => request<FolderTrust>("GET", `/projects/${slug}/trust`),
   trustProject: (slug: string) => request<FolderTrusted>("POST", `/projects/${slug}/trust`, {}),
   inspectSource: (body: { kind: SourceKind; location: string; branch?: string }) => request<SourceInspection>("POST", "/projects/inspect", body),
@@ -197,6 +202,10 @@ export const api = {
     request<InitStarted>("POST", `/projects/${slug}/init`, body),
 };
 
+/** `merge`, `pull_request`, `send_back` act on a task in `review`; `discard` removes its worktree and (unless merged
+ * or pushed) its branch. */
+export type TaskAction = "retry" | "cancel" | "merge" | "pull_request" | "send_back" | "discard";
+
 /** The platform hosts one repo per project: the Reflex corpus. The code stays in the project's own folder. */
 export type RepoName = "corpus";
 /** `reflex_gated`: Reflex at or above the threshold only, never the fallback (what the orchestrator's Reflex gates use). */
@@ -208,7 +217,7 @@ export type ProjectUpdate = {
   fallback?: string;
   model?: string | null;
   questions?: Question[];
-  /** Providers, verify, audit, paused and the Reflex gates; the source is kept. */
+  /** Providers, verify, audit, paused, the Reflex gates and branches; the source is kept. */
   settings?: ProjectSettings;
   paused?: boolean;
 };

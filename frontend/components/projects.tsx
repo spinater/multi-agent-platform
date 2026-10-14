@@ -11,6 +11,7 @@ import type { ProviderInfo } from "@/lib/generated/ProviderInfo";
 import type { RepoListing } from "@/lib/generated/RepoListing";
 
 import { useApp } from "./app-context";
+import { BranchesEditor } from "./branches";
 import { ProjectGit } from "./git-access";
 import {
   Btn,
@@ -578,6 +579,16 @@ function Settings({ info }: { info: ProjectInfo }) {
           <Box title="Providers" note="tried top to bottom">
             <ProvidersEditor rows={form.providers} onChange={(rows) => patch({ providers: rows })} providers={providers} onSignIn={openAuth} />
             <Check on={form.paused} onClick={() => patch({ paused: !form.paused })} label="Paused" sub="the orchestrator starts none of this project's pending tasks" />
+          </Box>
+        )}
+        {form && (
+          <Box title="Branches" note={form.branches.mode === "worktree" ? "a branch + worktree per task" : "shared folder"}>
+            <BranchesEditor value={form.branches} onChange={(branches) => patch({ branches })} slug={p.slug} defaults={defaults} />
+            <div className="flex items-center gap-2">
+              <Btn tone="primary" onClick={saveSettings} disabled={!edited}>
+                Save orchestrator settings
+              </Btn>
+            </div>
           </Box>
         )}
         {form && (

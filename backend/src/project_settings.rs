@@ -156,6 +156,13 @@ pub fn validate(hub: &Hub, s: &ProjectSettings) -> Result<()> {
     {
         bail!("verify commands cannot be empty");
     }
+    validate_branch(s.branches.base.as_deref())?;
+    for c in &s.branches.copy {
+        crate::worktrees::validate_copy(c)?;
+    }
+    if s.branches.mode == crate::model::BranchMode::Worktree && s.source.kind == SourceKind::Git {
+        bail!("a legacy git project cannot use worktrees; move it to a folder first");
+    }
     if let Some(p) = s.audit.as_ref().and_then(|a| a.provider.as_deref())
         && hub.spec(p)?.headless.is_empty()
     {
@@ -178,6 +185,10 @@ pub fn normalize(mut s: ProjectSettings) -> ProjectSettings {
     }
     if let Some(a) = &mut s.audit {
         a.provider = blank(a.provider.take());
+    }
+    s.branches.base = blank(s.branches.base.take());
+    for list in [&mut s.branches.setup, &mut s.branches.copy] {
+        *list = list.iter().map(|c| c.trim().to_string()).filter(|c| !c.is_empty()).collect();
     }
     s
 }

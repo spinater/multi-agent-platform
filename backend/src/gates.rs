@@ -82,8 +82,16 @@ pub fn task_state(task: &Task) -> String {
 }
 
 /// The uncommitted changes in `dir`: `git diff --stat HEAD`, else `git status --short` (no commit yet, untracked files).
-async fn changes(hub: &Hub, dir: &Path) -> String {
+async fn changes(hub: &Hub, dir: &Path, base: Option<&str>) -> String {
     let timeout = Duration::from_secs(10);
+    // A task on its own branch: everything since it left the base, committed or not.
+    if let Some(base) = base
+        && let Ok(base) = crate::hub::quote(base)
+        && let Ok((true, out)) = crate::orchestrator::shell(hub, dir, &format!("git diff --stat \"$(git merge-base {base} HEAD)\""), timeout).await
+        && !out.trim().is_empty()
+    {
+        return format!("git diff --stat against {base}:\n{}", tail(&out, 800));
+    }
     if let Ok((true, out)) = crate::orchestrator::shell(hub, dir, "git diff --stat HEAD", timeout).await
         && !out.trim().is_empty()
     {
@@ -99,7 +107,7 @@ async fn changes(hub: &Hub, dir: &Path) -> String {
 /// What the audit gate reads: the task, the worker's summary and the change.
 pub async fn audit_state(hub: &Hub, task: &Task, dir: &Path) -> String {
     let summary = task.result.as_deref().unwrap_or("(none)");
-    format!("Task: {}\n\n{}\n\nWorker summary:\n{}\n\n{}", head(&task.title, 200), head(&task.prompt, 600), head(summary, 600), changes(hub, dir).await)
+    format!("Task: {}\n\n{}\n\nWorker summary:\n{}\n\n{}", head(&task.title, 200), head(&task.prompt, 600), head(summary, 600), changes(hub, dir, task.git.as_ref().map(|g| g.base.as_str())).await)
 }
 
 /// Reflex's part of one gate.
@@ -371,6 +379,7 @@ mod tests {
             session: None,
             result: Some("fixed it".into()),
             project: None,
+            git: None,
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
         };

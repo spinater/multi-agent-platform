@@ -22,7 +22,7 @@ export const SESSION_TONE: Record<SessionState, Tone> = {
   exited: "idle",
 };
 
-export const TASK_TONE: Record<TaskStatus, Tone> = { pending: "idle", running: "ok", verifying: "info", auditing: "info", done: "accent", failed: "bad", cancelled: "idle" };
+export const TASK_TONE: Record<TaskStatus, Tone> = { pending: "idle", running: "ok", verifying: "info", auditing: "info", landing: "info", review: "warn", done: "accent", failed: "bad", cancelled: "idle" };
 
 export const LEVEL_TONE: Record<Level, Tone> = { info: "info", success: "ok", warning: "warn", error: "bad" };
 

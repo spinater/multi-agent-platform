@@ -20,7 +20,7 @@ export const WS_KEY = "~";
 export const projectKey = (slug: string | null | undefined) => slug ?? WS_KEY;
 export const keySlug = (key: string) => (key === WS_KEY ? null : key);
 
-const LIVE_BUSY = ["running", "verifying", "auditing"];
+const LIVE_BUSY = ["running", "verifying", "auditing", "landing"];
 export const NEEDS_YOU = ["waiting_input", "needs_auth", "needs_trust", "stalled", "error"] as const;
 const NEED_TAG: Record<string, string> = { waiting_input: "input", needs_auth: "sign in", needs_trust: "trust folder", stalled: "stalled", error: "error" };
 
@@ -119,7 +119,7 @@ export function useCommand() {
       groups.push({ key: QUEUE, label: "queue", color: "var(--idle)", kind: "queue" });
     }
     const groupKeys = new Set(groups.map((g) => g.key));
-    const stages = buildStages(pipeline, server?.database);
+    const stages = buildStages(pipeline, server?.database, tasks.some((t) => t.git));
     const graph: Graph = buildGraph({
       sessions,
       tasks,
@@ -137,6 +137,8 @@ export function useCommand() {
       if ((NEEDS_YOU as readonly string[]).includes(s.state))
         needs.push({ id: `s:${s.name}`, title: s.name, reason: s.detail || s.state.replace("_", " "), tag: NEED_TAG[s.state], tone: SESSION_TONE[s.state] });
     for (const t of tasks) if (t.status === "failed") needs.push({ id: `t:${t.id}`, title: `${taskLabel(t)} ${t.title}`, reason: t.result?.split("\n")[0] || "failed", tag: "failed", tone: "bad" });
+    for (const t of tasks)
+      if (t.status === "review") needs.push({ id: `t:${t.id}`, title: `${taskLabel(t)} ${t.title}`, reason: t.result?.split("\n")[0] || `${t.git?.branch ?? "branch"} waits for your review`, tag: "review", tone: "warn" });
 
     const summary = (slug: string | null): ProjectSummary => {
       const ts = allTasks.filter((t) => (t.project ?? null) === slug);
@@ -146,7 +148,7 @@ export function useCommand() {
       for (const t of ts) counts[t.status] = (counts[t.status] ?? 0) + 1;
       const busy = live.length > 0 || ts.some((t) => LIVE_BUSY.includes(t.status));
       const state = !ts.length && !live.length ? "idle" : !orchestrator?.running ? "paused" : busy ? "running" : "idle";
-      const need = ss.filter((s) => (NEEDS_YOU as readonly string[]).includes(s.state)).length + (counts.failed ?? 0);
+      const need = ss.filter((s) => (NEEDS_YOU as readonly string[]).includes(s.state)).length + (counts.failed ?? 0) + (counts.review ?? 0);
       return { key: projectKey(slug), slug, name: projectName(slug), color: colorOfProject(slug), state, live: live.length, running: counts.running ?? 0, done: counts.done ?? 0, total: ts.length, need, counts };
     };
 

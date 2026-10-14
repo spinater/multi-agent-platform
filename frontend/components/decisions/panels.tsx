@@ -179,7 +179,7 @@ export function TaskPanel({ task, node, provider, color, model, kinds, trace, ch
       kicker={`task #${task.id}${provider ? ` · ${provider}` : ""} · attempt ${attempt}`}
       dot={color}
       title={task.title}
-      sub={`${task.session ?? "no session yet"}${task.depends_on.length ? ` · after ${task.depends_on.map((d) => `#${d}`).join(", ")}` : ""}`}
+      sub={`${task.session ?? "no session yet"}${task.depends_on.length ? ` · after ${task.depends_on.map((d) => `#${d}`).join(", ")}` : ""}${task.git ? ` · ${task.git.branch} → ${task.git.base}` : ""}`}
       badge={`at ${point.label}`}
       badgeColor={tone}
       now={{

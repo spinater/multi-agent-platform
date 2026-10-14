@@ -20,6 +20,8 @@ pub struct FakeSession {
     pub attached: usize,
     pub sent: Vec<String>,
     pub script: String,
+    /// The folder it was started in.
+    pub cwd: std::path::PathBuf,
     /// Panes shown one after another as keys arrive (a TUI reacting to Down, Enter).
     pub after_keys: std::collections::VecDeque<String>,
 }
@@ -63,13 +65,13 @@ impl Terminal for FakeTerminal {
         Ok(self.sessions.lock().unwrap().contains_key(name))
     }
 
-    async fn spawn(&self, name: &str, _cwd: &Path, script: &Path) -> Result<()> {
+    async fn spawn(&self, name: &str, cwd: &Path, script: &Path) -> Result<()> {
         let mut sessions = self.sessions.lock().unwrap();
         if sessions.contains_key(name) {
             bail!("duplicate session: {name}");
         }
         let script = std::fs::read_to_string(script).unwrap_or_default();
-        sessions.insert(name.to_string(), FakeSession { script, ..Default::default() });
+        sessions.insert(name.to_string(), FakeSession { script, cwd: cwd.to_path_buf(), ..Default::default() });
         Ok(())
     }
 

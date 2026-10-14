@@ -20,6 +20,8 @@ export const STATUS_COLOR: Record<TaskStatus, string> = {
   running: "var(--ok)",
   verifying: "var(--info)",
   auditing: "var(--info)",
+  landing: "var(--info)",
+  review: "var(--warn)",
   done: "var(--accent)",
   failed: "var(--bad)",
   cancelled: "var(--idle)",

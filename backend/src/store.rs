@@ -176,7 +176,7 @@ impl Store {
 
     pub async fn save_task(&self, t: &Task) -> Result<()> {
         sqlx::query(
-            "UPDATE tasks SET title = ?, prompt = ?, depends_on = ?, provider = ?, model = ?, status = ?, session = ?, attempts = ?, result = ?, updated_at = ? WHERE id = ?",
+            "UPDATE tasks SET title = ?, prompt = ?, depends_on = ?, provider = ?, model = ?, status = ?, session = ?, attempts = ?, result = ?, git = ?, updated_at = ? WHERE id = ?",
         )
         .bind(&t.title)
         .bind(&t.prompt)
@@ -187,6 +187,7 @@ impl Store {
         .bind(&t.session)
         .bind(t.attempts)
         .bind(&t.result)
+        .bind(t.git.as_ref().map(serde_json::to_string).transpose()?)
         .bind(t.updated_at)
         .bind(t.id)
         .execute(&self.pool)
@@ -207,6 +208,7 @@ impl Store {
             session: row.get("session"),
             attempts: row.get("attempts"),
             result: row.get("result"),
+            git: row.get::<Option<String>, _>("git").map(|g| serde_json::from_str(&g)).transpose()?,
             created_at: row.get("created_at"),
             updated_at: row.get("updated_at"),
         })

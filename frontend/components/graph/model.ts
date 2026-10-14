@@ -9,7 +9,7 @@ import type { Task } from "@/lib/generated/Task";
 
 export type NodeType = "orch" | "group" | "session" | "task" | "stage" | "run";
 export type LinkKind = "hub" | "own" | "work" | "dep" | "stage" | "infra";
-export type Phase = "verify" | "audit" | "post_done" | "terminal" | "store" | "hub";
+export type Phase = "verify" | "audit" | "land" | "post_done" | "terminal" | "store" | "hub";
 
 /** A provider hub, the queue of unassigned tasks, or (all projects) a project. */
 export type Group = { key: string; label: string; color: string; kind: "provider" | "queue" | "project"; available?: boolean };
@@ -61,14 +61,16 @@ function glyphFor(command: string, taken: Set<string>): string {
   return `${word[0].toUpperCase()}${i}`;
 }
 
-/** The pipeline column: each verify command, the audit, each post_done hook, then the platform's own plumbing. */
-export function buildStages(pipeline: PipelineInfo | null, database: string | undefined): Stage[] {
-  const taken = new Set<string>(["A", "tm", "db", "ws"]);
+/** The pipeline column: each verify command, the audit, landing the task's branch (when some task has one), each
+ * post_done hook, then the platform's own plumbing. */
+export function buildStages(pipeline: PipelineInfo | null, database: string | undefined, branches = false): Stage[] {
+  const taken = new Set<string>(["A", "L", "tm", "db", "ws"]);
   const out: Stage[] = [];
   const verify = pipeline?.verify ?? [];
   if (verify.length === 0) out.push({ id: "verify", label: "verify · none configured", glyph: "V", phase: "verify" });
   verify.forEach((c, i) => out.push({ id: `verify-${i}`, label: c, glyph: glyphFor(c, taken), phase: "verify", command: c }));
   if (pipeline?.audit_enabled) out.push({ id: "audit", label: `audit · ${pipeline.audit_chain.join(" → ")}`, glyph: "A", phase: "audit" });
+  if (branches) out.push({ id: "land", label: "land · map/task-N → base", glyph: "L", phase: "land" });
   (pipeline?.post_done ?? []).forEach((c, i) => out.push({ id: `post-${i}`, label: c, glyph: glyphFor(c, taken), phase: "post_done", command: c }));
   out.push({ id: "tmux", label: "tmux · send-keys / capture-pane", glyph: "tm", phase: "terminal" });
   out.push({ id: "sqlite", label: `sqlite · ${database ?? ".map/map.db"}`, glyph: "db", phase: "store" });
@@ -151,7 +153,7 @@ export function buildGraph(input: BuildInput): Graph {
   for (const t of tasks) for (const d of t.depends_on) if (taskIds.has(d)) add(`t:${d}`, `t:${t.id}`, "dep", false);
   const activeStages = new Set<string>();
   for (const t of tasks) {
-    const phase = t.status === "verifying" ? "verify" : t.status === "auditing" ? "audit" : null;
+    const phase = t.status === "verifying" ? "verify" : t.status === "auditing" ? "audit" : t.status === "landing" ? "land" : null;
     if (!phase) continue;
     for (const st of stages.filter((x) => x.phase === phase)) {
       add(`t:${t.id}`, `g:${st.id}`, "stage", true);

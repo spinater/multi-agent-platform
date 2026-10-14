@@ -123,6 +123,11 @@ pub enum TaskStatus {
     Running,
     Verifying,
     Auditing,
+    /// Committing the task's branch and landing it (rebase + fast-forward into its base, or push + pull request).
+    Landing,
+    /// The work passed but waits for the owner: `land = keep`, a project folder with changes in the way, or a push
+    /// that failed. Merge, push, send back or discard it from the dashboard.
+    Review,
     Done,
     Failed,
     Cancelled,
@@ -139,6 +144,8 @@ impl TaskStatus {
             TaskStatus::Running => "running",
             TaskStatus::Verifying => "verifying",
             TaskStatus::Auditing => "auditing",
+            TaskStatus::Landing => "landing",
+            TaskStatus::Review => "review",
             TaskStatus::Done => "done",
             TaskStatus::Failed => "failed",
             TaskStatus::Cancelled => "cancelled",
@@ -166,8 +173,34 @@ pub struct Task {
     pub attempts: i64,
     /// Summary from the agent's result file, or the reason the task failed.
     pub result: Option<String>,
+    /// The task's own branch and worktree, for a project with `branches.mode = worktree`; `None` when it runs in the
+    /// project folder itself.
+    pub git: Option<TaskGit>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+}
+
+/// A task's branch (`map/task-<id>`), made from `base` in a worktree of its own so tasks of one project run side
+/// by side without touching each other's files.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, TS)]
+#[serde(default)]
+#[ts(export)]
+pub struct TaskGit {
+    pub branch: String,
+    /// The branch it was made from and lands into.
+    pub base: String,
+    /// The worktree folder while it exists; `None` once removed.
+    pub worktree: Option<String>,
+    /// How the owner asked to land it from `review` (`None`: the project's `branches.land`).
+    pub land: Option<LandMode>,
+    /// The base commit it landed as, after a merge.
+    pub merged: Option<String>,
+    /// Set once the branch has been pushed.
+    pub pushed: bool,
+    /// The pull or merge request opened for it.
+    pub pr_url: Option<String>,
+    /// What landing did last, or why the task waits in `review`.
+    pub note: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -519,9 +552,11 @@ pub enum DecisionNode {
     Watch,
     Verify,
     Audit,
+    Land,
     Post,
     End,
     Retry,
+    Review,
     Blocked,
     Failed,
     Done,
@@ -979,6 +1014,48 @@ pub struct ProjectAudit {
     pub provider: Option<String>,
 }
 
+/// Where a project's tasks run.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum BranchMode {
+    /// Every task works in the project folder, on whatever branch it has checked out. One task at a time is safe.
+    #[default]
+    Shared,
+    /// Each task gets its own branch and git worktree, so several run at once; MAP lands each when it passes.
+    Worktree,
+}
+
+/// What MAP does with a task's branch once it has passed verify and audit.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum LandMode {
+    /// Rebase onto the base branch and fast-forward the base (one task at a time per project); a conflict goes back
+    /// to the agent.
+    #[default]
+    Merge,
+    /// Push the branch to `origin` and open a pull request (`gh`) or merge request (`glab`) against the base.
+    PullRequest,
+    /// Leave the branch for the owner to review and land from the dashboard.
+    Keep,
+}
+
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, TS)]
+#[serde(default)]
+#[ts(export)]
+pub struct ProjectBranches {
+    pub mode: BranchMode,
+    /// The branch tasks start from and land into; `None` is the branch checked out in the project folder.
+    pub base: Option<String>,
+    pub land: LandMode,
+    /// Commands run in each new worktree before the agent starts (e.g. `bun install`).
+    pub setup: Vec<String>,
+    /// Untracked files or folders copied from the project folder into each new worktree (e.g. `.env`); never
+    /// committed by MAP.
+    pub copy: Vec<String>,
+}
+
 /// A project's own settings, stored in the platform database (not in `map.toml`).
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, TS)]
 #[serde(default)]
@@ -995,6 +1072,8 @@ pub struct ProjectSettings {
     pub paused: bool,
     /// Decisions the orchestrator asks the project's Reflex first, never an LLM.
     pub reflex_gates: ReflexGates,
+    /// Shared folder or a branch and worktree per task.
+    pub branches: ProjectBranches,
 }
 
 /// Repeated orchestrator decisions answered by the project's Reflex (its `orchestration` corpus domain). An answer
@@ -2089,4 +2168,92 @@ pub struct FsListing {
     /// Dot-folders left out because `hidden` was not set.
     #[ts(type = "number")]
     pub hidden_dirs: u64,
+}
+
+/// `POST /api/projects/{slug}/worktree-estimate` (`{parallel?, copy?, setup?}`): what running N tasks of the project side by side in
+/// worktrees would cost this machine, and what it trades for the speed. Rough by design: sizes are measured, RAM per
+/// agent is measured from running CLIs when there are any, build memory is a rule of thumb.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct WorktreeEstimate {
+    pub machine: MachineSpec,
+    /// Tasks run at once (the request's `parallel`, else `orchestrator.max_parallel`).
+    pub parallel: u32,
+    /// Bytes of the files git checks out into each worktree (`git ls-tree -r -l HEAD`).
+    #[ts(type = "number")]
+    pub checkout_bytes: u64,
+    pub tracked_files: u32,
+    /// Ignored folders in the project folder that setup rebuilds per worktree (node_modules, target, .venv…), and
+    /// the `copy` list.
+    pub extra: Vec<SizedPath>,
+    /// Disk one worktree takes: checkout plus `extra`.
+    #[ts(type = "number")]
+    pub per_task_disk: u64,
+    /// Memory of one agent CLI, per provider the project uses.
+    pub agents: Vec<AgentMemory>,
+    /// Memory one task's verify commands may take while they build and test (rule of thumb from the project's files).
+    #[ts(type = "number")]
+    pub build_memory: u64,
+    pub build_note: String,
+    /// One task: the largest agent plus `build_memory`.
+    #[ts(type = "number")]
+    pub per_task_memory: u64,
+    #[ts(type = "number")]
+    pub total_disk: u64,
+    #[ts(type = "number")]
+    pub total_memory: u64,
+    /// CPU threads the parallel verify steps want at their peak (one build per task).
+    pub peak_threads: u32,
+    /// Most tasks this machine should run at once, and what limits it.
+    pub recommended_parallel: u32,
+    pub limited_by: String,
+    /// The project's pending and running tasks: how many waves they take one at a time and with `parallel` workers.
+    pub open_tasks: u32,
+    pub waves_serial: u32,
+    pub waves_parallel: u32,
+    /// What the speed costs, most serious first.
+    pub drawbacks: Vec<Drawback>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct MachineSpec {
+    pub cpus: u32,
+    #[ts(type = "number")]
+    pub memory_total: u64,
+    /// `None` where MAP cannot read it.
+    #[ts(type = "number | null")]
+    pub memory_available: Option<u64>,
+    /// Free space where worktrees are made (`<data_dir>/projects`).
+    #[ts(type = "number | null")]
+    pub disk_free: Option<u64>,
+    pub disk_path: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct SizedPath {
+    pub path: String,
+    #[ts(type = "number")]
+    pub bytes: u64,
+    /// From the `copy` list (copied) rather than rebuilt by setup.
+    pub copied: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct AgentMemory {
+    pub provider: String,
+    #[ts(type = "number")]
+    pub bytes: u64,
+    /// Measured from running processes (how many) rather than assumed.
+    pub measured: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct Drawback {
+    pub level: Level,
+    pub title: String,
+    pub detail: String,
 }

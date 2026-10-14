@@ -1,7 +1,7 @@
 "use client";
 
 import clsx from "clsx";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, type ReactNode } from "react";
 
 import { api } from "@/lib/api";
 import { providerColor } from "@/lib/colors";
@@ -14,7 +14,7 @@ import { keySlug, type Command } from "./command-data";
 import { Btn, LEVEL_TONE, Pill, SESSION_TONE, TASK_TONE, TONE_TEXT, hms, rel, type Tone } from "./command-ui";
 import { PromptBar, closeSession, usePane } from "./console";
 import { QUEUE } from "./graph/model";
-import { blocked, taskActions } from "./tasks";
+import { TaskGitPanel, blocked, taskActions } from "./tasks";
 
 type Line = { text: string; tone?: Tone | "text" | "muted" };
 type Action = { label: string; kind?: "primary" | "ghost" | "danger"; run: () => void; /** Only looks, so it stays in all-projects mode. */ nav?: boolean };
@@ -26,6 +26,8 @@ type Detail = {
   tone: Tone;
   rows: [string, string | number | null | undefined | false][];
   blocks: { label: string; note?: string; lines: Line[] }[];
+  /** Shown between the rows and the blocks (a task's branch and its review choices). */
+  extra?: ReactNode;
   actions: Action[];
   /** Live sessions get a terminal input. */
   live?: Session;
@@ -108,7 +110,7 @@ export function DetailCard({
         badge: s.state,
         tone: s.state === "running" ? "ok" : s.state === "paused" ? "warn" : "idle",
         rows: [
-          ["Tasks", ["running", "verifying", "auditing", "pending", "done", "failed"].filter((x) => s.counts[x]).map((x) => `${s.counts[x]} ${x}`).join(" · ") || "none"],
+          ["Tasks", ["running", "verifying", "auditing", "landing", "review", "pending", "done", "failed"].filter((x) => s.counts[x]).map((x) => `${s.counts[x]} ${x}`).join(" · ") || "none"],
           ["Live", `${s.live} sessions`],
           ["Needs you", s.need || ""],
           ["Folder", slug === null ? server?.workspace_dir : projects.find((x) => x.project.slug === slug)?.workspace],
@@ -229,7 +231,7 @@ export function DetailCard({
       for (const a of taskActions(t, act)) actions.push({ label: a.label, kind: a.kind, run: a.run });
       actions.push(flyBtn);
       const blocks: Detail["blocks"] = [{ label: "prompt", lines: t.prompt.split("\n").map((text) => ({ text: text || " ", tone: "text" })) }];
-      if (t.result) blocks.push({ label: "result", lines: t.result.split("\n").map((text) => ({ text: text || " ", tone: t.status === "failed" ? "bad" : "ok" })) });
+      if (t.result) blocks.push({ label: "result", lines: t.result.split("\n").map((text) => ({ text: text || " ", tone: t.status === "failed" ? "bad" : t.status === "review" ? "warn" : "ok" })) });
       return {
         kicker: `${cmd.all ? `${cmd.projectName(t.project)} · ` : ""}task #${t.id}`,
         title: t.title,
@@ -245,6 +247,8 @@ export function DetailCard({
           ["Updated", rel(t.updated_at, now)],
         ],
         blocks,
+        // Its buttons act on the task, so like the other actions they are left out in all-projects mode.
+        extra: t.git ? <TaskGitPanel key={t.id} task={t} act={act} actions={!cmd.all} /> : undefined,
         actions,
         project: t.project,
       };
@@ -253,12 +257,12 @@ export function DetailCard({
       const g = cmd.graph.stages.find((x) => x.id === key);
       if (!g) return null;
       const act = cmd.graph.activeStages.has(id);
-      const users = cmd.tasks.filter((t) => (g.phase === "verify" && t.status === "verifying") || (g.phase === "audit" && t.status === "auditing"));
+      const users = cmd.tasks.filter((t) => (g.phase === "verify" && t.status === "verifying") || (g.phase === "audit" && t.status === "auditing") || (g.phase === "land" && t.status === "landing"));
       const done = cmd.tasks
         .filter((t) => t.status === "done")
         .slice(-4)
         .map((t) => ({ text: `✓ ${cmd.taskLabel(t)} ${t.title}`, tone: "ok" as const }));
-      const ofPipeline = g.phase === "verify" || g.phase === "audit" || g.phase === "post_done";
+      const ofPipeline = g.phase === "verify" || g.phase === "audit" || g.phase === "land" || g.phase === "post_done";
       return {
         kicker: `pipeline · ${g.phase.replace("_", " ")}`,
         title: g.label,
@@ -269,7 +273,7 @@ export function DetailCard({
           ["Phase", g.phase],
           ["Command", g.command],
           ["Running for", ofPipeline ? users.map((t) => cmd.taskLabel(t)).join(", ") || "—" : ""],
-          ["Rule", g.phase === "verify" ? "every command must exit 0, else the task retries with the output" : g.phase === "audit" ? "first auditor with a verdict decides; VERDICT: PASS accepts" : g.phase === "post_done" ? "runs after a task passes; {id} and {title} are substituted" : ""],
+          ["Rule", g.phase === "verify" ? "every command must exit 0, else the task retries with the output" : g.phase === "audit" ? "first auditor with a verdict decides; VERDICT: PASS accepts" : g.phase === "land" ? "commits the task's branch and lands it (merge, pull request or keep, per project); a conflict sends it back to the agent" : g.phase === "post_done" ? "runs after a task passes; {id} and {title} are substituted" : ""],
         ],
         blocks: ofPipeline && done.length ? [{ label: "recent passes", lines: done }] : [],
         actions: [flyBtn],
@@ -352,6 +356,7 @@ export function DetailCard({
           ))}
         </div>
       )}
+      {d.extra}
       {d.blocks.map((b, i) => (
         <div key={b.label} className="flex flex-col gap-1.5 px-4 pb-3">
           <span className="truncate font-mono text-[10px] leading-none tracking-[0.12em] text-muted uppercase">

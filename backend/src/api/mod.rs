@@ -97,6 +97,7 @@ pub fn router(hub: Arc<Hub>) -> Router {
         .route("/fs/roots", get(fs::list_roots))
         .route("/fs/browse", get(fs::browse))
         .route("/projects/{slug}/trust", get(projects::trust_state).post(projects::trust))
+        .route("/projects/{slug}/worktree-estimate", post(projects::worktree_estimate))
         .route("/providers/{name}/login", get(projects::login_state).post(projects::login_start))
         // ---- usage: plan limits per provider (usage.rs)
         .route("/usage", get(usage))
@@ -410,17 +411,31 @@ async fn create_task(State(hub): State<Arc<Hub>>, Json(body): Json<CreateTask>) 
 enum TaskAction {
     Retry,
     Cancel,
+    /// From `review`: rebase and fast-forward into the base.
+    Merge,
+    /// From `review`: push the branch and open a pull request.
+    PullRequest,
+    /// From `review`: back to an agent, with the owner's note.
+    SendBack,
+    /// Removes the task's worktree and branch; a task in review or failed becomes cancelled.
+    Discard,
 }
 
 #[derive(Deserialize)]
 struct UpdateTask {
     action: TaskAction,
+    #[serde(default)]
+    note: Option<String>,
 }
 
 async fn update_task(State(hub): State<Arc<Hub>>, UrlPath(id): UrlPath<i64>, Json(body): Json<UpdateTask>) -> ApiResult<Task> {
     let task = match body.action {
         TaskAction::Retry => Orchestrator::retry(&hub, id).await?,
         TaskAction::Cancel => Orchestrator::cancel(&hub, id).await?,
+        TaskAction::Merge => Orchestrator::land_now(&hub, id, crate::model::LandMode::Merge).await.map_err(conflict)?,
+        TaskAction::PullRequest => Orchestrator::land_now(&hub, id, crate::model::LandMode::PullRequest).await.map_err(conflict)?,
+        TaskAction::SendBack => Orchestrator::send_back(&hub, id, body.note.as_deref()).await.map_err(conflict)?,
+        TaskAction::Discard => Orchestrator::discard(&hub, id).await.map_err(conflict)?,
     };
     Ok(Json(task))
 }
@@ -430,9 +445,15 @@ async fn delete_task(State(hub): State<Arc<Hub>>, UrlPath(id): UrlPath<i64>) -> 
     if !task.status.is_terminal() && task.status != crate::model::TaskStatus::Pending {
         return Err(ApiError(StatusCode::CONFLICT, "cancel a running task before deleting it".into()));
     }
+    let mut task = task;
+    crate::worktrees::discard(&hub, &mut task).await;
     hub.store.delete_task(id).await?;
     hub.announce_task_removed(id);
     Ok(Json(json!({ "ok": true })))
+}
+
+fn conflict(err: anyhow::Error) -> ApiError {
+    ApiError(StatusCode::CONFLICT, format!("{err:#}"))
 }
 
 async fn orchestrator(State(hub): State<Arc<Hub>>) -> ApiResult<Value> {

@@ -56,7 +56,7 @@ export function LeftColumn({
   const running = !!orchestrator?.running;
   const counts: Record<string, number> = {};
   for (const t of cmd.tasks) counts[t.status] = (counts[t.status] ?? 0) + 1;
-  const taskSummary = ["running", "verifying", "auditing", "pending", "done", "failed"]
+  const taskSummary = ["running", "verifying", "auditing", "landing", "review", "pending", "done", "failed"]
     .filter((s) => counts[s])
     .map((s) => `${counts[s]} ${s}`)
     .join(" · ");

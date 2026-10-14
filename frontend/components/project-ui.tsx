@@ -12,6 +12,7 @@ import { api } from "@/lib/api";
 import { providerColor } from "@/lib/colors";
 import type { OrchestratorStatus } from "@/lib/generated/OrchestratorStatus";
 import type { ProjectDefaults } from "@/lib/generated/ProjectDefaults";
+import type { ProjectBranches } from "@/lib/generated/ProjectBranches";
 import type { ProjectInfo } from "@/lib/generated/ProjectInfo";
 import type { ProjectSettings } from "@/lib/generated/ProjectSettings";
 import type { ProjectSource } from "@/lib/generated/ProjectSource";
@@ -203,7 +204,11 @@ export type SettingsForm = {
   /** "" is the global audit chain. */
   auditor: string;
   gates: ReflexGates;
+  /** `base: ""` in the form is the branch checked out in the project folder (`null` when saved). */
+  branches: ProjectBranches;
 };
+
+export const DEFAULT_BRANCHES: ProjectBranches = { mode: "shared", base: null, land: "merge", setup: [], copy: [] };
 
 export function formFromSettings(s: ProjectSettings | null, providers: ProviderInfo[], defaults: ProjectDefaults | null): SettingsForm {
   const order = s && s.providers.length ? s.providers.map((p) => p.name) : (defaults?.provider_order ?? providers.map((p) => p.name));
@@ -219,6 +224,7 @@ export function formFromSettings(s: ProjectSettings | null, providers: ProviderI
     audit: !s?.audit ? "global" : s.audit.enabled ? "on" : "off",
     auditor: s?.audit?.provider ?? "",
     gates: s?.reflex_gates ?? { audit: false, tier: false },
+    branches: s?.branches ?? DEFAULT_BRANCHES,
   };
 }
 
@@ -234,6 +240,7 @@ export function settingsFromForm(f: SettingsForm, defaults: ProjectDefaults | nu
     audit: f.audit === "global" ? null : { enabled: f.audit === "on", provider: f.audit === "on" && f.auditor ? f.auditor : null },
     paused: f.paused,
     reflex_gates: f.gates,
+    branches: { ...f.branches, base: f.branches.base?.trim() || null },
   };
 }
 
@@ -538,6 +545,17 @@ export function tomlLines(
   kv("audit", String(s.reflex_gates.audit));
   kv("tier", String(s.reflex_gates.tier));
   if (s.reflex_gates.audit || s.reflex_gates.tier) c(`answered from the corpus's ${GATES_DOMAIN}/ domain; tier models from map.toml [orchestrator.tiers]`);
+  blank();
+  sec("[project.branches]");
+  kv("mode", q(s.branches.mode));
+  if (s.branches.mode === "worktree") {
+    if (s.branches.base) kv("base", q(s.branches.base));
+    else c("base: the branch checked out in the project folder");
+    kv("land", q(s.branches.land));
+    if (s.branches.setup.length) kv("setup", arr(s.branches.setup));
+    if (s.branches.copy.length) kv("copy", arr(s.branches.copy));
+    c("each task works on map/task-<id> in a git worktree of its own");
+  } else c("every task works in the project folder itself");
   for (const x of s.providers.filter((x) => x.model || x.max_parallel !== null)) {
     blank();
     sec(`[project.providers.${x.name}]`);
@@ -582,6 +600,8 @@ export const SEGMENTS: [TaskStatus, string, string][] = [
   ["running", "var(--ok)", "running"],
   ["verifying", "var(--info)", "verifying"],
   ["auditing", "var(--area-8)", "auditing"],
+  ["landing", "var(--info)", "landing"],
+  ["review", "var(--warn)", "review"],
   ["pending", "#5d6673", "pending"],
   ["failed", "var(--bad)", "failed"],
 ];
@@ -592,7 +612,7 @@ export type ProjectFigures = {
   counts: Partial<Record<TaskStatus, number>>;
   total: number;
   live: number;
-  /** Sessions waiting for input, signed out, stalled or in error, plus failed tasks. */
+  /** Sessions waiting for input, signed out, stalled or in error, plus failed tasks and tasks waiting for review. */
   attention: number;
   last: number | null;
   status: ProjectStatus;
@@ -606,9 +626,9 @@ export function figures(slug: string | null, info: ProjectInfo | null, tasks: Ta
   const live = sessions.filter((s) => (s.project ?? null) === slug && s.state !== "exited");
   const counts: Partial<Record<TaskStatus, number>> = {};
   for (const t of own) counts[t.status] = (counts[t.status] ?? 0) + 1;
-  const attention = live.filter((s) => ["waiting_input", "needs_auth", "needs_trust", "stalled", "error"].includes(s.state)).length + (counts.failed ?? 0);
+  const attention = live.filter((s) => ["waiting_input", "needs_auth", "needs_trust", "stalled", "error"].includes(s.state)).length + (counts.failed ?? 0) + (counts.review ?? 0);
   const times = [...own.map((t) => t.updated_at), ...sessions.filter((s) => (s.project ?? null) === slug).map((s) => s.last_activity_at)].map((x) => new Date(x).getTime());
-  const busy = (counts.running ?? 0) + (counts.verifying ?? 0) + (counts.auditing ?? 0) > 0;
+  const busy = (counts.running ?? 0) + (counts.verifying ?? 0) + (counts.auditing ?? 0) + (counts.landing ?? 0) > 0;
   const status: ProjectStatus = info?.project.settings.paused ? "paused" : orchestrator?.running && busy ? "running" : "idle";
   return { counts, total: own.length, live: live.length, attention, last: times.length ? Math.max(...times) : null, status };
 }
