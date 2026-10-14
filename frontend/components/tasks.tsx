@@ -2,7 +2,7 @@
 
 import clsx from "clsx";
 import { ExternalLink, GitBranch } from "lucide-react";
-import { useState, type CSSProperties } from "react";
+import { useMemo, useState, type CSSProperties } from "react";
 
 import { activityMarks, ageOf, useActivity } from "@/lib/activity";
 import { api } from "@/lib/api";
@@ -10,11 +10,14 @@ import { providerColor } from "@/lib/colors";
 import type { PipelineInfo } from "@/lib/generated/PipelineInfo";
 import type { ProviderInfo } from "@/lib/generated/ProviderInfo";
 import type { Task } from "@/lib/generated/Task";
+import type { Event } from "@/lib/generated/Event";
 import type { TaskGit } from "@/lib/generated/TaskGit";
 
 import { PhaseBar } from "./activity";
 import { useApp } from "./app-context";
 import { Btn, Chip, Pill, TASK_TONE } from "./command-ui";
+import { isDecision } from "./decisions/model";
+import { ScopeChip, waitText } from "./parallel";
 import { Modal } from "./shell/page";
 
 const FINISHED = ["done", "failed", "cancelled"];
@@ -30,10 +33,16 @@ export function blocked(t: Task, tasks: Task[]): boolean {
 
 /** The task queue of the left column (design: `taskRows`). */
 export function TaskRows({ tasks, label, selected, onSelect, projectOf }: { tasks: Task[]; label: (t: Task) => string; selected: string | null; onSelect: (id: string) => void; projectOf?: (t: Task) => string }) {
-  const { now, sessions } = useApp();
+  const { now, sessions, events } = useApp();
   // Re-render on every live change; the marks say what changed and when.
   useActivity();
   const marks = activityMarks();
+  // Each task's newest decision among the recent events (newest first), for a pending task's parallel wait.
+  const latest = useMemo(() => {
+    const map = new Map<number, Event>();
+    for (const e of events) if (isDecision(e) && !map.has(e.task_id!)) map.set(e.task_id!, e);
+    return map;
+  }, [events]);
   if (tasks.length === 0) return <p className="font-mono text-[11px] text-muted">No tasks yet. Add one; with the orchestrator running it starts once its dependencies are done.</p>;
   return (
     <div className="flex flex-col gap-1.5">
@@ -46,6 +55,7 @@ export function TaskRows({ tasks, label, selected, onSelect, projectOf }: { task
         const age = ageOf(mark?.at, now);
         const recent = mark?.to === t.status && age < 3000;
         const color = providerColor((t.session && sessions.find((x) => x.name === t.session)?.provider) || t.provider);
+        const wait = t.status === "pending" && !isBlocked ? waitText(latest.get(t.id)) : null;
         return (
           <button
             key={t.id}
@@ -61,7 +71,17 @@ export function TaskRows({ tasks, label, selected, onSelect, projectOf }: { task
             <span className="font-mono text-[10.5px] leading-none text-muted">{label(t)}</span>
             <span className="flex min-w-0 flex-col gap-1">
               <span className="text-[12.5px] leading-[1.25] font-medium text-pretty">{t.title}</span>
-              {t.git && <BranchChip git={t.git} />}
+              {(t.git || t.scope) && (
+                <span className="flex min-w-0 flex-wrap items-center gap-1">
+                  {t.git && <BranchChip git={t.git} />}
+                  {t.scope && <ScopeChip scope={t.scope} />}
+                </span>
+              )}
+              {wait && (
+                <span className="font-mono text-[10px] leading-[1.2] text-warn" title={latest.get(t.id)?.message}>
+                  {wait}
+                </span>
+              )}
               <span className="font-mono text-[10px] leading-[1.2] text-muted">
                 {projectOf ? `${projectOf(t)} · ` : ""}
                 {t.depends_on.length ? `after ${t.depends_on.map((d) => `#${d}`).join(", ")}` : "no deps"}

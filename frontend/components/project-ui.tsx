@@ -582,6 +582,13 @@ export function tomlLines(
     c("each task works on map/task-<id> in a git worktree of its own");
   } else c("every task works in the project folder itself");
   blank();
+  sec("[project.parallel]");
+  if (s.parallel.max !== null) kv("max", String(s.parallel.max));
+  else c("max: none, only the machine-wide limit");
+  kv("analyst", String(s.parallel.analyst));
+  if (s.parallel.analyst_provider) kv("analyst_provider", q(s.parallel.analyst_provider));
+  if (s.branches.mode === "shared") c(s.parallel.analyst ? "a second task shares the folder only when the analyst cleared both as touching different files" : "shared folder: one task at a time");
+  blank();
   sec("[project.knowledge]");
   const k = s.knowledge;
   kv("dirs", arr(k.dirs));
@@ -602,7 +609,7 @@ export function tomlLines(
   blank();
   c("global, from map.toml (read-only here)");
   c(`workspace.session_prefix = ${q(defaults?.session_prefix ?? "")}`);
-  c(`orchestrator.max_parallel = ${defaults?.max_parallel ?? "?"}`);
+  c(`orchestrator.max_parallel = ${defaults?.max_parallel ?? "?"} (changed live from the Command centre)`);
   if (defaults?.post_done.length) c(`orchestrator.post_done = ${arr(defaults.post_done)}`);
   return L;
 }

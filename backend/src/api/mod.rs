@@ -98,6 +98,8 @@ pub fn router(hub: Arc<Hub>) -> Router {
         .route("/fs/browse", get(fs::browse))
         .route("/projects/{slug}/trust", get(projects::trust_state).post(projects::trust))
         .route("/projects/{slug}/worktree-estimate", post(projects::worktree_estimate))
+        .route("/projects/{slug}/parallel/analyze", post(projects::parallel_analyze))
+        .route("/projects/{slug}/scopes", post(projects::scopes))
         .route("/projects/{slug}/knowledge", get(projects::knowledge))
         .route("/projects/{slug}/knowledge/reindex", post(projects::knowledge_reindex))
         .route("/projects/{slug}/knowledge/search", get(projects::knowledge_search))
@@ -198,7 +200,7 @@ pub(crate) fn project_scope<'a>(method: &axum::http::Method, path: &'a str) -> O
     let (slug, tail) = rest.split_once('/')?;
     let ok = matches!(
         (method, tail),
-        (&Method::POST, "decide" | "feedback" | "plans")
+        (&Method::POST, "decide" | "feedback" | "plans" | "scopes")
             | (&Method::GET, "decisions" | "decisions/summary" | "repos/corpus" | "repos/corpus/file" | "plans" | "knowledge/search" | "knowledge/doc")
             | (&Method::PUT, "repos/corpus/file")
     );
@@ -610,6 +612,8 @@ mod tests {
         assert_eq!(project_scope(&Method::GET, "/api/projects/support/plans"), Some("support"));
         assert_eq!(project_scope(&Method::GET, "/api/projects/support/knowledge/search"), Some("support"));
         assert_eq!(project_scope(&Method::GET, "/api/projects/support/knowledge/doc"), Some("support"));
+        assert_eq!(project_scope(&Method::POST, "/api/projects/support/scopes"), Some("support"));
+        assert_eq!(project_scope(&Method::POST, "/api/projects/support/parallel/analyze"), None);
         for (method, path) in [
             (Method::GET, "/api/projects/support/knowledge"),
             (Method::POST, "/api/projects/support/knowledge/reindex"),

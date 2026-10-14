@@ -157,6 +157,14 @@ pub fn validate(hub: &Hub, s: &ProjectSettings) -> Result<()> {
         bail!("verify commands cannot be empty");
     }
     validate_branch(s.branches.base.as_deref())?;
+    if s.parallel.max == Some(0) {
+        bail!("a project's parallel limit must be at least 1 (empty: no project limit)");
+    }
+    if let Some(p) = s.parallel.analyst_provider.as_deref()
+        && hub.spec(p)?.headless.is_empty()
+    {
+        bail!("provider `{p}` has no headless command, so it cannot be the parallel analyst");
+    }
     for c in &s.branches.copy {
         crate::worktrees::validate_copy(c)?;
     }
@@ -187,6 +195,7 @@ pub fn normalize(mut s: ProjectSettings) -> ProjectSettings {
         a.provider = blank(a.provider.take());
     }
     s.branches.base = blank(s.branches.base.take());
+    s.parallel.analyst_provider = blank(s.parallel.analyst_provider.take());
     for list in [&mut s.branches.setup, &mut s.branches.copy] {
         *list = list.iter().map(|c| c.trim().to_string()).filter(|c| !c.is_empty()).collect();
     }
@@ -245,6 +254,9 @@ mod tests {
         let b = hub.store.create_task(task("b", Some(&slug))).await.unwrap();
         let c = hub.store.create_task(task("c", Some(&paused))).await.unwrap();
         let d = hub.store.create_task(task("d", None)).await.unwrap();
+        // Cleared to share the folder, so only the provider limit holds b back.
+        let scope = |id, path: &str| crate::parallel::SubmittedScope { id, paths: vec![path.into()], independent: true, reason: String::new() };
+        crate::parallel::save_scopes(&hub, Some(&slug), vec![scope(a.id, "src/a/"), scope(b.id, "src/b/")], "test").await.unwrap();
         Orchestrator::new(hub.clone()).tick().await.unwrap();
 
         let a = hub.store.task(a.id).await.unwrap().unwrap();

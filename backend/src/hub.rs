@@ -41,6 +41,8 @@ pub struct Hub {
     /// Tasks whose verify/audit/land step is running in the background (the orchestrator loop and the owner's
     /// Merge button share it, so a task is never finished twice at once).
     pub finishing: Arc<Mutex<std::collections::HashSet<i64>>>,
+    /// The parallel analyst's runs per project (`parallel.rs`).
+    pub analyses: crate::parallel::Analyses,
 }
 
 pub struct LaunchRequest {
@@ -80,6 +82,7 @@ impl Hub {
             usage,
             updates,
             finishing: Default::default(),
+            analyses: Default::default(),
         })
     }
 
@@ -336,6 +339,8 @@ impl Hub {
         }
         self.store.set_runtime_setting("orchestrator.max_parallel", n.map(|n| n.to_string()).as_deref()).await?;
         self.max_parallel.store(n.unwrap_or(self.config.orchestrator.max_parallel), Ordering::Relaxed);
+        let status = self.orchestrator_status().await;
+        self.send(ServerMessage::Orchestrator { status });
         Ok(())
     }
 

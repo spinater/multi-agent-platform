@@ -200,7 +200,12 @@ export function nowChecks(args: {
         return { mark: done ? "✓" : "…", color: done ? OK : IDLE, text: `#${d} ${t?.title ?? ""} · ${t ? (done ? "done" : `at ${label(args.nodeOfTask(t))}`) : "missing"}` };
       });
       if (!deps.length) deps.push({ mark: "✓", color: OK, text: "no dependencies" });
-      return [...deps, { mark: "·", color: active >= model.max_parallel ? WARN : IDLE, text: `slots ${active} of ${model.max_parallel} in use` }];
+      const rows: Check[] = [...deps, { mark: "·", color: active >= model.max_parallel ? WARN : IDLE, text: `slots ${active} of ${model.max_parallel} in use` }];
+      // The project's parallel limit or the shared folder (decision.ready.project_full / shared_busy / awaiting_analyst / cleared).
+      if (trace[0]?.kind.startsWith("decision.ready.") && trace[0].message) {
+        rows.push({ mark: trace[0].kind === "decision.ready.cleared" ? "✓" : "…", color: trace[0].kind === "decision.ready.cleared" ? OK : WARN, text: trace[0].message });
+      }
+      return rows;
     }
     case "pick": {
       const last = trace.find((e) => e.kind === "decision.pick.none");

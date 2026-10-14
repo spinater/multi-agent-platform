@@ -61,7 +61,7 @@ const failedInspection: SourceInspection = { ok: false, error: null, default_bra
  * directly, an existing one or a new empty one; the platform never copies or hosts the code. The settings are stored
  * in the platform database. `onCreated` gets the server's check lines. */
 export function ProjectWizard({ onClose, onCreated, initialStep = 0 }: { onClose: () => void; onCreated: (slug: string, checks: CheckLine[]) => void; initialStep?: number }) {
-  const { providers, server, openAuth } = useApp();
+  const { providers, server, openAuth, orchestrator } = useApp();
   const defaults = useDefaults();
   const [step, setStep] = useState(initialStep);
   const [source, setSource] = useState<Source>({ kind: "local", location: "", url: "", branch: "" });
@@ -375,8 +375,8 @@ export function ProjectWizard({ onClose, onCreated, initialStep = 0 }: { onClose
                 <ProvidersEditor rows={rows.providers} onChange={(providers) => patch({ providers })} providers={providers} onSignIn={openAuth} />
                 <div className="flex flex-wrap items-center gap-x-7 gap-y-3">
                   <span className="font-mono text-[10.5px] tracking-[0.1em] text-muted uppercase">
-                    max_parallel <span className="text-[15px] font-semibold tracking-normal text-text">{defaults?.max_parallel ?? "?"}</span>{" "}
-                    <span className="tracking-normal normal-case">for all projects, in map.toml</span>
+                    tasks at once <span className="text-[15px] font-semibold tracking-normal text-text">{orchestrator?.max_parallel ?? defaults?.max_parallel ?? "?"}</span>{" "}
+                    <span className="tracking-normal normal-case">for all projects · changed live in the Command centre; a project limit is in its settings</span>
                   </span>
                   <Check on={rows.paused} onClick={() => patch({ paused: !rows.paused })} label="Start paused" sub="tasks wait until you resume the project" />
                 </div>

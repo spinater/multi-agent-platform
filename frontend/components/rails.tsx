@@ -12,6 +12,7 @@ import { ActivityFeed } from "./activity";
 import type { Command } from "./command-data";
 import { Btn, Pill, SideTitle, TONE_TEXT } from "./command-ui";
 import { EventLog } from "./events";
+import { ParallelStepper } from "./parallel";
 import { SessionRows } from "./sessions";
 import { TaskRows } from "./tasks";
 
@@ -76,6 +77,7 @@ export function LeftColumn({
             </span>
             <span className={sub}>read-only overview · open a project to act</span>
           </div>
+          <ParallelStepper orchestrator={orchestrator} />
           <div className="flex flex-col overflow-hidden rounded-[10px] border border-line">
             {cmd.projectOrder.map((slug) => {
               const p = cmd.summary(slug);
@@ -128,6 +130,7 @@ export function LeftColumn({
               {running ? "❚❚ Pause" : "▶ Run"}
             </Btn>
           </div>
+          <ParallelStepper orchestrator={orchestrator} />
           <div className="flex flex-col overflow-hidden rounded-[10px] border border-line">
             {cmd.providers.map((p, i) => {
               const st = cmd.providerState(p, now);

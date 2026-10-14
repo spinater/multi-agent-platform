@@ -33,6 +33,10 @@ use Level::{Error as E, Info as I, Success as S, Warning as W};
 impl Kind {
     // Orchestrator::tick: dependencies and worker slots.
     pub const READY_GO: Kind = k("decision.ready.go", N::Ready, N::Pick, I, "ready → pick provider");
+    pub const READY_FULL: Kind = k("decision.ready.project_full", N::Ready, N::Ready, I, "project at its parallel limit · waiting");
+    pub const READY_SHARED_BUSY: Kind = k("decision.ready.shared_busy", N::Ready, N::Ready, I, "shared folder busy · not cleared to run beside it · waiting");
+    pub const READY_AWAIT_ANALYST: Kind = k("decision.ready.awaiting_analyst", N::Ready, N::Ready, I, "shared folder busy · waiting for the parallel analyst");
+    pub const READY_CLEARED: Kind = k("decision.ready.cleared", N::Ready, N::Ready, S, "analyst cleared it to share the folder · paths disjoint");
     pub const READY_BLOCKED: Kind = k("decision.ready.blocked", N::Ready, N::Blocked, W, "blocked by a dependency");
     // start() / pick_provider().
     pub const PICK_CHOSEN: Kind = k("decision.pick.chosen", N::Pick, N::Launch, I, "provider chosen → launch");
@@ -115,6 +119,10 @@ impl Kind {
 pub const ALL: &[Kind] = &[
     Kind::READY_GO,
     Kind::READY_BLOCKED,
+    Kind::READY_FULL,
+    Kind::READY_SHARED_BUSY,
+    Kind::READY_AWAIT_ANALYST,
+    Kind::READY_CLEARED,
     Kind::PICK_CHOSEN,
     Kind::PICK_NONE,
     Kind::PICK_TIER_LIGHT,
@@ -243,7 +251,7 @@ fn edge(from: N, to: N, label: &str) -> DecisionEdge {
 pub fn model(hub: &Hub, tick_secs: u64) -> DecisionModel {
     let cfg = &hub.config.orchestrator;
     let nodes = vec![
-        point(N::Ready, "Ready?", "Are all depends_on tasks done, and is a worker slot free?", "every depends_on task is done && active < max_parallel; a failed or cancelled dependency blocks", "Orchestrator::tick · orchestrator.max_parallel", false),
+        point(N::Ready, "Ready?", "Are all depends_on tasks done, and is a worker slot free?", "every depends_on task is done && active < max_parallel (machine-wide, live) && the project's active tasks < parallel.max; in a shared-folder project a task starts beside running ones only when the parallel analyst cleared all of them as independent with disjoint paths; a failed or cancelled dependency blocks", "Orchestrator::tick · max_parallel · project parallel · parallel.rs", false),
         point(N::Pick, "Pick provider", "Which provider takes this task, with which model?", "task.provider if pinned, else the first of the project's providers (or provider_order) that is on PATH, not cooling down and under its session limit; with the project's tier gate on and no pinned model, a confident Reflex `tier` answer (light | standard | heavy) takes that provider's model from orchestrator.tiers, an unsure one keeps the usual model", "pick_provider() · tier_gate() · project settings · orchestrator.provider_order · orchestrator.tiers", false),
         point(N::Launch, "Launch", "Did the worker session start?", "hub.launch(LaunchRequest) returns Ok; an error cools the provider down for 5m", "start() · hub.launch", false),
         point(N::Watch, "Watch", "What has the worker reported?", "$MAP_RESULT_FILE status done | failed; session exited or needs_auth; started > task_timeout_minutes ago; needs_trust waits for the owner (no timeout)", "check_running() · orchestrator.task_timeout_minutes", false),

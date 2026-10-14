@@ -10,6 +10,7 @@ import { useApp } from "../app-context";
 import { DecisionGraph, type Selection, type Token } from "../decisions/graph";
 import { CHIPS, ORDER, attention, edgeKey, nodeOf, nowChecks, providerOf } from "../decisions/model";
 import { NodeChips, NodePanel, TaskPanel, TaskRows, type Row } from "../decisions/panels";
+import { waitText } from "../parallel";
 import { useDecisions, useTrace } from "../decisions/use-decisions";
 import { Main, PageHeader } from "../shell/page";
 import { TopBar, workspaceName } from "../shell/top-bar";
@@ -42,9 +43,9 @@ export function DecisionsScreen() {
         node === "watch"
           ? `${task.session ?? ""} · ${(s?.state ?? "working").replace("_", " ")}`
           : node === "ready"
-            ? task.depends_on.length
+            ? (waitText(last) ?? (task.depends_on.length
               ? `waiting on ${task.depends_on.filter((d) => tasks.find((t) => t.id === d)?.status !== "done").map((d) => `#${d}`).join(", ") || "a worker slot"}`
-              : "no dependencies · next tick"
+              : "no dependencies · next tick"))
             : node === "pick"
               ? `${task.provider ? `pinned ${task.provider}` : "provider_order"} · not available`
               : node === "blocked"

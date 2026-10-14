@@ -807,6 +807,30 @@ branch `map/task-N`, made from the base branch (`base`, or the branch checked ou
   tasks take one at a time and N at a time, and the drawbacks: conflicts and reruns, plan limits reached N× sooner,
   builds competing for the CPU, cold worktrees, shared ports and services.
 
+## Parallel tasks
+
+How many tasks run at once is set at two levels, both applied at the next orchestrator tick (5 s) without a
+restart:
+
+- **Machine-wide** (`max_parallel`): `[orchestrator] max_parallel` in map.toml, or the value set in the Command centre
+  (`POST /api/orchestrator {"max_parallel": N}`, kept in the database across restarts; `0` goes back to map.toml's).
+- **Per project** (Settings → Parallel, `parallel.max`): the most of that project's tasks at once; empty is only the
+  machine-wide limit.
+
+Independent tasks (no `depends_on` between them) start together up to those limits. In a **worktree** project every
+task has its own branch, so nothing else is needed. In a **shared-folder** project (one folder, one branch) a second
+task only starts beside a running one when the **parallel analyst** has cleared all of them: an agent run headless
+(the project's `parallel.analyst_provider`, else its audit provider, else the first available with a headless
+command) reads the tasks and the code read-only and answers, per task, the paths it will change and whether it is
+independent (no shared files such as lockfiles, migrations, generated code, shared config). Tasks are cleared when
+each is independent and their paths do not overlap (a folder covers what is under it; no paths means the whole repo).
+The analyst runs on its own when tasks wait for it (not again for the same tasks within 10 minutes), or with
+`POST /api/projects/{slug}/parallel/analyze`; an agent can also declare scopes with its project token
+(`POST /api/projects/{slug}/scopes`). A cleared worker is told its paths and not to commit, stash, reset or reformat
+the repo. With `parallel.analyst = false` a shared-folder project runs one task at a time. The default workspace
+follows the shared-folder rules. Decisions: `decision.ready.project_full`, `.shared_busy`, `.awaiting_analyst`,
+`.cleared`.
+
 ## Knowledge
 
 The Knowledge screen (`#knowledge/<slug>`) indexes a project's docs: the Markdown and text files under
@@ -913,6 +937,8 @@ All routes are under `/api`. When `server.api_token` is set, send `Authorization
 | PUT | `/git/identity` | `{"name", "email"}` (both empty: none) |
 | GET | `/projects/{slug}/git` | The folder's `is_repo`, branch, upstream, origin, ahead/behind, dirty count, last fetch and commit, `busy` |
 | POST | `/projects/{slug}/git/fetch`, `…/pull`, `…/push` | `{}`: run it; returns `ok`, commands, output, new status (409 with the reason when refused) |
+| POST | `/projects/{slug}/parallel/analyze` | `{}`: run the parallel analyst now over the project's unscoped open tasks; `started`, `reason` |
+| POST | `/projects/{slug}/scopes` | `{"tasks": [{"id", "paths", "independent", "reason"}]}`: declare tasks' scopes (project token allowed) |
 | GET | `/projects/{slug}/knowledge` | `KnowledgeOverview`: docs, counts by kind, health issues (with fix task prompts), rulebook budgets, scratch folders, recent searches; reindexes when older than 2 minutes |
 | POST | `/projects/{slug}/knowledge/reindex` | Reindex now; returns the overview |
 | GET | `/projects/{slug}/knowledge/search?q=&kind=&limit=` | Full-text search (trigram: Thai and English substrings); logged as by agent (project token) or owner. Project token allowed |

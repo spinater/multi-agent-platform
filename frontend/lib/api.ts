@@ -29,6 +29,7 @@ import type { GitTestResult } from "./generated/GitTestResult";
 import type { InitPlan } from "./generated/InitPlan";
 import type { InitStarted } from "./generated/InitStarted";
 import type { LoginState } from "./generated/LoginState";
+import type { OrchestratorStatus } from "./generated/OrchestratorStatus";
 import type { Overview } from "./generated/Overview";
 import type { PipelineInfo } from "./generated/PipelineInfo";
 import type { ProjectCreated } from "./generated/ProjectCreated";
@@ -124,7 +125,10 @@ export const api = {
   /** `note` (send_back only) goes into the agent's next prompt. 409 with the reason when the task's status refuses it. */
   taskAction: (id: number, action: TaskAction, note?: string) => request<Task>("PATCH", `/tasks/${id}`, note ? { action, note } : { action }),
   deleteTask: (id: number) => request("DELETE", `/tasks/${id}`),
-  setOrchestrator: (running: boolean) => request("POST", "/orchestrator", { running }),
+  /** Pause or run the orchestrator. */
+  setOrchestrator: (running: boolean) => request<OrchestratorStatus>("POST", "/orchestrator", { running }),
+  /** Live changes, no restart: `max_parallel` is tasks at once across all projects (0 resets to map.toml's value). */
+  updateOrchestrator: (body: { running?: boolean; max_parallel?: number }) => request<OrchestratorStatus>("POST", "/orchestrator", body),
   /** The orchestrator's verify / audit / post_done settings (command centre). */
   pipeline: () => request<PipelineInfo>("GET", "/pipeline"),
 
@@ -170,6 +174,8 @@ export const api = {
   /** What running `parallel` tasks side by side in worktrees would cost; `copy`/`setup` are the form's unsaved lists. */
   worktreeEstimate: (slug: string, body: { parallel?: number; copy?: string[]; setup?: string[] }) =>
     request<WorktreeEstimate>("POST", `/projects/${slug}/worktree-estimate`, body),
+  /** Runs the project's parallel analyst now; `started: false` says why not (`reason`). */
+  analyzeParallel: (slug: string) => request<{ ok: boolean; started: boolean; reason: string }>("POST", `/projects/${slug}/parallel/analyze`, {}),
   projectTrust: (slug: string) => request<FolderTrust>("GET", `/projects/${slug}/trust`),
   trustProject: (slug: string) => request<FolderTrusted>("POST", `/projects/${slug}/trust`, {}),
   inspectSource: (body: { kind: SourceKind; location: string; branch?: string }) => request<SourceInspection>("POST", "/projects/inspect", body),
@@ -230,7 +236,7 @@ export type ProjectUpdate = {
   fallback?: string;
   model?: string | null;
   questions?: Question[];
-  /** Providers, verify, audit, paused, the Reflex gates and branches; the source is kept. */
+  /** Providers, verify, audit, paused, the Reflex gates, branches, knowledge and parallel; the source is kept. */
   settings?: ProjectSettings;
   paused?: boolean;
 };

@@ -11,6 +11,7 @@ mod knowledge;
 mod login;
 mod model;
 mod orchestrator;
+mod parallel;
 mod plans;
 mod project_git;
 mod project_settings;

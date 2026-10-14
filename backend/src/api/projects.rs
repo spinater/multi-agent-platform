@@ -486,3 +486,25 @@ pub async fn knowledge_doc(State(hub): State<Arc<Hub>>, UrlPath(slug): UrlPath<S
     let path = p.path.unwrap_or_default();
     crate::knowledge::doc(&hub, &project, &path).await?.map(Json).ok_or_else(|| not_found("document"))
 }
+
+// ---- parallel tasks (parallel.rs)
+
+/// Runs the parallel analyst now over the project's unscoped open tasks; `started: false` with the reason when not.
+pub async fn parallel_analyze(State(hub): State<Arc<Hub>>, UrlPath(slug): UrlPath<String>) -> ApiResult<Value> {
+    load(&hub, &slug).await?;
+    let why = crate::parallel::analyze(&hub, Some(slug), true).await?;
+    Ok(Json(json!({ "ok": true, "started": why.is_none(), "reason": why })))
+}
+
+#[derive(Deserialize)]
+pub struct ScopesBody {
+    tasks: Vec<crate::parallel::SubmittedScope>,
+}
+
+/// An agent (the planner, a worker with the project token) or the owner declares tasks' scopes.
+pub async fn scopes(State(hub): State<Arc<Hub>>, UrlPath(slug): UrlPath<String>, headers: axum::http::HeaderMap, Json(body): Json<ScopesBody>) -> ApiResult<Value> {
+    load(&hub, &slug).await?;
+    let by = searched_by(&hub, &slug, &headers);
+    let saved = crate::parallel::save_scopes(&hub, Some(&slug), body.tasks, by).await?;
+    Ok(Json(json!({ "ok": true, "saved": saved })))
+}

@@ -14,6 +14,7 @@ import { useApp } from "./app-context";
 import { BranchesEditor } from "./branches";
 import { KnowledgeEditor } from "./knowledge/settings-editor";
 import { ProjectGit } from "./git-access";
+import { ParallelEditor } from "./parallel";
 import {
   Btn,
   Check,
@@ -589,6 +590,33 @@ function Settings({ info }: { info: ProjectInfo }) {
         {form && (
           <Box title="Branches" note={form.branches.mode === "worktree" ? "a branch + worktree per task" : "shared folder"}>
             <BranchesEditor value={form.branches} onChange={(branches) => patch({ branches })} slug={p.slug} defaults={defaults} />
+            <div className="flex items-center gap-2">
+              <Btn tone="primary" onClick={saveSettings} disabled={!edited}>
+                Save orchestrator settings
+              </Btn>
+            </div>
+          </Box>
+        )}
+        {form && (
+          <Box
+            title="Parallel"
+            note={
+              form.branches.mode === "worktree"
+                ? `up to ${form.parallel.max ?? "the machine-wide limit"} at once`
+                : form.parallel.analyst
+                  ? "shared folder · analyst clears"
+                  : "shared folder · one at a time"
+            }
+          >
+            <ParallelEditor
+              value={form.parallel}
+              onChange={(parallel) => patch({ parallel })}
+              mode={form.branches.mode}
+              slug={p.slug}
+              providers={providers}
+              defaultProvider={(form.audit === "on" && form.auditor) || form.providers.find((x) => x.enabled && providers.find((i) => i.name === x.name)?.available)?.name || null}
+              dirty={!!edited}
+            />
             <div className="flex items-center gap-2">
               <Btn tone="primary" onClick={saveSettings} disabled={!edited}>
                 Save orchestrator settings

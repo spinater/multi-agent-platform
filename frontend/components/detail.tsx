@@ -14,7 +14,9 @@ import { useApp } from "./app-context";
 import { keySlug, type Command } from "./command-data";
 import { Btn, LEVEL_TONE, Pill, SESSION_TONE, TASK_TONE, TONE_TEXT, hms, rel, type Tone } from "./command-ui";
 import { PromptBar, closeSession, usePane } from "./console";
+import { useTrace } from "./decisions/use-decisions";
 import { QUEUE } from "./graph/model";
+import { ScopePanel, waitText } from "./parallel";
 import { TaskGitPanel, blocked, taskActions } from "./tasks";
 
 type Line = { text: string; tone?: Tone | "text" | "muted" };
@@ -69,6 +71,8 @@ export function DetailCard({
   const key = id.slice(ty.length + 1);
   const session = ty === "s" ? cmd.sessions.find((s) => s.name === key) : undefined;
   const paneText = usePane(session?.name ?? null, !!session && session.state !== "exited", 200);
+  // A task's trace (newest first): its newest decision says why a pending task still waits.
+  const trace = useTrace(ty === "t" && /^\d+$/.test(key) ? Number(key) : null);
   const act = (ok: string, run: () => Promise<unknown>) => {
     run().then(
       () => toast(ok),
@@ -88,7 +92,10 @@ export function DetailCard({
         badge: running ? "running" : "paused",
         tone: running ? "ok" : "idle",
         rows: [
-          ["Parallel", `${orchestrator?.active ?? 0} / ${orchestrator?.max_parallel ?? 1}`],
+          [
+            "Parallel",
+            `${orchestrator?.active ?? 0} / ${orchestrator?.max_parallel ?? 1}${orchestrator && orchestrator.max_parallel !== orchestrator.config_max_parallel ? ` · map.toml ${orchestrator.config_max_parallel}` : ""} · change live in the left column`,
+          ],
           ["Order", p?.provider_order.join(" → ")],
           ["Verify", p && (p.verify.length ? p.verify.join(" · ") : "none configured")],
           ["Audit", p && (p.audit_enabled ? `${p.audit_chain.join(" → ")}${p.audit_required ? " · required" : ""}` : "off")],
@@ -227,6 +234,7 @@ export function DetailCard({
       if (!t) return null;
       const s = t.session ? cmd.sessions.find((x) => x.name === t.session) : undefined;
       const isBlocked = blocked(t, cmd.tasks);
+      const wait = t.status === "pending" && !isBlocked ? waitText(trace[0]) : null;
       const actions: Action[] = [];
       if (s) actions.push({ label: `Open ${s.name}`, run: () => select(`s:${s.name}`), nav: true });
       for (const a of taskActions(t, act)) actions.push({ label: a.label, kind: a.kind, run: a.run });
@@ -243,6 +251,7 @@ export function DetailCard({
           ["Depends on", t.depends_on.length ? t.depends_on.map((x) => `#${x}`).join(", ") : "none"],
           ["Provider", t.provider ? `pinned · ${t.provider}${t.model ? ` (${t.model})` : ""}` : "any · failover"],
           ["Session", t.session ?? "not started"],
+          ["Waiting", wait && `${wait.replace(/^waiting: /, "")}${trace[0]?.message ? ` · ${trace[0].message}` : ""}`],
           ["Attempts", `${t.attempts}${p ? ` of ${p.max_attempts}` : ""}`],
           ["Created", rel(t.created_at, now)],
           ["Updated", rel(t.updated_at, now)],
@@ -257,6 +266,7 @@ export function DetailCard({
               </div>
             )}
             {t.git && <TaskGitPanel key={t.id} task={t} act={act} actions={!cmd.all} />}
+            {t.scope && <ScopePanel key={`scope-${t.id}`} scope={t.scope} now={now} />}
           </>
         ),
         actions,

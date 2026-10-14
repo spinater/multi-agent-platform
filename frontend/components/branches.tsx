@@ -15,11 +15,12 @@ import type { ProjectBranches } from "@/lib/generated/ProjectBranches";
 import type { ProjectDefaults } from "@/lib/generated/ProjectDefaults";
 import type { WorktreeEstimate } from "@/lib/generated/WorktreeEstimate";
 
+import { useApp } from "./app-context";
 import { LEVEL_TONE, TONE_TEXT } from "./command-ui";
 import { Btn, Field, Inset, Segmented, TextInput, errText } from "./project-ui";
 
 const MODES: [BranchMode, string, string][] = [
-  ["shared", "Shared folder", "Every task works in the project folder itself, one at a time per file; nothing to merge."],
+  ["shared", "Shared folder", "Every task works in the project folder itself, one at a time unless the parallel analyst clears them as touching different files; nothing to merge."],
   ["worktree", "Branch + worktree per task", "Each task gets branch map/task-<id> in its own git worktree, so several run at once; MAP lands each when it passes."],
 ];
 
@@ -154,7 +155,7 @@ function UsageBar({ title, used, avail, of, fmt = fmtBytes }: { title: string; u
 
 /** What N tasks side by side would cost. Refetches (debounced) when N or the form's unsaved copy/setup lists change. */
 function EstimatePanel({ slug, copy, setup, defaults }: { slug: string; copy: string[]; setup: string[]; defaults: ProjectDefaults | null }) {
-  // `null` until the owner picks N: the server answers for `orchestrator.max_parallel`.
+  // `null` until the owner picks N: the server answers for the machine-wide limit.
   const [parallel, setParallel] = useState<number | null>(null);
   const [result, setResult] = useState<{ key: string; est: WorktreeEstimate | null; error: string } | null>(null);
   const key = JSON.stringify({ parallel, copy, setup });
@@ -181,7 +182,9 @@ function EstimatePanel({ slug, copy, setup, defaults }: { slug: string; copy: st
   const pick = (v: number) => setParallel(Math.min(max, Math.max(1, v)));
   const m = est?.machine;
   const memAvail = m ? (m.memory_available ?? m.memory_total) : null;
-  const globalMax = defaults?.max_parallel;
+  // The live machine-wide limit (the Command centre's), not only map.toml's.
+  const { orchestrator, go } = useApp();
+  const globalMax = orchestrator?.max_parallel ?? defaults?.max_parallel;
 
   return (
     <Inset className="gap-3.5 font-sans text-[12.5px]">
@@ -286,8 +289,12 @@ function EstimatePanel({ slug, copy, setup, defaults }: { slug: string; copy: st
       )}
 
       <p className={clsx("font-mono text-[11px] leading-snug", globalMax !== undefined && n > globalMax ? "text-warn" : "text-muted")}>
-        MAP runs at most {globalMax ?? "?"} task{globalMax === 1 ? "" : "s"} at once across all projects ([orchestrator] max_parallel in map.toml); this setting does not change that.
-        {globalMax !== undefined && n > globalMax ? ` To run ${n} at once, set [orchestrator] max_parallel = ${n} in map.toml, then restart MAP.` : ""}
+        This only estimates. MAP runs at most {globalMax ?? "?"} task{globalMax === 1 ? "" : "s"} at once across all projects
+        {globalMax !== undefined && n > globalMax ? `; to run ${n} at once, raise it` : "; change it"} live (no restart) in the{" "}
+        <button type="button" onClick={() => go("command")} className="cursor-pointer text-accent-soft hover:underline">
+          Command centre
+        </button>
+        , and this project&apos;s own limit in its Parallel settings.
       </p>
     </Inset>
   );

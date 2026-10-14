@@ -103,6 +103,11 @@ impl Orchestrator {
         let tasks = self.hub.store.tasks().await?;
         let mut active = tasks.iter().filter(|t| matches!(t.status, TaskStatus::Running | TaskStatus::Verifying | TaskStatus::Auditing | TaskStatus::Landing)).count();
         let paused = crate::project_settings::paused(&self.hub).await;
+        let projects: std::collections::HashMap<String, crate::model::ProjectSettings> =
+            self.hub.store.projects().await.unwrap_or_default().into_iter().map(|p| (p.slug, p.settings)).collect();
+        // Tasks that hold a folder: the active ones, plus those this tick starts.
+        let mut holding: Vec<Task> = tasks.iter().filter(|t| crate::parallel::is_active(t)).cloned().collect();
+        let mut analyse: std::collections::BTreeSet<Option<String>> = Default::default();
         for task in tasks.iter().filter(|t| t.status == TaskStatus::Pending && !crate::project_settings::is_paused(&paused, t)) {
             if active >= self.hub.max_parallel() {
                 break;
@@ -122,9 +127,36 @@ impl Orchestrator {
             if missing || deps.iter().any(|d| d.status != TaskStatus::Done) {
                 continue;
             }
+            let settings = task.project.as_ref().and_then(|p| projects.get(p)).cloned().unwrap_or_default();
+            let mine: Vec<&Task> = holding.iter().filter(|t| t.project == task.project).collect();
+            match crate::parallel::gate(task, settings.branches.mode, &settings.parallel, &mine) {
+                crate::parallel::Gate::Go => {}
+                crate::parallel::Gate::Cleared(why) => record(&self.hub, Kind::READY_CLEARED, task, why).await,
+                crate::parallel::Gate::Full(why) => {
+                    record(&self.hub, Kind::READY_FULL, task, why).await;
+                    continue;
+                }
+                crate::parallel::Gate::Busy(why) => {
+                    record(&self.hub, Kind::READY_SHARED_BUSY, task, why).await;
+                    continue;
+                }
+                crate::parallel::Gate::AwaitAnalyst(why) => {
+                    record(&self.hub, Kind::READY_AWAIT_ANALYST, task, why).await;
+                    analyse.insert(task.project.clone());
+                    continue;
+                }
+            }
             record(&self.hub, Kind::READY_GO, task, dec::ready_detail(task, active, self.hub.max_parallel())).await;
             if self.start(task.clone()).await? {
                 active += 1;
+                if let Some(started) = self.hub.store.task(task.id).await? {
+                    holding.push(started);
+                }
+            }
+        }
+        for project in analyse {
+            if let Err(err) = crate::parallel::analyze(&self.hub, project, false).await {
+                tracing::warn!("parallel analyst: {err:#}");
             }
         }
         Ok(())
@@ -147,6 +179,16 @@ impl Orchestrator {
         p.push_str("  If you cannot finish, write {\"status\": \"failed\", \"summary\": \"<why>\"} instead.\n");
         if !verify.is_empty() {
             p.push_str(&format!("- After you report done, the orchestrator runs: {}. Run them yourself first.\n", verify.join(" && ")));
+        }
+        if task.git.is_none()
+            && let Some(scope) = task.scope.as_ref().filter(|s| s.independent)
+        {
+            p.push_str(&format!(
+                "- Other agents may be working in this same folder and branch right now, cleared to because your task stays within: {}. \
+                 Only change files there. Do not reformat, regenerate or install across the repo, and never commit, stash, reset, checkout or clean: \
+                 that would take the others' work with it. If you must change something outside your paths, stop and report failed saying why.\n",
+                scope.paths.join(", ")
+            ));
         }
         if let Some(git) = &task.git {
             p.push_str(&format!(
@@ -1117,6 +1159,53 @@ mod tests {
         let t = hub.store.task(t.id).await.unwrap().unwrap();
         assert_eq!(t.status, TaskStatus::Failed);
         assert!(t.result.as_deref().unwrap().contains("not a git repo with a commit"), "{:?}", t.result);
+    }
+
+    #[tokio::test]
+    async fn the_analyst_clears_independent_tasks_to_share_one_folder() {
+        let dir = tempfile::tempdir().unwrap();
+        // The analyst stand-in: answers for tasks 1 and 2, whatever it is asked.
+        let analyst = dir.path().join("analyst.sh");
+        std::fs::write(&analyst, "#!/bin/sh\necho 'looked at the code'\necho '{\"tasks\": [{\"id\": 1, \"paths\": [\"src/a/\"], \"independent\": true, \"reason\": \"own module\"}, {\"id\": 2, \"paths\": [\"src/b/\"], \"independent\": true, \"reason\": \"own module\"}]}'\n").unwrap();
+        std::fs::set_permissions(&analyst, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+        let text = format!(
+            "[projects]\npath = \"{0}\"\n[workspace]\ndir = \"{0}\"\n[server]\ndata_dir = \"{0}/data\"\n[orchestrator]\nprovider_order = [\"claude\"]\nmax_parallel = 4\n[orchestrator.audit]\nchain = [\"fake\"]\n[providers.claude]\nbinary = \"/bin/sh\"\n[providers.fake]\nbinary = \"{1}\"\ninteractive = [\"{{binary}}\"]\nheadless = [\"{{binary}}\"]\n",
+            dir.path().display(),
+            analyst.display()
+        );
+        let config = Config::parse(&text, Path::new("/")).unwrap();
+        let hub = Hub::new(config, Store::memory().await.unwrap(), Arc::new(FakeTerminal::default()));
+        let a = hub.store.create_task(new_task("a", vec![])).await.unwrap();
+        let b = hub.store.create_task(new_task("b", vec![])).await.unwrap();
+        assert_eq!((a.id, b.id), (1, 2));
+        let mut orch = Orchestrator::new(hub.clone());
+        orch.tick().await.unwrap();
+        // One folder: a starts, b waits for the analyst, who is started for both.
+        assert_eq!(hub.store.task(a.id).await.unwrap().unwrap().status, TaskStatus::Running);
+        assert_eq!(hub.store.task(b.id).await.unwrap().unwrap().status, TaskStatus::Pending);
+        assert!(decisions_of(&hub, b.id).await.contains(&"ready.awaiting_analyst".to_string()));
+        for _ in 0..100 {
+            if hub.store.task(b.id).await.unwrap().unwrap().scope.is_some() && hub.store.task(a.id).await.unwrap().unwrap().scope.is_some() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        let scope = hub.store.task(b.id).await.unwrap().unwrap().scope.unwrap();
+        assert_eq!((scope.paths.clone(), scope.independent, scope.by.as_str()), (vec!["src/b/".to_string()], true, "analyst:fake"));
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        orch.tick().await.unwrap();
+        let b = hub.store.task(b.id).await.unwrap().unwrap();
+        assert_eq!(b.status, TaskStatus::Running, "cleared: disjoint paths");
+        assert!(decisions_of(&hub, b.id).await.contains(&"ready.cleared".to_string()));
+        let prompt = std::fs::read_to_string(hub.run_dir(b.session.as_ref().unwrap()).join("prompt.md")).unwrap();
+        assert!(prompt.contains("Only change files there") && prompt.contains("src/b/"), "{prompt}");
+
+        // A third task the analyst marks as overlapping waits; the project's own cap holds even cleared ones.
+        let c = hub.store.create_task(new_task("c", vec![])).await.unwrap();
+        crate::parallel::save_scopes(&hub, None, vec![crate::parallel::SubmittedScope { id: c.id, paths: vec!["src/a/x.rs".into()], independent: true, reason: String::new() }], "agent").await.unwrap();
+        orch.tick().await.unwrap();
+        assert_eq!(hub.store.task(c.id).await.unwrap().unwrap().status, TaskStatus::Pending);
+        assert!(decisions_of(&hub, c.id).await.contains(&"ready.shared_busy".to_string()));
     }
 
     // ---- orchestrator decisions
