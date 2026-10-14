@@ -46,6 +46,8 @@ function Row({ p, now, onUpdate, onConsole }: { p: UpdateInfo; now: number; onUp
   const badge = updateBadge(p);
   const checked = p.checked_at ? now - new Date(p.checked_at).getTime() : null;
   const canUpdate = p.update_command.length > 0 && !p.update_blocked && !p.updating;
+  // Up to date: no button. Unknown installed version (the check failed): still offered.
+  const offerUpdate = p.update_command.length > 0 && (p.available || p.updating || p.installed === null);
   const why = p.updating
     ? "An update is running"
     : p.update_blocked ?? (p.update_command.length ? undefined : `No update command; set providers.${p.provider}.update in map.toml`);
@@ -70,9 +72,9 @@ function Row({ p, now, onUpdate, onConsole }: { p: UpdateInfo; now: number; onUp
       </span>
       {p.error && <span className="font-mono text-[10.5px] leading-[1.35] break-words text-warn">{p.error}</span>}
       {p.update_blocked && <span className="font-mono text-[10.5px] leading-[1.35] break-words text-muted">{p.update_blocked}</span>}
-      {(p.update_command.length > 0 || onConsole) && (
+      {(offerUpdate || onConsole) && (
         <div className="flex items-center gap-1.5">
-          {p.update_command.length > 0 && (
+          {offerUpdate && (
             <Btn size="sm" kind={p.available && canUpdate ? "primary" : "ghost"} disabled={!canUpdate} title={why} onClick={onUpdate}>
               {p.updating ? "Updating…" : "Update"}
             </Btn>

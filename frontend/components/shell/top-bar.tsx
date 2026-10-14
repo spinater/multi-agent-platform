@@ -130,7 +130,6 @@ export function TopBar({ extra }: { extra?: ReactNode }) {
         </a>
         <ProjectSwitcher />
         <Nav />
-        {extra}
       </div>
       <div className="flex items-center gap-3">
         <UpdatesBell />
@@ -140,6 +139,8 @@ export function TopBar({ extra }: { extra?: ReactNode }) {
           {theme === "dark" ? <Sun className="size-3.5" /> : <Moon className="size-3.5" />}
         </button>
       </div>
+      {/* A screen's status strip gets its own row, so the nav and the right-hand controls stay on one line. */}
+      {extra && <div className="w-full min-w-0 overflow-x-auto">{extra}</div>}
     </header>
   );
 }
