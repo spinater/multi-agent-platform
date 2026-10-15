@@ -9,6 +9,7 @@ import type { Decision } from "./generated/Decision";
 import type { DecisionCounts } from "./generated/DecisionCounts";
 import type { DecisionModel } from "./generated/DecisionModel";
 import type { EnvList } from "./generated/EnvList";
+import type { KnowledgeGraph } from "./generated/KnowledgeGraph";
 import type { ConfigAskRequest } from "./generated/ConfigAskRequest";
 import type { ConfigAskResult } from "./generated/ConfigAskResult";
 import type { Workflow } from "./generated/Workflow";
@@ -277,6 +278,7 @@ export const api = {
   searchKnowledge: (slug: string, q: string, kind: KnowledgeKind | null, limit = 30) =>
     request<KnowledgeSearch>("GET", `/projects/${slug}/knowledge/search?q=${encodeURIComponent(q)}&kind=${kind ?? ""}&limit=${limit}`),
   /** Only indexed paths (including `map://tasks/<id>`, `map://plans/<id>`) are readable. */
+  knowledgeGraph: (slug: string) => request<KnowledgeGraph>("GET", `/projects/${slug}/knowledge/graph`),
   knowledgeDoc: (slug: string, path: string) => request<KnowledgeDocBody>("GET", `/projects/${slug}/knowledge/doc?path=${encodeURIComponent(path)}`),
   // ---- templates: lay a development process into a project's folder, then queue the init agent
   templates: () => request<TemplateInfo[]>("GET", "/templates"),

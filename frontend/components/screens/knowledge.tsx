@@ -12,6 +12,7 @@ import type { KnowledgeOverview } from "@/lib/generated/KnowledgeOverview";
 
 import { useApp } from "../app-context";
 import { DocViewer } from "../knowledge/doc-viewer";
+import { KnowledgeGraphView } from "../knowledge/graph";
 import { Box, Browse, Budgets, Health, Queries, SearchBox } from "../knowledge/sections";
 import { KIND_LABEL, knowledgeHash } from "../knowledge/shared";
 import { Suggestion } from "../knowledge/suggestion";
@@ -191,6 +192,7 @@ export function KnowledgeScreen() {
         {data && s && (
           <>
             <Suggestion key={slug} slug={slug} data={data} onChange={(next) => (next ? setLoaded({ slug, data: next }) : setTick((t) => t + 1))} />
+            {data.docs.length > 0 && <KnowledgeGraphView key={`${slug}:${data.indexed_at ?? ""}`} slug={slug} onOpenDoc={openDoc} />}
             {data.docs.length === 0 && (
               <Box title="Nothing to know yet" glyph="◇">
                 <p className="text-[13px] leading-normal text-text-2">
