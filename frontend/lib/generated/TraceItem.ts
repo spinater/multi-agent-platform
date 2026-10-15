@@ -20,4 +20,8 @@ detail: string, count: number, first_at: string | null, last_at: string | null,
 /**
  * The latest few exact invocations (masked), newest last.
  */
-samples: Array<string>, };
+samples: Array<string>, 
+/**
+ * The last lines each of `samples` printed (masked; empty when the transcript has no result for it), same order.
+ */
+outputs: Array<string>, };

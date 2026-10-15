@@ -28,4 +28,8 @@ row: number, started_at: string | null, last_at: string | null,
 /**
  * Exact invocations of a command node (masked).
  */
-samples: Array<string>, };
+samples: Array<string>, 
+/**
+ * The tail of what each of `samples` printed (masked; empty when unknown), same order.
+ */
+outputs: Array<string>, };

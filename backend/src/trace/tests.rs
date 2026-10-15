@@ -92,6 +92,50 @@ fn claude_and_codex_fixtures_become_items() {
 }
 
 #[test]
+fn command_outputs_follow_their_samples() {
+    let call = |id: &str, cmd: &str| {
+        json!({ "type": "assistant", "timestamp": "2026-10-15T10:00:00Z", "message": { "role": "assistant", "content": [
+            { "type": "tool_use", "id": id, "name": "Bash", "input": { "command": cmd } }
+        ] } })
+        .to_string()
+    };
+    let result = |id: &str, content: Value| {
+        json!({ "type": "user", "message": { "role": "user", "content": [ { "type": "tool_result", "tool_use_id": id, "content": content } ] } }).to_string()
+    };
+    let claude = [
+        call("a", "cargo test"),
+        result("a", json!("Compiling map\n\nrunning 3 tests\ntest a ... ok\ntest result: ok. 3 passed; 0 failed")),
+        call("b", "cargo test -- lanes"),
+        call("c", "curl -H \"Authorization: Bearer abc.def\" $U/x"),
+        result("c", json!([{ "type": "text", "text": "token=ghp_abcdefghijklmnop1234" }])),
+    ]
+    .join("\n");
+    let mut items = vec![];
+    aggregate(&mut items, parse_claude(&claude));
+    let t = items.iter().find(|i| i.name == "cargo test").unwrap();
+    assert_eq!(t.samples, vec!["cargo test", "cargo test -- lanes"]);
+    assert_eq!(t.outputs, vec!["running 3 tests\ntest a ... ok\ntest result: ok. 3 passed; 0 failed".to_string(), String::new()], "last 3 lines; none for a call without a result");
+    let c = items.iter().find(|i| i.kind == "command" && i.name.starts_with("curl")).unwrap();
+    assert!(!c.outputs[0].contains("ghp_abc") && c.outputs[0].contains("***"), "{:?}", c.outputs);
+
+    let codex = [
+        json!({ "type": "response_item", "payload": { "type": "function_call", "name": "exec_command", "call_id": "k", "arguments": "{\"cmd\":\"cargo build\"}" } }).to_string(),
+        json!({ "type": "response_item", "payload": { "type": "function_call_output", "call_id": "k", "output": "{\"output\":\"Finished dev\\n\",\"metadata\":{\"exit_code\":0}}" } }).to_string(),
+    ]
+    .join("\n");
+    let mut items = vec![];
+    aggregate(&mut items, parse_codex(&codex));
+    assert_eq!(items[0].outputs, vec!["Finished dev"]);
+
+    // Items stored before outputs existed line up again on the next sample.
+    let mut old = vec![TraceItem { kind: "command".into(), name: "ls".into(), detail: "ls".into(), count: 1, first_at: None, last_at: None, samples: vec!["ls".into()], outputs: vec![] }];
+    let mut r = raw("command", "ls", "ls -la", None);
+    r.output = Some("x".into());
+    aggregate(&mut old, vec![r]);
+    assert_eq!(old[0].outputs, vec![String::new(), "x".into()]);
+}
+
+#[test]
 fn aggregation_caps_items_and_samples() {
     let mut items = vec![];
     let many: Vec<Raw> = (0..300).map(|i| raw("command", format!("tool{i}"), "x", None)).collect();

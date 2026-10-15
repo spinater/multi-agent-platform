@@ -603,14 +603,18 @@ function CommandCentre() {
         >
           {activity ? (
             all || !project ? (
-              <p className="p-6 font-mono text-[12px] text-muted">
-                The activity view is per project: pick a project in the scope
-                switch above.
-              </p>
+              <div className="flex h-full items-center justify-center p-6">
+                <span className="max-w-[420px] text-center text-[13px] leading-[1.55] text-text-2">
+                  Activity is per project: who made each task, which agent ran
+                  it, and what that agent used. Switch the scope to one project
+                  to see its flow.
+                </span>
+              </div>
             ) : (
               <ActivityGraphView
                 slug={project}
                 motion={motion}
+                onSelect={select}
                 onOpenConsole={(name) => setModal({ kind: "console", name })}
               />
             )

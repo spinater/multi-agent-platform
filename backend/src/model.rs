@@ -3133,6 +3133,9 @@ pub struct TraceItem {
     pub last_at: Option<DateTime<Utc>>,
     /// The latest few exact invocations (masked), newest last.
     pub samples: Vec<String>,
+    /// The last lines each of `samples` printed (masked; empty when the transcript has no result for it), same order.
+    #[serde(default)]
+    pub outputs: Vec<String>,
 }
 
 /// `GET /api/sessions/{name}/trace`.
@@ -3174,6 +3177,8 @@ pub struct ActivityNode {
     pub last_at: Option<DateTime<Utc>>,
     /// Exact invocations of a command node (masked).
     pub samples: Vec<String>,
+    /// The tail of what each of `samples` printed (masked; empty when unknown), same order.
+    pub outputs: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]

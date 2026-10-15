@@ -138,10 +138,31 @@ pub struct Raw {
     pub name: String,
     pub detail: String,
     pub at: Option<DateTime<Utc>>,
+    /// The tail of what the call printed, when the transcript has its result.
+    pub output: Option<String>,
 }
 
 fn raw(kind: &'static str, name: impl Into<String>, detail: impl Into<String>, at: Option<DateTime<Utc>>) -> Raw {
-    Raw { kind, name: name.into(), detail: detail.into(), at }
+    Raw { kind, name: name.into(), detail: detail.into(), at, output: None }
+}
+
+const TAIL_LINES: usize = 3;
+
+/// The last few non-empty lines of a call's output, masked and capped.
+pub fn tail(text: &str) -> String {
+    let lines: Vec<&str> = text.lines().map(str::trim_end).filter(|l| !l.trim().is_empty()).collect();
+    let start = lines.len().saturating_sub(TAIL_LINES);
+    let out: Vec<String> = lines[start..].iter().map(|l| cap(&mask(l), 160)).collect();
+    cap(&out.join("\n"), MAX_DETAIL)
+}
+
+/// The text of a Claude `tool_result` block: a string, or an array of `{type: text, text}` parts.
+fn result_text(block: &Value) -> String {
+    match block.get("content") {
+        Some(Value::String(s)) => s.clone(),
+        Some(Value::Array(parts)) => parts.iter().filter_map(|p| p.get("text").and_then(Value::as_str)).collect::<Vec<_>>().join("\n"),
+        _ => String::new(),
+    }
 }
 
 /// What a shell command uses besides being a command: a skill's or knowledge card's file, MAP's knowledge API.
@@ -174,20 +195,32 @@ fn at_of(v: &Value) -> Option<DateTime<Utc>> {
 
 /// Claude Code transcript lines: every `tool_use` block of the assistant's messages.
 pub fn parse_claude(text: &str) -> Vec<Raw> {
-    let mut out = vec![];
+    let mut out: Vec<Raw> = vec![];
+    // A Bash call's id → its command's index in `out`, for the `tool_result` that comes later.
+    let mut calls: HashMap<String, usize> = HashMap::new();
     for line in text.lines() {
-        if !line.contains("\"tool_use\"") {
+        if !line.contains("\"tool_use") && !line.contains("\"tool_result\"") {
             continue;
         }
         let Ok(v) = serde_json::from_str::<Value>(line) else { continue };
         let at = at_of(&v);
         let Some(content) = v.pointer("/message/content").and_then(Value::as_array) else { continue };
+        for block in content.iter().filter(|b| b.get("type").and_then(Value::as_str) == Some("tool_result")) {
+            if let Some(&i) = block.get("tool_use_id").and_then(Value::as_str).and_then(|id| calls.get(id)) {
+                out[i].output = Some(tail(&result_text(block)));
+            }
+        }
         for block in content.iter().filter(|b| b.get("type").and_then(Value::as_str) == Some("tool_use")) {
             let name = block.get("name").and_then(Value::as_str).unwrap_or("?");
             let input = block.get("input").cloned().unwrap_or(Value::Null);
             let s = |k: &str| input.get(k).and_then(Value::as_str).unwrap_or("").to_string();
             match name {
-                "Bash" => from_command(&s("command"), at, &mut out),
+                "Bash" => {
+                    if let Some(id) = block.get("id").and_then(Value::as_str) {
+                        calls.insert(id.to_string(), out.len());
+                    }
+                    from_command(&s("command"), at, &mut out)
+                }
                 "Skill" => {
                     let n = [s("skill"), s("name"), s("command")].into_iter().find(|x| !x.is_empty()).unwrap_or_else(|| "?".into());
                     out.push(raw("skill", n.trim_start_matches('/'), s("args"), at));
@@ -214,7 +247,8 @@ pub fn parse_claude(text: &str) -> Vec<Raw> {
 
 /// Codex rollout lines: `function_call` (`exec_command`, `shell`), `local_shell_call` and `custom_tool_call`.
 pub fn parse_codex(text: &str) -> Vec<Raw> {
-    let mut out = vec![];
+    let mut out: Vec<Raw> = vec![];
+    let mut calls: HashMap<String, usize> = HashMap::new();
     for line in text.lines() {
         if !line.contains("call") {
             continue;
@@ -223,6 +257,18 @@ pub fn parse_codex(text: &str) -> Vec<Raw> {
         let at = at_of(&v);
         let Some(p) = v.get("payload") else { continue };
         let kind = p.get("type").and_then(Value::as_str).unwrap_or("");
+        if kind == "function_call_output" {
+            if let Some(&i) = p.get("call_id").and_then(Value::as_str).and_then(|id| calls.get(id)) {
+                // `output` is the text, or a JSON string `{"output": "...", "metadata": …}`.
+                let text = match p.get("output") {
+                    Some(Value::String(s)) => serde_json::from_str::<Value>(s).ok().and_then(|o| o.get("output").and_then(Value::as_str).map(String::from)).unwrap_or_else(|| s.clone()),
+                    Some(o) => o.get("output").and_then(Value::as_str).unwrap_or("").to_string(),
+                    None => String::new(),
+                };
+                out[i].output = Some(tail(&text));
+            }
+            continue;
+        }
         let name = p.get("name").and_then(Value::as_str).unwrap_or("");
         let args: Value = match p.get("arguments") {
             Some(Value::String(s)) => serde_json::from_str(s).unwrap_or(Value::Null),
@@ -242,7 +288,12 @@ pub fn parse_codex(text: &str) -> Vec<Raw> {
             _ => None,
         };
         match (kind, name) {
-            ("function_call" | "local_shell_call", "exec_command" | "shell" | "container.exec" | "") if cmd.is_some() => from_command(cmd.as_deref().unwrap_or(""), at, &mut out),
+            ("function_call" | "local_shell_call", "exec_command" | "shell" | "container.exec" | "") if cmd.is_some() => {
+                if let Some(id) = p.get("call_id").and_then(Value::as_str) {
+                    calls.insert(id.to_string(), out.len());
+                }
+                from_command(cmd.as_deref().unwrap_or(""), at, &mut out)
+            }
             ("function_call" | "custom_tool_call", n) if !n.is_empty() => out.push(raw("tool", n, "", at)),
             _ => {}
         }
@@ -259,7 +310,7 @@ pub fn aggregate(items: &mut Vec<TraceItem>, new: Vec<Raw>) {
         let i = match index.get(&key) {
             Some(&i) => i,
             None => {
-                items.push(TraceItem { kind: key.0.clone(), name: key.1.clone(), detail: String::new(), count: 0, first_at: r.at, last_at: r.at, samples: vec![] });
+                items.push(TraceItem { kind: key.0.clone(), name: key.1.clone(), detail: String::new(), count: 0, first_at: r.at, last_at: r.at, samples: vec![], outputs: vec![] });
                 index.insert(key, items.len() - 1);
                 items.len() - 1
             }
@@ -268,11 +319,20 @@ pub fn aggregate(items: &mut Vec<TraceItem>, new: Vec<Raw>) {
         t.count += 1;
         if !r.detail.is_empty() {
             t.detail = r.detail.clone();
+            // Older items have no outputs: line them up with the samples first.
+            t.outputs.resize(t.samples.len(), String::new());
+            let output = r.output.unwrap_or_default();
             if t.samples.last() != Some(&r.detail) {
                 t.samples.push(r.detail);
+                t.outputs.push(output);
                 if t.samples.len() > MAX_SAMPLES {
                     t.samples.remove(0);
+                    t.outputs.remove(0);
                 }
+            } else if !output.is_empty()
+                && let Some(last) = t.outputs.last_mut()
+            {
+                *last = output;
             }
         }
         if r.at.is_some() && (t.first_at.is_none() || r.at < t.first_at) {
@@ -529,6 +589,7 @@ fn node(id: impl Into<String>, kind: &str, label: impl Into<String>, layer: u32,
         started_at: None,
         last_at: None,
         samples: vec![],
+        outputs: vec![],
     }
 }
 
@@ -561,6 +622,7 @@ fn hang(g: &mut G, owner: &str, items: &[TraceItem]) {
         n.count = t.count;
         n.detail = (!t.detail.is_empty()).then(|| t.detail.clone());
         n.samples = t.samples.clone();
+        n.outputs = t.outputs.clone();
         n.started_at = t.first_at;
         n.last_at = t.last_at;
         let i = g.node(n);
@@ -847,7 +909,7 @@ pub fn build(input: &Input) -> ActivityGraph {
             _ => None,
         };
         if let Some(owner) = owner {
-            let item = TraceItem { kind: "knowledge".into(), name: format!("search: {}", cap(&q.query, 50)), detail: format!("{} hits", q.hits), count: 1, first_at: Some(q.at), last_at: Some(q.at), samples: vec![] };
+            let item = TraceItem { kind: "knowledge".into(), name: format!("search: {}", cap(&q.query, 50)), detail: format!("{} hits", q.hits), count: 1, first_at: Some(q.at), last_at: Some(q.at), samples: vec![], outputs: vec![] };
             hang(&mut g, &owner, &[item]);
         }
     }
