@@ -70,6 +70,7 @@ function nodeFromArg(arg: string | null): string | null {
   const tail = rest.join("/");
   if (head === "sessions" && tail && tail !== "new") return `s:${tail}`;
   if (head === "tasks" && /^\d+$/.test(tail)) return `t:${tail}`;
+  if (head === "lanes" && tail) return `l:${tail}`;
   return null;
 }
 
@@ -91,6 +92,7 @@ function argFromNode(id: string | null): string | null {
   if (!id) return null;
   if (id.startsWith("s:")) return `sessions/${id.slice(2)}`;
   if (id.startsWith("t:")) return `tasks/${id.slice(2)}`;
+  if (id.startsWith("l:")) return `lanes/${id.slice(2)}`;
   return null;
 }
 

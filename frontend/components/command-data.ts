@@ -2,9 +2,10 @@
 
 import { useEffect, useMemo, useState } from "react";
 
-import { api } from "@/lib/api";
+import { api, lanesApi } from "@/lib/api";
 import { projectColor, providerColor } from "@/lib/colors";
 import type { Event } from "@/lib/generated/Event";
+import type { LaneInfo } from "@/lib/generated/LaneInfo";
 import type { PipelineInfo } from "@/lib/generated/PipelineInfo";
 import type { ProviderInfo } from "@/lib/generated/ProviderInfo";
 import type { Session } from "@/lib/generated/Session";
@@ -13,7 +14,7 @@ import { heldReason, isHeld } from "@/lib/intake";
 
 import { useApp } from "./app-context";
 import { SESSION_TONE, type Tone } from "./command-ui";
-import { QUEUE, buildGraph, buildStages, type Graph, type Group } from "./graph/model";
+import { QUEUE, buildGraph, buildStages, laneSession, type Graph, type Group } from "./graph/model";
 import { workspaceName } from "./shell/top-bar";
 
 /** Key of a project in the all-projects groups; the default workspace has no slug. */
@@ -56,6 +57,19 @@ export function useCommand(pinned: number | null = null) {
   const { sessions: allSessions, tasks: allTasks, events: allEvents, providers, projects, server, scope, project, orchestrator } = app;
   const all = scope === "all";
   const [pipeline, setPipeline] = useState<PipelineInfo | null>(null);
+  const [lanes, setLanes] = useState<LaneInfo[]>([]);
+
+  // Lanes (agent sessions MAP watches) join the graph: the project's, or every project's in all-projects mode.
+  useEffect(() => {
+    let stop = false;
+    const load = () => lanesApi.list(all ? null : project).then((l) => !stop && setLanes(l), () => {});
+    void load();
+    const t = window.setInterval(load, 15_000);
+    return () => {
+      stop = true;
+      window.clearInterval(t);
+    };
+  }, [all, project]);
 
   useEffect(() => {
     let stop = false;
@@ -125,6 +139,9 @@ export function useCommand(pinned: number | null = null) {
       for (const s of sessions) if (!groups.some((g) => g.key === s.provider)) groups.push({ key: s.provider, label: s.provider, color: providerColor(s.provider), kind: "provider", available: false });
       groups.push({ key: QUEUE, label: "queue", color: "var(--idle)", kind: "queue" });
     }
+    // The default workspace has no lanes: `?project=` was not sent, so keep only lanes of no project there.
+    const shownLanes = all ? lanes : project === null ? lanes.filter((l) => l.project === null) : lanes.filter((l) => l.project === project);
+    if (!all && shownLanes.length) groups.splice(groups.length - 1, 0, { key: "lanes", label: "lanes", color: "var(--p-claude)", kind: "provider", available: true });
     const groupKeys = new Set(groups.map((g) => g.key));
     const stages = buildStages(pipeline, server?.database, tasks.some((t) => t.git));
     const graph: Graph = buildGraph({
@@ -137,6 +154,8 @@ export function useCommand(pinned: number | null = null) {
       groupOfLooseTask: (t) => (all ? projectKey(t.project) : t.provider && groupKeys.has(t.provider) && t.status === "done" ? t.provider : QUEUE),
       taskLabel,
       sessionLabel,
+      lanes: shownLanes.map((lane) => ({ lane, session: laneSession(lane) })),
+      groupOfLane: (l) => (all ? projectKey(l.project) : "lanes"),
     });
 
     const needs: Need[] = [];
@@ -182,8 +201,10 @@ export function useCommand(pinned: number | null = null) {
       /** Done tasks in scope (left out of `tasks`): counts and the pipeline card's "recently done". */
       doneTasks,
       doneCount: doneTasks.length,
+      /** Lanes in the graph (`l:<name>` nodes). */
+      lanes: shownLanes,
     };
-  }, [all, allSessions, allTasks, allEvents, providers, projects, server, project, orchestrator, pipeline, pinned]);
+  }, [all, allSessions, allTasks, allEvents, providers, projects, server, project, orchestrator, pipeline, pinned, lanes]);
 }
 
 export type Command = ReturnType<typeof useCommand>;

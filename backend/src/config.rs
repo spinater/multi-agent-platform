@@ -990,6 +990,9 @@ pub struct ProviderSpec {
     /// Pane text of harmless first-run pickers (a colour scheme, a welcome page) MAP answers with Enter (the
     /// default) before typing `login_send`. Never a folder-trust or permission question: those wait for a person.
     pub login_onboarding: Vec<String>,
+    /// Pane text of a terms or data-use question the CLI asks around sign-in (agy: "Terms of Service & Data Use").
+    /// MAP never answers it: the sign-in shows it as `consent` for the person to decide in the console.
+    pub login_consent: Vec<String>,
     /// Files the CLI keeps its credentials in (`~/` is the home directory). Only their existence and whether
     /// they parse are checked; empty: the sign-in state is unknown.
     pub credentials: Vec<String>,
@@ -1143,6 +1146,7 @@ struct ProviderOverride {
     login_warning: Option<String>,
     login_ready: Option<Vec<String>>,
     login_onboarding: Option<Vec<String>>,
+    login_consent: Option<Vec<String>>,
     credentials: Option<Vec<String>>,
     api_key_env: Option<String>,
     version: Option<Vec<String>>,
@@ -1204,6 +1208,7 @@ pub fn builtin_providers() -> BTreeMap<String, ProviderSpec> {
             login_warning: None,
             login_ready: vec![],
             login_onboarding: vec![],
+            login_consent: vec![],
             credentials: strings(&["~/.claude/.credentials.json"]),
             api_key_env: Some("ANTHROPIC_API_KEY".into()),
             version: strings(&["{binary}", "--version"]),
@@ -1256,6 +1261,7 @@ pub fn builtin_providers() -> BTreeMap<String, ProviderSpec> {
             login_warning: Some("codex login signs out the current account as soon as it starts, before you approve the new one.".into()),
             login_ready: vec![],
             login_onboarding: vec![],
+            login_consent: vec![],
             credentials: strings(&["~/.codex/auth.json"]),
             api_key_env: Some("OPENAI_API_KEY".into()),
             version: strings(&["{binary}", "--version"]),
@@ -1301,7 +1307,11 @@ pub fn builtin_providers() -> BTreeMap<String, ProviderSpec> {
             // agy's first run on a fresh home: "Welcome to Antigravity CLI! Choose your color scheme: … [Next]
             // ↑/↓ Navigate · enter Confirm". Enter keeps the default and moves on.
             login_onboarding: strings(&["Choose your color scheme", "[Next]", "enter Confirm", "Select login method"]),
-            credentials: strings(&["~/.gemini/jetski-standalone-oauth-token"]),
+            // agy 1.3 after the sign-in: "Terms of Service & Data Use … [x] Yes, I agree to help improve Antigravity CLI
+            // by allowing Google to collect and use my Interactions data … [Previous] [Done]".
+            login_consent: strings(&["Terms of Service & Data Use"]),
+            // agy 1.3 keeps its token under antigravity-cli/; older builds wrote jetski-standalone-oauth-token.
+            credentials: strings(&["~/.gemini/antigravity-cli/antigravity-oauth-token", "~/.gemini/jetski-standalone-oauth-token"]),
             api_key_env: Some("GEMINI_API_KEY".into()),
             version: strings(&["{binary}", "--version"]),
             latest: Some(LatestSource {
@@ -1356,6 +1366,7 @@ pub fn builtin_providers() -> BTreeMap<String, ProviderSpec> {
             login_warning: None,
             login_ready: vec![],
             login_onboarding: vec![],
+            login_consent: vec![],
             // Where the sign-in is kept is not documented (a keyring where there is one): the state is unknown.
             credentials: vec![],
             api_key_env: Some("CURSOR_API_KEY".into()),
@@ -1408,6 +1419,7 @@ pub fn builtin_providers() -> BTreeMap<String, ProviderSpec> {
             login_warning: None,
             login_ready: vec![],
             login_onboarding: vec![],
+            login_consent: vec![],
             // The token is in the system keychain (or, without one, in config.json next to other state), so a file
             // cannot tell: the state is unknown unless the variable below is set.
             credentials: vec![],
@@ -1518,6 +1530,7 @@ impl ProviderOverride {
             login_warning: optional(self.login_warning, base.login_warning),
             login_ready: self.login_ready.unwrap_or(base.login_ready),
             login_onboarding: self.login_onboarding.unwrap_or(base.login_onboarding),
+            login_consent: self.login_consent.unwrap_or(base.login_consent),
             credentials: self.credentials.unwrap_or(base.credentials),
             api_key_env: optional(self.api_key_env, base.api_key_env),
             version: self.version.unwrap_or(base.version),

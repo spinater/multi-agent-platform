@@ -187,6 +187,9 @@ pub fn phase(spec: &ProviderSpec, pane: &str, parsed: &Parsed, live: bool) -> (S
     } else if bottom(pane, 4).to_lowercase().contains("got an error") {
         // agy after a wrong or expired code: "Got an error: token exchange failed … Press any key to go back."
         ("failed", Some("The CLI refused the code (wrong or expired). Start the sign-in again and paste the new code."))
+    } else if spec.login_consent.iter().any(|m| !m.is_empty() && bottom(pane, 40).contains(m.as_str())) {
+        // A terms / data-use question: the person decides; MAP never accepts it for them.
+        ("consent", Some("The CLI asks you to accept its terms, and whether Google may use your interactions (the [x] box, on by default). Decide below: Enter toggles the box, ↓ moves to [Done], Enter again finishes."))
     } else if parsed.wants_code {
         ("waiting_for_code", Some("Paste the code the browser gave you."))
     } else if parsed.url.is_some() || parsed.code.is_some() {
@@ -222,6 +225,10 @@ pub async fn send_when_ready(hub: &Hub, spec: &ProviderSpec, target: &str, text:
         let shown = parse(&crate::detect::strip_ansi(&pane));
         if shown.url.is_some() || shown.wants_code || shown.success {
             return Ok(true);
+        }
+        if spec.login_consent.iter().any(|m| !m.is_empty() && bottom(&pane, 40).contains(m.as_str())) {
+            hub.event(Level::Info, "provider.login", Some(target), None, "The CLI asks you to accept its terms; answer it in the sign-in console").await;
+            return Ok(false);
         }
         match readiness(spec, &pane) {
             Readiness::Ready => {
@@ -540,6 +547,9 @@ mod tests {
         let code = "Please visit https://accounts.google.com/o/oauth2/auth?x=1\nOr, paste the authorization code here and press Enter:\n";
         assert_eq!(phase(&spec, code, &parse(code), true).0, "waiting_for_code");
         assert_eq!(phase(&spec, "Login successful", &parse("Login successful"), true).0, "success");
+        let tos = "Terms of Service & Data Use\n  > [x] Yes, I agree to help improve Antigravity CLI by allowing\n      Google to collect and use my Interactions data\n    [Previous]      [Done]\n  ↑/↓ Navigate · enter Toggle\n";
+        assert_eq!(phase(&spec, tos, &parse(tos), true).0, "consent", "the person decides; MAP never accepts terms");
+        assert_ne!(readiness(&spec, tos), Readiness::Onboarding, "never answered with Enter");
     }
 
     /// A fake `agy` on a private tmux socket: the colour-scheme picker, then the prompt, `/login`, the code prompt,

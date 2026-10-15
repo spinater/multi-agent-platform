@@ -11,6 +11,7 @@ import { attachCommand } from "@/lib/tmux";
 
 import { PhaseBar } from "./activity";
 import { useApp } from "./app-context";
+import { laneSession } from "./graph/model";
 import { keySlug, type Command } from "./command-data";
 import { Btn, LEVEL_TONE, Pill, SESSION_TONE, TASK_TONE, TONE_TEXT, hms, rel, type Tone } from "./command-ui";
 import { PromptBar, closeSession, usePane } from "./console";
@@ -67,7 +68,7 @@ export function DetailCard({
   onOpenConsole: (name: string) => void;
   onToggleRun: () => void;
 }) {
-  const { now, toast, openAuth, setProject, setScope, server, projects } = useApp();
+  const { now, toast, openAuth, setProject, setScope, server, projects, go } = useApp();
   const ty = id.split(":")[0];
   const key = id.slice(ty.length + 1);
   const session = ty === "s" ? cmd.sessions.find((s) => s.name === key) : undefined;
@@ -106,6 +107,28 @@ export function DetailCard({
         ],
         blocks: [],
         actions: [{ label: running ? "Pause orchestrator" : "Run orchestrator", kind: running ? "ghost" : "primary", run: onToggleRun }, { label: "New task", run: onNewTask }],
+      };
+    }
+    if (ty === "l") {
+      const lane = cmd.lanes.find((l) => l.name === key);
+      if (!lane) return null;
+      const ls = laneSession(lane);
+      return {
+        kicker: `lane${lane.role ? ` · ${lane.role}` : ""}`,
+        title: lane.name,
+        color: "var(--p-claude)",
+        badge: ls.state.replace("_", " "),
+        tone: SESSION_TONE[ls.state] ?? "idle",
+        rows: [
+          ["Project", lane.project ?? "none"],
+          ["Sessions", lane.sessions.map((x) => `${x.name} · ${x.state.replace("_", " ")}${x.context_pct != null ? ` · ${Math.round(x.context_pct)}% context` : ""}${x.attached ? " · attached" : ""}`).join("; ") || "no session running"],
+          ["Status", lane.status ? `${lane.status.state ?? ""}${lane.status.note ? ` · ${lane.status.note}` : ""}` : null],
+          ["Actions", lane.actions ? "MAP may /clear and prompt it when idle" : "watch only"],
+          ["Last", lane.history[0] ? `${lane.history[0].kind} · ${lane.history[0].message}` : null],
+        ],
+        blocks: [],
+        actions: [{ label: "Open in Lanes →", kind: "primary", run: () => go("lanes", lane.name), nav: true }, flyBtn],
+        project: lane.project,
       };
     }
     if (ty === "p" && cmd.all) {

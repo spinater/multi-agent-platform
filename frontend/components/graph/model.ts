@@ -1,5 +1,6 @@
 import type { Event } from "@/lib/generated/Event";
 import type { PipelineInfo } from "@/lib/generated/PipelineInfo";
+import type { LaneInfo } from "@/lib/generated/LaneInfo";
 import type { Session } from "@/lib/generated/Session";
 import type { Task } from "@/lib/generated/Task";
 
@@ -108,7 +109,37 @@ export type BuildInput = {
   sessionLabel: (s: Session) => string;
   /** At most this many run dots, newest first. */
   maxRuns?: number;
+  /** Lanes (agent sessions MAP watches, `lanes.rs`) as session-like nodes `l:<name>` under `groupOfLane`. */
+  lanes?: { lane: LaneInfo; session: Session }[];
+  groupOfLane?: (l: LaneInfo) => string;
 };
+
+const LANE_STATE: Record<string, Session["state"]> = { busy: "working", idle: "idle", waiting: "waiting_input", pending_input: "waiting_input", rate_limited: "rate_limited", missing: "exited" };
+
+/** A lane as a session, so the canvases draw it like one: its loudest tmux session's state. */
+export function laneSession(l: LaneInfo): Session {
+  const order = ["missing", "waiting", "pending_input", "rate_limited", "busy", "idle"];
+  const worst = order.find((st) => l.sessions.some((x) => x.state === st));
+  const state: Session["state"] = l.stopped || !l.sessions.length ? "exited" : (LANE_STATE[worst ?? "idle"] ?? "idle");
+  const now = l.checked_at ?? new Date(0).toISOString();
+  return {
+    name: l.name,
+    provider: "claude",
+    model: l.role ?? "lane",
+    role: "manual",
+    task_id: null,
+    state,
+    detail: l.sessions.map((x) => `${x.name}: ${x.why}`).join(" · ") || null,
+    rate_limit_reset_at: null,
+    wakeups: 0,
+    last_line: null,
+    attached: l.sessions.some((x) => x.attached),
+    created_at: now,
+    last_activity_at: now,
+    project: l.project,
+    spawned_by: "lane",
+  };
+}
 
 export function buildGraph(input: BuildInput): Graph {
   const { sessions, tasks, events, groups, stages } = input;
@@ -130,6 +161,10 @@ export function buildGraph(input: BuildInput): Graph {
     const g = taskGroup(t);
     nodes.push({ id: `t:${t.id}`, type: "task", group: g, label: `${input.taskLabel(t)} ${t.title}`, color: gcolor(g), parent: s ? `s:${s.name}` : `p:${g}`, ref: { kind: "task", task: t } });
   }
+  for (const { lane, session } of input.lanes ?? []) {
+    const g = input.groupOfLane?.(lane) ?? "lanes";
+    nodes.push({ id: `l:${lane.name}`, type: "session", group: g, label: `${lane.role ? `${lane.role} · ` : ""}${lane.label ?? lane.name}`, color: gcolor(g), parent: `p:${g}`, ref: { kind: "session", session } });
+  }
   for (const st of stages) nodes.push({ id: `g:${st.id}`, type: "stage", group: null, label: st.label, color: "var(--text-2)", parent: "orch", ref: { kind: "stage", stage: st } });
   let runs = 0;
   for (const e of events) {
@@ -145,9 +180,11 @@ export function buildGraph(input: BuildInput): Graph {
   const add = (a: string, b: string, kind: LinkKind, active: boolean) => links.push({ id: `${a}>${b}`, a, b, kind, active });
   const working = new Set(sessions.filter((s) => WORKING.has(s.state)).map((s) => s.name));
   const activeGroups = new Set(sessions.filter((s) => working.has(s.name)).map(input.groupOfSession));
+  for (const { lane, session } of input.lanes ?? []) if (session.state === "working") activeGroups.add(input.groupOfLane?.(lane) ?? "lanes");
   const taskIds = new Set(tasks.map((t) => t.id));
   for (const g of groups) add("orch", `p:${g.key}`, "hub", activeGroups.has(g.key));
   for (const s of sessions) add(`p:${input.groupOfSession(s)}`, `s:${s.name}`, "own", working.has(s.name));
+  for (const { lane, session } of input.lanes ?? []) add(`p:${input.groupOfLane?.(lane) ?? "lanes"}`, `l:${lane.name}`, "own", session.state === "working");
   for (const s of sessions) if (s.task_id != null && taskIds.has(s.task_id)) add(`s:${s.name}`, `t:${s.task_id}`, "work", working.has(s.name));
   for (const t of tasks) if (!t.session || !byName.has(t.session)) add(`p:${taskGroup(t)}`, `t:${t.id}`, "own", false);
   for (const t of tasks) for (const d of t.depends_on) if (taskIds.has(d)) add(`t:${d}`, `t:${t.id}`, "dep", false);

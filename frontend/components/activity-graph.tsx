@@ -11,14 +11,16 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import { activityApi } from "@/lib/api";
+import { activityApi, lanesApi } from "@/lib/api";
 import { providerColor } from "@/lib/colors";
 import type { ActivityGraph } from "@/lib/generated/ActivityGraph";
 import type { ActivityNode } from "@/lib/generated/ActivityNode";
+import type { LaneInfo } from "@/lib/generated/LaneInfo";
 import type { Task } from "@/lib/generated/Task";
 import { isHeld } from "@/lib/intake";
 
 import { useApp } from "./app-context";
+import { laneSession } from "./graph/model";
 
 // Columns: [x, width] on the 1250-wide canvas.
 const COL = {
@@ -160,6 +162,19 @@ export function ActivityGraphView({
   const [zoom, setZoom] = useState<number | null>(null);
   const [fit, setFit] = useState(1);
   const wrap = useRef<HTMLDivElement>(null);
+  const [watched, setWatched] = useState<LaneInfo[]>([]);
+
+  // The project's watched lanes (tmux sessions MAP watches, `lanes.rs`) join the lanes band.
+  useEffect(() => {
+    let live = true;
+    const load = () => lanesApi.list(slug).then((l) => live && setWatched(l.filter((x) => x.project === slug && !x.owned)), () => {});
+    void load();
+    const t = window.setInterval(load, 15_000);
+    return () => {
+      live = false;
+      window.clearInterval(t);
+    };
+  }, [slug]);
 
   useEffect(() => {
     const el = wrap.current;
@@ -213,7 +228,33 @@ export function ActivityGraphView({
     for (const list of usesOf.values())
       list.sort((a, b) => USE_ORDER.indexOf(a.kind as UseKind) - USE_ORDER.indexOf(b.kind as UseKind) || b.count - a.count);
     const creators = graph.nodes.filter((n) => n.layer === 0 && ["owner", "manager", "planner"].includes(n.kind));
-    const lanes = graph.nodes.filter((n) => n.kind === "agent" && n.task_id == null && !n.parent);
+    const owned = graph.nodes.filter((n) => n.kind === "agent" && n.task_id == null && !n.parent);
+    // Watched lanes as band nodes (`watch:<name>`), after MAP's own.
+    const lanes = [
+      ...owned,
+      ...watched.map((l): ActivityNode => {
+        const ss = laneSession(l);
+        return {
+          id: `watch:${l.name}`,
+          kind: "agent",
+          label: `${l.role ? `${l.role} · ` : ""}${l.label ?? l.name}`,
+          detail: "watched lane",
+          count: 1,
+          state: ss.state,
+          provider: "claude",
+          model: null,
+          task_id: null,
+          session: null,
+          parent: null,
+          layer: 1,
+          row: 0,
+          started_at: null,
+          last_at: l.checked_at,
+          samples: [],
+          outputs: [],
+        };
+      }),
+    ];
     const laneFrom = new Map(graph.edges.filter((e) => e.kind === "spawned" && e.label === "lane").map((e) => [e.to, e.from]));
     const creatorOf = new Map(graph.edges.filter((e) => e.kind === "created").map((e) => [e.to, e.from]));
 
@@ -305,7 +346,7 @@ export function ActivityGraphView({
       height: Math.max(height, maxC),
       hiddenDone,
     };
-  }, [graph, now, showDone, open, taskById]);
+  }, [graph, now, showDone, open, taskById, watched]);
 
   const sinceMs = RANGE_MS[range];
   const hiddenOld = projectTasks.filter(
@@ -652,14 +693,14 @@ export function ActivityGraphView({
           w: 196,
           h: 40,
           glyph: "≡",
-          title: `lane · ${l.label}`,
+          title: l.id.startsWith("watch:") ? l.label : `lane · ${l.label}`,
           meta: [l.provider, l.state, ago(l.last_at, now)].filter(Boolean).join(" · "),
           color: "var(--p-claude)",
           border: tint("var(--p-claude)", 40),
           dashed: true,
           op: focus ? 0.3 : 1,
           badge: working ? { text: "working", color: "var(--ok)" } : undefined,
-          tip: `Persistent lane opened by the ${from === "manager" ? "manager" : "owner"}`,
+          tip: l.id.startsWith("watch:") ? "A tmux session MAP watches for this project" : `Persistent lane opened by the ${from === "manager" ? "manager" : "owner"}`,
           onClick: () => setPop({ kind: "lane", lane: l }),
         });
         if (fy !== undefined) {
@@ -670,7 +711,7 @@ export function ActivityGraphView({
           });
         }
       });
-      label(380, v.laneY - 12, `opened by the ${v.laneFrom.get(v.lanes[0].id) === "owner" ? "owner" : "manager"}`, "var(--p-claude)", tint("var(--p-claude)", 30), focus ? 0.3 : 1);
+      label(380, v.laneY - 12, v.lanes.every((l) => l.id.startsWith("watch:")) ? "lanes · watched sessions" : `opened by the ${v.laneFrom.get(v.lanes[0].id) === "owner" ? "owner" : "manager"}`, "var(--p-claude)", tint("var(--p-claude)", 30), focus ? 0.3 : 1);
     }
 
     const rowById = new Map<number, Row>();
@@ -1012,6 +1053,7 @@ export function ActivityGraphView({
       foot = `tasks record created_by = manager; lanes record spawned_by = manager:${slug}`;
     } else {
       const l = pop.lane;
+      const wl = l.id.startsWith("watch:") ? watched.find((x) => `watch:${x.name}` === l.id) : undefined;
       glyph = "≡";
       color = "var(--p-claude)";
       kicker = `persistent lane · spawned_by ${v.laneFrom.get(l.id) === "manager" ? `manager:${slug}` : "owner"}`;
@@ -1019,6 +1061,15 @@ export function ActivityGraphView({
       lines = [{ t: [l.provider, l.model, l.state, `last active ${ago(l.last_at, now)}`].filter(Boolean).join(" · ") }];
       if (l.session) link = { text: "Open its console →", go: () => onOpenConsole(l.session!) };
       foot = "started and closed through the hub like any MAP session";
+      if (wl) {
+        kicker = `watched lane${wl.role ? ` · ${wl.role}` : ""}`;
+        title = wl.name;
+        lines = wl.sessions.length
+          ? wl.sessions.map((x) => ({ t: `${x.name} · ${x.state.replace("_", " ")}${x.context_pct != null ? ` · ${Math.round(x.context_pct)}% context` : ""} · ${x.why}` }))
+          : [{ t: "no tmux session matches it right now" }];
+        link = { text: "Open in Lanes →", go: () => go("lanes", wl.name) };
+        foot = wl.actions ? "MAP may /clear and prompt it when idle and nobody is attached" : "watch only: MAP never types into it";
+      }
     }
     return (
       <div className="absolute bottom-11 left-3.5 z-10 flex max-h-[60%] w-[min(420px,calc(100%-28px))] flex-col gap-2 overflow-auto rounded-[10px] border border-line-3 bg-menu p-3 shadow-[0_16px_44px_rgba(0,0,0,.55)]">

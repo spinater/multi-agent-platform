@@ -655,9 +655,11 @@ provider's own login in a helper session with MAP's folder. The per-provider fie
 blindly after `startup_secs`: it watches the pane for up to 60 s, answers the provider's known harmless first-run
 pickers with Enter (`login_onboarding`; agy's colour-scheme picker, `[Next]`, `enter Confirm`, and its login-method picker, where Enter takes Google OAuth), and types
 `login_send` only once the CLI's prompt shows (`login_ready`, else `idle_markers`). A folder-trust or permission
-question is never answered (`detect::trust_prompt`); it waits for you in the console. `GET
+question is never answered (`detect::trust_prompt`); it waits for you in the console. Neither is a terms or data-use
+question (`login_consent`; agy's "Terms of Service & Data Use" after sign-in): the phase is `consent` and you decide.
+agy 1.3 keeps its token in `~/.gemini/antigravity-cli/antigravity-oauth-token`. `GET
 /api/providers/{name}/login` returns a `phase` (`starting`, `onboarding`, `ready`, `browser`, `waiting_for_code`,
-`success`, `console`, `ended`) and a `hint` the sign-in modal shows, and a pasted code goes through `POST
+`success`, `consent`, `console`, `ended`) and a `hint` the sign-in modal shows, and a pasted code goes through `POST
 …/login/code`, which types it only while the code prompt is the last line on screen. A sign-in finished anywhere
 (the modal, a terminal) reaches the dashboard without a reload: the watcher compares each provider's availability,
 sign-in, API key and cooldown every tick and pushes a `providers` WebSocket message when one changes.

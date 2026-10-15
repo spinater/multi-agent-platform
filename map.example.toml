@@ -268,6 +268,8 @@ timeout_secs = 600
 # first-run pickers MAP answers with Enter first (never a trust or permission question). agy's defaults:
 # login_ready = ["Type your message"]
 # login_onboarding = ["Choose your color scheme", "[Next]", "enter Confirm", "Select login method"]
+# A terms / data-use question MAP never answers: the sign-in shows it as `consent` for you to decide in its console.
+# login_consent = ["Terms of Service & Data Use"]
 
 # Projects: each one is a folder on this machine (used in place), a corpus repo and its own Reflex decision engine
 # (https://reflex.gist.rs).

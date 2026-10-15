@@ -207,7 +207,7 @@ function AuthDialog({ provider, onClose }: { provider: string; onClose: () => vo
                   <UrlLink url={state.url} />
                 </div>
               ) : (
-                <p className={clsx("font-mono text-[12px]", state?.phase === "console" || state?.phase === "failed" ? "text-warn" : "text-info")}>
+                <p className={clsx("font-mono text-[12px]", state?.phase === "console" || state?.phase === "failed" || state?.phase === "consent" ? "text-warn" : "text-info")}>
                   {live
                     ? state?.hint
                       ? `${state.hint}${state.phase === "onboarding" ? dots : ""}`
@@ -235,7 +235,7 @@ function AuthDialog({ provider, onClose }: { provider: string; onClose: () => vo
                 </div>
               )}
               {lines.length > 0 && (
-                <Inset className={clsx("gap-0 text-[11px]", state?.phase === "console" && "ring-1 ring-warn/60")}>
+                <Inset className={clsx("gap-0 text-[11px]", (state?.phase === "console" || state?.phase === "consent") && "ring-1 ring-warn/60")}>
                   <span className="text-muted">$ {login?.command}</span>
                   {lines.map((l, i) => (
                     <span key={i} className="break-all whitespace-pre-wrap text-text-2">
