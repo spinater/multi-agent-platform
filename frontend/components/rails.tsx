@@ -6,6 +6,7 @@ import type { ReactNode } from "react";
 
 import { providerColor } from "@/lib/colors";
 import type { Event } from "@/lib/generated/Event";
+import { useT } from "@/lib/i18n";
 import type { OrchestratorStatus } from "@/lib/generated/OrchestratorStatus";
 
 import { ActivityFeed } from "./activity";
@@ -56,6 +57,7 @@ export function LeftColumn({
   onOpenProject: (slug: string | null) => void;
   now: number;
 }) {
+  const tr = useT();
   const running = !!orchestrator?.running;
   const counts: Record<string, number> = {};
   for (const t of cmd.tasks) counts[t.status] = (counts[t.status] ?? 0) + 1;
@@ -70,7 +72,7 @@ export function LeftColumn({
       {cmd.all ? (
         <section className="flex flex-col gap-3.5">
           <SideTitle glyph={<CircleDot className="size-3" />} note={`${cmd.sessions.filter((s) => s.state !== "exited").length} live sessions`}>
-            All projects
+            {tr("cc.allProjects")}
           </SideTitle>
           <div className="flex flex-col gap-2">
             <span className={clsx(big, "text-accent")}>
@@ -117,11 +119,11 @@ export function LeftColumn({
       ) : (
         <section className="flex flex-col gap-3.5">
           <SideTitle glyph={<Hexagon className="size-3" strokeWidth={2.5} />} note={`${cmd.active}/${orchestrator?.max_parallel ?? 1} active`}>
-            Orchestrator
+            {tr("cc.orchestrator")}
           </SideTitle>
           <div className="flex items-end justify-between gap-3">
             <div className="flex min-w-0 flex-col gap-2">
-              <span className={clsx(big, running ? "text-accent" : "text-idle")}>{running ? "Running" : "Paused"}</span>
+              <span className={clsx(big, running ? "text-accent" : "text-idle")}>{running ? tr("cc.running") : tr("cc.paused")}</span>
               <span className={sub}>
                 order{" "}
                 {(cmd.pipeline?.provider_order ?? cmd.providers.map((p) => p.name)).filter((n) => cmd.providers.find((p) => p.name === n)?.available).join(" → ") || "none available"}
@@ -180,12 +182,12 @@ export function LeftColumn({
           note={
             !cmd.all && (
               <Btn size="sm" kind="primary" className="h-[26px] rounded-md" onClick={onNewTask}>
-                + New task
+                {tr("cc.newTask")}
               </Btn>
             )
           }
         >
-          {cmd.all ? "All tasks" : "Task queue"}
+          {cmd.all ? tr("cc.allTasks") : tr("cc.queue")}
         </SideTitle>
         {(taskSummary || cmd.doneCount > 0) && (
           <span className="font-mono text-[10.5px] leading-none text-muted">
@@ -221,6 +223,7 @@ export function RightColumn({
   onOpenEvent: (e: Event) => void;
   now: number;
 }) {
+  const tr = useT();
   const live = cmd.sessions.filter((s) => s.state !== "exited").length;
   const who = (e: Event) => {
     const p = cmd.all ? cmd.eventProject(e) : undefined;
@@ -231,7 +234,7 @@ export function RightColumn({
     <Column side="right">
       <section className="flex flex-col gap-3">
         <SideTitle glyph={<Flag className="size-3" />} note="watcher can't fix these">
-          Needs you
+          {tr("cc.needsYou")}
         </SideTitle>
         <div className="flex items-center gap-3.5">
           <span className="font-sans text-[46px] leading-none font-semibold tracking-[-0.02em] text-accent">{cmd.needs.length}</span>
@@ -255,7 +258,7 @@ export function RightColumn({
 
       <section className="flex flex-col gap-2.5">
         <SideTitle glyph={<ActivityIcon className="size-3" />} note="newest first">
-          Live activity
+          {tr("cc.live")}
         </SideTitle>
         <ActivityFeed cmd={cmd} now={now} onOpen={select} />
       </section>
@@ -270,13 +273,13 @@ export function RightColumn({
               </span>
               {!cmd.all && (
                 <Btn size="sm" className="rounded-md" onClick={onNewSession}>
-                  + New
+                  {tr("cc.new")}
                 </Btn>
               )}
             </>
           }
         >
-          Sessions
+          {tr("cc.sessions")}
         </SideTitle>
         <SessionRows
           sessions={cmd.sessions}
@@ -290,7 +293,7 @@ export function RightColumn({
 
       <section className="flex flex-col gap-2.5">
         <SideTitle glyph="≡" note="newest first">
-          Event log
+          {tr("cc.events")}
         </SideTitle>
         <EventLog events={cmd.events} who={who} onOpen={onOpenEvent} />
       </section>

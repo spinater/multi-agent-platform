@@ -10,6 +10,8 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "@/lib/api";
 import type { KnowledgeOverview } from "@/lib/generated/KnowledgeOverview";
 
+import { useT } from "@/lib/i18n";
+
 import { useApp } from "../app-context";
 import { DocViewer } from "../knowledge/doc-viewer";
 import { KnowledgeGraphView } from "../knowledge/graph";
@@ -35,6 +37,7 @@ function parseArg(arg: string | null): { slug: string | null; doc: string | null
 
 export function KnowledgeScreen() {
   const { route, go, projects, project, setProject, setScope, connection, now, toast } = useApp();
+  const tt = useT();
   const arg = parseArg(route.arg);
   // The route's project, else the current one, else the first: knowledge belongs to a project folder.
   const slug = arg.slug ?? (projects.some((p) => p.project.slug === project) ? project : (projects[0]?.project.slug ?? null));
@@ -99,7 +102,7 @@ export function KnowledgeScreen() {
       <>
         <TopBar />
         <Main>
-          <PageHeader kicker="Knowledge" title="Knowledge" lead="Each project's docs, their health, and what agents look up." />
+          <PageHeader kicker="Knowledge" title={tt("nav.knowledge")} lead="Each project's docs, their health, and what agents look up." />
           {connection === "connecting" ? (
             <Empty>Loading projects…</Empty>
           ) : (
@@ -126,7 +129,7 @@ export function KnowledgeScreen() {
       <Main>
         <PageHeader
           kicker={`Project · ${projectName}`}
-          title="Knowledge"
+          title={tt("nav.knowledge")}
           lead="The docs in the project folder (knowledge cards and their index, requirements, task sheets, rulebooks) and what MAP remembers of finished tasks and approved plans."
           actions={
             <>

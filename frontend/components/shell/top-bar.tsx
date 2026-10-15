@@ -30,8 +30,9 @@ export function Clock() {
 
 function ProjectSwitcher() {
   const { projects, project, setProject, setScope, scope, server, go, route } = useApp();
+  const t = useT();
   const [open, setOpen] = useState(false);
-  const current = scope === "all" ? "All projects" : project === null ? workspaceName(server?.workspace_dir) : (projects.find((p) => p.project.slug === project)?.project.name ?? project);
+  const current = scope === "all" ? t("sw.all") : project === null ? workspaceName(server?.workspace_dir) : (projects.find((p) => p.project.slug === project)?.project.name ?? project);
   const pick = (slug: string | null) => {
     setProject(slug);
     setScope("project");
@@ -63,11 +64,11 @@ function ProjectSwitcher() {
         <>
           <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
           <div role="menu" className="absolute top-9 left-0 z-50 w-[290px] max-w-[calc(100vw-32px)] rounded-[10px] border border-line-2 bg-menu p-1.5 shadow-[0_20px_50px_rgba(0,0,0,.55)]">
-            <p className="label px-2.5 pt-1.5 pb-1">Switch project</p>
-            {row("", workspaceName(server?.workspace_dir), `${server?.workspace_dir ?? ""} · default workspace`, scope === "project" && project === null, () => pick(null), "var(--muted)")}
+            <p className="label px-2.5 pt-1.5 pb-1">{t("sw.title")}</p>
+            {row("", workspaceName(server?.workspace_dir), `${server?.workspace_dir ?? ""} · ${t("sw.default")}`, scope === "project" && project === null, () => pick(null), "var(--muted)")}
             {projects.map((p) => row(p.project.slug, p.project.name, `${p.workspace} · reflex ${p.reflex.state.replace("_", " ")}`, scope === "project" && project === p.project.slug, () => pick(p.project.slug)))}
             <div className="my-1 border-t border-line" />
-            {row("*", "All projects", "merged view, read-only", scope === "all", () => {
+            {row("*", t("sw.all"), t("sw.allSub"), scope === "all", () => {
               setScope("all");
               setOpen(false);
               if (route.screen !== "command") go("command");
@@ -79,7 +80,7 @@ function ProjectSwitcher() {
               }}
               className="flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left font-mono text-[11.5px] text-link hover:bg-white/5"
             >
-              + New project
+              {t("sw.new")}
             </button>
           </div>
         </>
@@ -88,24 +89,19 @@ function ProjectSwitcher() {
   );
 }
 
-/** EN | TH: the interface language (design: LangSwitch.dc.html). */
+/** EN ⇄ TH: one button that shows the current interface language and switches it (design: LangSwitch.dc.html). */
 export function LangSwitch() {
   const lang = useLang();
   const t = useT();
   return (
-    <div title={t("lang.title")} className="flex gap-0.5 rounded-[7px] border border-line-2 p-0.5">
-      {(["en", "th"] as const).map((l) => (
-        <button
-          key={l}
-          onClick={() => setLang(l)}
-          aria-pressed={lang === l}
-          className="h-[22px] min-w-[30px] cursor-pointer rounded-[5px] px-[7px] font-mono text-[10.5px] font-medium"
-          style={{ background: lang === l ? "color-mix(in srgb, var(--accent) 14%, transparent)" : "transparent", color: lang === l ? "var(--accent-soft)" : "var(--muted)" }}
-        >
-          {l.toUpperCase()}
-        </button>
-      ))}
-    </div>
+    <button
+      onClick={() => setLang(lang === "en" ? "th" : "en")}
+      title={`${t("lang.title")} · ${t("lang.toggle")}`}
+      aria-label={t("lang.toggle")}
+      className="flex h-7 min-w-[38px] cursor-pointer items-center justify-center rounded-[7px] border border-line-2 px-2 font-mono text-[10.5px] font-semibold text-accent-soft hover:border-line-3"
+    >
+      {lang.toUpperCase()}
+    </button>
   );
 }
 
@@ -138,6 +134,7 @@ function Nav() {
  * the CLI updates bell, the usage pill, the clock, Settings and the theme toggle. */
 export function TopBar({ extra }: { extra?: ReactNode }) {
   const { go, route, theme, toggleTheme } = useApp();
+  const t = useT();
   const onSettings = route.screen === "settings";
   return (
     <header className="sticky top-0 z-30 flex min-h-11 flex-wrap items-center justify-between gap-x-5 gap-y-2 border-b border-line bg-[color-mix(in_srgb,var(--bg)_97%,transparent)] px-5 py-2">
@@ -166,7 +163,7 @@ export function TopBar({ extra }: { extra?: ReactNode }) {
             e.preventDefault();
             go("settings");
           }}
-          title="Settings: git and SSH access, agent CLIs, server"
+          title={t("top.settings")}
           aria-label="Settings"
           aria-current={onSettings ? "page" : undefined}
           className={clsx(
@@ -176,7 +173,7 @@ export function TopBar({ extra }: { extra?: ReactNode }) {
         >
           <Settings className="size-3.5" />
         </a>
-        <button onClick={toggleTheme} className="flex size-7 items-center justify-center rounded-md text-muted hover:bg-white/5 hover:text-text" aria-label="Toggle theme">
+        <button onClick={toggleTheme} className="flex size-7 items-center justify-center rounded-md text-muted hover:bg-white/5 hover:text-text" aria-label={t("top.theme")} title={t("top.theme")}>
           {theme === "dark" ? <Sun className="size-3.5" /> : <Moon className="size-3.5" />}
         </button>
       </div>

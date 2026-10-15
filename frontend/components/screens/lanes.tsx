@@ -6,6 +6,8 @@ import { useCallback, useEffect, useState } from "react";
 import { lanesApi } from "@/lib/api";
 import type { LaneInfo } from "@/lib/generated/LaneInfo";
 
+import { useT } from "@/lib/i18n";
+
 import { useApp } from "../app-context";
 import { ProjectLanesHead } from "../lanes/add-lane";
 import { ImportWatcher } from "../lanes/import-watcher";
@@ -44,6 +46,7 @@ function groupLanes(lanes: LaneInfo[], projects: string[]): [string | null, Lane
  * and, when allowed, nudges them (`/clear`, the status prompt) while idle with nobody attached. */
 export function LanesScreen() {
   const { route, project, scope, projects } = useApp();
+  const tt = useT();
   const [lanes, setLanes] = useState<LaneInfo[] | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -100,7 +103,7 @@ export function LanesScreen() {
       <Main>
         <PageHeader
           kicker="Watch"
-          title="Lanes"
+          title={tt("nav.lanes")}
           lead="Every lane belongs to a project: its manager and developer agents, in tmux sessions MAP watches and reports to Telegram. MAP only types into one (/clear, the status prompt) when that is allowed, the session is idle, and nobody is attached."
           actions={
             <Btn size="sm" onClick={refresh} disabled={busy}>

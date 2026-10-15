@@ -7,6 +7,8 @@ import { useEffect, useState, type ReactNode } from "react";
 import { gitApi } from "@/lib/api";
 import type { SettingsInfo } from "@/lib/generated/SettingsInfo";
 
+import { useT } from "@/lib/i18n";
+
 import { useApp } from "../app-context";
 import { errText } from "../project-ui";
 import { AgentClis } from "../settings/agent-clis";
@@ -34,6 +36,7 @@ const isSection = (s: string | null): s is SectionId => SECTIONS.some((x) => x.i
  * modal and the update flow; Telegram and Server are `map.toml`, read only. No secret is ever taken or shown here. */
 export function SettingsScreen() {
   const { route, go } = useApp();
+  const t = useT();
   const [settings, setSettings] = useState<SettingsInfo | null>(null);
   const [error, setError] = useState("");
   const active: SectionId = isSection(route.arg) ? route.arg : "git";
@@ -62,7 +65,7 @@ export function SettingsScreen() {
       <Main className="gap-7">
         <PageHeader
           kicker="Configuration"
-          title="Settings"
+          title={t("nav.settings")}
           lead="Set up this MAP once: how agents reach GitHub, GitLab or your own git host, the agent CLIs they run, the Reflex gates, and the server's own settings. Keys, tokens and passwords are never typed or shown here: only public keys, and whether a secret is set."
         />
         <div className="grid min-w-0 gap-6 lg:grid-cols-[220px_minmax(0,1fr)] lg:gap-8">
@@ -83,7 +86,7 @@ export function SettingsScreen() {
               >
                 <s.icon className="size-3.5 shrink-0" />
                 <span className="flex min-w-0 flex-col">
-                  <span className="text-[12.5px] font-semibold whitespace-nowrap">{s.label}</span>
+                  <span className="text-[12.5px] font-semibold whitespace-nowrap">{t(`set.${s.id}`)}</span>
                   <span className="hidden font-mono text-[10.5px] text-muted lg:block">{s.sub}</span>
                 </span>
               </a>

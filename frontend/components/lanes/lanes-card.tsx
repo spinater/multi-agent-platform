@@ -12,6 +12,7 @@ import { lanesApi } from "@/lib/api";
 import type { LaneInfo } from "@/lib/generated/LaneInfo";
 import type { LaneState } from "@/lib/generated/LaneState";
 
+import { useT } from "@/lib/i18n";
 import { useApp } from "../app-context";
 import { Pill, SideTitle, type Tone } from "../command-ui";
 import { STANDARD_ROLES } from "./add-lane";
@@ -47,6 +48,7 @@ const contextOf = (l: LaneInfo) => {
 
 export function LanesCard() {
   const { project, scope, projects, go } = useApp();
+  const t = useT();
   const all = scope === "all";
   const [lanes, setLanes] = useState<LaneInfo[] | null>(null);
 
@@ -97,8 +99,8 @@ export function LanesCard() {
   const missing = project ? STANDARD_ROLES.filter((r) => !shown.some((l) => l.role === r)) : [];
   return (
     <section className="flex flex-col gap-3">
-      <SideTitle glyph={<Layers className="size-3" />} note={<a href="#lanes" className="text-accent-soft hover:underline">{project ? "+ Add lane" : "all lanes →"}</a>}>
-        Lanes
+      <SideTitle glyph={<Layers className="size-3" />} note={<a href="#lanes" className="text-accent-soft hover:underline">{project ? t("cc.addLane") : "all lanes →"}</a>}>
+        {t("cc.lanes")}
       </SideTitle>
       <div className="flex flex-col overflow-hidden rounded-[10px] border border-line">
         {shown.map((l) => {

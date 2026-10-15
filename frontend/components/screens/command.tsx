@@ -21,6 +21,8 @@ import { usePlans } from "@/lib/use-plans";
 
 import { ActivityTicker } from "../activity";
 import { ActivityGraphView } from "../activity-graph";
+import { useT } from "@/lib/i18n";
+
 import { useApp } from "../app-context";
 import { useCommand } from "../command-data";
 import { DoneTasksScreen } from "./done-tasks";
@@ -44,9 +46,9 @@ const CONNECTION: Record<Connection, [string, Tone]> = {
   unauthorized: ["token required", "warn"],
 };
 
-const VIEW_TABS: [View, string][] = [
-  ["graph", "GRAPH"],
-  ["orbit", "3D ORBIT"],
+const VIEW_TABS: [View, "cc.graph" | "cc.orbit"][] = [
+  ["graph", "cc.graph"],
+  ["orbit", "cc.orbit"],
 ];
 
 const HINTS: Record<View, string> = {
@@ -214,6 +216,7 @@ function CommandCentre() {
     tasks: everyTask,
     current,
   } = app;
+  const tr = useT();
   const [view, setViewState] = useState<View>(() => storedView(scope));
   const [selected, setSelected] = useState<string | null>(() =>
     nodeFromArg(route.arg),
@@ -452,7 +455,7 @@ function CommandCentre() {
       <div className="flex flex-wrap items-center justify-between gap-2.5">
         <div className="flex flex-wrap items-center gap-2.5">
           <span className="font-mono text-[10px] font-medium tracking-[0.2em] text-muted/70">
-            VIEW
+            {tr("cc.view")}
           </span>
           <div className="flex overflow-hidden rounded-lg border border-line-2">
             {VIEW_TABS.map(([v, label]) => (
@@ -469,7 +472,7 @@ function CommandCentre() {
                     : "text-nav hover:text-text",
                 )}
               >
-                {label}
+                {tr(label)}
               </button>
             ))}
             <button
@@ -482,7 +485,7 @@ function CommandCentre() {
                   : "text-nav hover:text-text",
               )}
             >
-              ACTIVITY
+              {tr("cc.activity")}
             </button>
           </div>
         </div>

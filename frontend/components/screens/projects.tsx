@@ -7,6 +7,8 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { CheckLine } from "@/lib/generated/CheckLine";
 import type { ProjectInfo } from "@/lib/generated/ProjectInfo";
 
+import { useT } from "@/lib/i18n";
+
 import { useApp } from "../app-context";
 import { GitLine } from "../git-access";
 import { ProjectInit } from "../project-init";
@@ -78,6 +80,7 @@ type Card = {
 
 function ProjectList({ reveal, offer, onDismissOffer }: { reveal: Reveal | null; offer: string | null; onDismissOffer: () => void }) {
   const { projects, tasks, sessions, orchestrator, providers, server, now, go, setProject, setScope, scope, project, openAuth } = useApp();
+  const tt = useT();
   const defaults = useDefaults();
   const [query, setQuery] = useState("");
 
@@ -113,7 +116,7 @@ function ProjectList({ reveal, offer, onDismissOffer }: { reveal: Reveal | null;
     <Main className="gap-7">
       <PageHeader
         kicker="Workspaces"
-        title="Projects"
+        title={tt("nav.projects")}
         lead="Each project is a folder on this machine that agents work in directly, plus a corpus repo and its own Reflex engine, with its own providers, verify commands and task history. Tasks without a project run in the default workspace. Pick one to open its command centre."
         actions={
           <>

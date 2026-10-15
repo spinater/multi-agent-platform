@@ -115,7 +115,7 @@
   --lane-reflex: #4ade80;
   --lane-llm: #f2c14e;
   --lane-abstain: #f26d6d;
-  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-family: var(--font-geist-mono), var(--font-thai), ui-monospace, monospace;
 }
 
 :root[data-theme="light"] .reflex-theme {
@@ -182,9 +182,9 @@
   --color-lane-llm: var(--lane-llm);
   --color-lane-abstain: var(--lane-abstain);
   /* Geist for UI text, JetBrains Mono for data and labels, Geist Mono for the Reflex screen. */
-  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
-  --font-mono: var(--font-jetbrains-mono), ui-monospace, SFMono-Regular, Menlo, monospace;
-  --font-reflex: var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo, monospace;
+  --font-sans: var(--font-geist-sans), var(--font-thai), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-jetbrains-mono), var(--font-thai), ui-monospace, SFMono-Regular, Menlo, monospace;
+  --font-reflex: var(--font-geist-mono), var(--font-thai), ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 
 body {
@@ -209,7 +209,7 @@ body {
 
 /* Small spaced capitals (JetBrains Mono): section titles, chips, table heads, kickers. */
 .label {
-  font-family: var(--font-jetbrains-mono), ui-monospace, monospace;
+  font-family: var(--font-jetbrains-mono), var(--font-thai), ui-monospace, monospace;
   font-size: 10px;
   font-weight: 500;
   letter-spacing: 0.16em;

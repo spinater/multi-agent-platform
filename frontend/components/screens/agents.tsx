@@ -15,6 +15,8 @@ import { providerName } from "@/lib/use-usage";
 import { AgentEditor } from "../agents/agent-editor";
 import { AgentMatrix } from "../agents/agent-matrix";
 import { agentArg, AGENT_PROVIDERS, parseAgentArg, PROVIDER_FORMAT, PROVIDER_LABEL } from "../agents/shared";
+import { useT } from "@/lib/i18n";
+
 import { useApp } from "../app-context";
 import { Main, Modal, PageHeader, SectionTitle } from "../shell/page";
 import { TopBar, workspaceName } from "../shell/top-bar";
@@ -119,6 +121,7 @@ function BuiltinAgents() {
  * `#agents/<scope>/<name>` opens one in the editor, `#agents/new` a blank one. */
 export function AgentsScreen() {
   const { project, current, server, route, go } = useApp();
+  const tt = useT();
   const [loaded, setLoaded] = useState<Loaded | null>(null);
   const [tick, setTick] = useState(0);
 
@@ -159,7 +162,7 @@ export function AgentsScreen() {
       <Main className="gap-[26px]">
         <PageHeader
           kicker={`Project · ${projectName}`}
-          title="Agents"
+          title={tt("nav.agents")}
           lead={`Custom sub-agents for this project and for you, written in each CLI's own format: Claude Code and agy read Markdown, Codex reads TOML.${data?.readers.length ? ` ${data.readers.map((r) => providerName(r.provider, true)).join(" and ")} load the Claude Code files of a project.` : ""}`}
           actions={
             <>

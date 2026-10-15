@@ -7,7 +7,7 @@ import clsx from "clsx";
 import { createContext, useContext, type ReactNode } from "react";
 
 import type { ConfigSource } from "@/lib/generated/ConfigSource";
-import { TAB_DESC_TH, useLang, useT } from "@/lib/i18n";
+import { TAB_DESC_TH, TAB_TITLE_TH, useLang, useT } from "@/lib/i18n";
 
 export type Scope = "project" | "machine";
 
@@ -216,7 +216,7 @@ export function TabHead({ title, desc, savesTo, add }: { title: string; desc: Re
   return (
     <div className="flex flex-wrap items-end justify-between gap-3 border-b border-line pb-3.5">
       <div className="flex max-w-[640px] flex-col gap-[7px]">
-        <h2 className="text-[22px] leading-[1.15] font-semibold tracking-[-0.01em]">{title}</h2>
+        <h2 className="text-[22px] leading-[1.15] font-semibold tracking-[-0.01em]">{lang === "th" ? (TAB_TITLE_TH[title] ?? title) : title}</h2>
         <p className="text-[13px] leading-normal text-text-2">{lang === "th" && TAB_DESC_TH[title] ? TAB_DESC_TH[title] : desc}</p>
         <span className="font-mono text-[10.5px] leading-[1.3] text-muted">
           {t("cfg.savesTo")} {savesTo}

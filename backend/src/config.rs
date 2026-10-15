@@ -2184,7 +2184,7 @@ default_root = "Docker""#,
         // Every path MAP reads under ~/.claude, ~/.codex or ~/.gemini moved with it; others did not.
         assert_eq!(c.providers["claude"].credentials, ["/srv/ah/claude/.credentials.json"]);
         assert_eq!(c.providers["codex"].credentials, ["/srv/ah/codex/auth.json"]);
-        assert_eq!(c.providers["gemini"].credentials, ["/srv/ah/gemini-home/.gemini/jetski-standalone-oauth-token"]);
+        assert_eq!(c.providers["gemini"].credentials, ["/srv/ah/gemini-home/.gemini/antigravity-cli/antigravity-oauth-token", "/srv/ah/gemini-home/.gemini/jetski-standalone-oauth-token"]);
         assert_eq!(c.providers["claude"].latest.as_ref().unwrap().channel.as_ref().unwrap().file, "/srv/ah/claude/settings.json");
         assert_eq!(c.usage.claude_credentials, ah.join("claude/.credentials.json"));
         assert_eq!(c.usage.claude_projects, ah.join("claude/projects"));

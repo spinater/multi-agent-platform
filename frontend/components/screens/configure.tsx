@@ -314,7 +314,7 @@ export function ConfigureScreen() {
                       <span className="w-4 font-mono text-[12px] font-semibold" style={{ color }}>
                         {glyph}
                       </span>
-                      <span className="flex-1 whitespace-nowrap">{label}</span>
+                      <span className="flex-1 whitespace-nowrap">{t(`tab.${id}` as MsgKey) || label}</span>
                       {counts[id]?.ov && <span title="has project overrides" className="size-1.5 rounded-full bg-warn" />}
                       {pending[id] && <span title="unsaved changes" className="size-1.5 rounded-full bg-accent" />}
                       <span className="font-mono text-[10.5px] leading-none text-muted">{counts[id]?.n ?? ""}</span>
