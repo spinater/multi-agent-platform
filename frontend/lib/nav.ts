@@ -2,13 +2,14 @@
  * `#command/sessions/map-task-4-1`, `#command/done` (the Done tasks page), `#projects/new`,
  * `#projects/init/<slug>`, `#knowledge/<slug>/doc/<path>`, `#lanes/<name>`, `#settings/git` (or `agents`, `gates`, `server`, `telegram`). The static export is one page, so routing lives
  * in the hash. */
-export const SCREENS = ["projects", "command", "lanes", "skills", "agents", "knowledge", "decisions", "reflex", "usage", "settings"] as const;
+export const SCREENS = ["projects", "command", "lanes", "configure", "skills", "agents", "knowledge", "decisions", "reflex", "usage", "settings"] as const;
 export type Screen = (typeof SCREENS)[number];
 
 export const SCREEN_LABEL: Record<Screen, string> = {
   projects: "Projects",
   command: "Command centre",
   lanes: "Lanes",
+  configure: "Configure",
   skills: "Skills",
   agents: "Agents",
   knowledge: "Knowledge",
@@ -17,6 +18,10 @@ export const SCREEN_LABEL: Record<Screen, string> = {
   usage: "Usage",
   settings: "Settings",
 };
+
+/** The top bar's links, in order. Skills and Agents live inside Configure (their screens stay reachable by link);
+ * Settings is the gear. */
+export const NAV: Screen[] = ["projects", "command", "configure", "knowledge", "decisions", "reflex", "usage", "lanes"];
 
 export type Route = { screen: Screen; arg: string | null };
 

@@ -16,6 +16,7 @@ import { LanesScreen } from "./screens/lanes";
 import { ProjectsScreen } from "./screens/projects";
 import { ReflexScreen } from "./screens/reflex";
 import { SettingsScreen } from "./screens/settings";
+import { ConfigureScreen } from "./screens/configure";
 import { SkillsScreen } from "./screens/skills";
 import { UsageScreen } from "./screens/usage";
 import { Button, Input } from "./ui";
@@ -85,6 +86,8 @@ function Router() {
       return <ProjectsScreen />;
     case "lanes":
       return <LanesScreen />;
+    case "configure":
+      return <ConfigureScreen />;
     case "skills":
       return <SkillsScreen />;
     case "agents":

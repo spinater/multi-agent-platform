@@ -4,7 +4,7 @@ import clsx from "clsx";
 import { Hexagon, Moon, Settings, Sun } from "lucide-react";
 import { useState, type ReactNode } from "react";
 
-import { SCREEN_LABEL, SCREENS } from "@/lib/nav";
+import { NAV, SCREEN_LABEL } from "@/lib/nav";
 
 import { useApp } from "../app-context";
 import { UpdatesBell } from "../updates-bell";
@@ -91,7 +91,7 @@ function Nav() {
   const { route, go } = useApp();
   return (
     <nav className="flex max-w-full min-w-0 gap-0.5 overflow-x-auto">
-      {SCREENS.map((s) => (
+      {NAV.map((s) => (
         <a
           key={s}
           href={`#${s}`}
@@ -101,7 +101,7 @@ function Nav() {
           }}
           className={clsx(
             "flex h-7 items-center rounded-md px-2.5 text-xs font-medium whitespace-nowrap no-underline",
-            route.screen === s ? "bg-accent-tint text-accent-soft hover:text-accent-soft" : "text-nav hover:bg-white/5 hover:text-text",
+            route.screen === s || (s === "configure" && (route.screen === "skills" || route.screen === "agents")) ? "bg-accent-tint text-accent-soft hover:text-accent-soft" : "text-nav hover:bg-white/5 hover:text-text",
           )}
         >
           {SCREEN_LABEL[s]}

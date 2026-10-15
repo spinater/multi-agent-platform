@@ -8,6 +8,9 @@ import type { DecideResponse } from "./generated/DecideResponse";
 import type { Decision } from "./generated/Decision";
 import type { DecisionCounts } from "./generated/DecisionCounts";
 import type { DecisionModel } from "./generated/DecisionModel";
+import type { ConfigSource } from "./generated/ConfigSource";
+import type { EnvList } from "./generated/EnvList";
+import type { EnvVarInput } from "./generated/EnvVarInput";
 import type { Event } from "./generated/Event";
 import type { SessionTrace } from "./generated/SessionTrace";
 import type { ProviderInfo } from "./generated/ProviderInfo";
@@ -400,3 +403,68 @@ export const managerApi = {
 // ----
 
 export const fmtConf =(c: number | null | undefined) => (c == null ? "—" : c === 0 ? "0" : c < 0.001 ? c.toExponential(2) : c.toFixed(4));
+
+/** One change an agent proposes for a Configure tab (`POST /api/configure/ask`); the dashboard applies it to the
+ * tab's draft. */
+export type ConfigOp = { op: "add" | "change" | "remove" | string; target: string; text: string; value: unknown };
+export type AskReply = { summary: string; evidence: string[]; ops: ConfigOp[]; provider: string; model: string; duration_ms: number };
+export type AskBody = {
+  tab: string;
+  project?: string;
+  provider: string;
+  model?: string;
+  effort?: string;
+  prompt: string;
+  language: "en" | "th";
+  context: unknown;
+  workflow_id?: string;
+  from_runs: boolean;
+};
+
+const scopeQ = (project: string | null) => (project ? `?project=${encodeURIComponent(project)}` : "");
+
+/** Configure › Env & secrets: secret values are write-only (`value: null` keeps a stored secret). */
+export const envApi = {
+  list: (project: string | null) => request<EnvList>("GET", `/env${scopeQ(project)}`),
+  save: (project: string | null, vars: EnvVarInput[]) => request<EnvList>("PUT", "/env", { project: project ?? undefined, vars }),
+};
+
+// Placeholder shapes until the workflows backend lands (replaced by lib/generated types).
+export type WorkflowNode = {
+  id: string;
+  kind: "trigger" | "agent" | "verify" | "audit" | "hook" | "end";
+  label: string;
+  x: number;
+  y: number;
+  agent: string | null;
+  prompt: string | null;
+  command: string | null;
+  max_attempts: number | null;
+  verdict: string | null;
+  event: string | null;
+  blocking: boolean | null;
+  timeout_secs: number | null;
+  outcome: "done" | "failed" | null;
+};
+export type WorkflowEdge = { from: string; to: string; kind: "next" | "pass" | "fail" };
+export type Workflow = {
+  id: string;
+  name: string;
+  description: string;
+  trigger: { default: boolean; keywords: string[]; paths: string[] };
+  nodes: WorkflowNode[];
+  edges: WorkflowEdge[];
+  source: ConfigSource;
+};
+export type WorkflowStats = { nodes: { node: string; runs: number; avg_ms: number | null; fail_pct: number }[] };
+
+export const workflowsApi = {
+  list: (project: string | null) => request<Workflow[]>("GET", `/workflows${scopeQ(project)}`),
+  save: (project: string | null, workflow: Workflow) => request<Workflow>("PUT", "/workflows", { project: project ?? undefined, workflow }),
+  remove: (project: string | null, id: string) => request("DELETE", "/workflows", { project: project ?? undefined, id }),
+  stats: (id: string, project: string | null) => request<WorkflowStats>("GET", `/workflows/${encodeURIComponent(id)}/stats${scopeQ(project)}`),
+};
+
+export const configureApi = {
+  ask: (body: AskBody) => request<AskReply>("POST", "/configure/ask", body),
+};
