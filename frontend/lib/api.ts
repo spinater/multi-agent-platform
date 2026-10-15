@@ -10,6 +10,15 @@ import type { DecisionCounts } from "./generated/DecisionCounts";
 import type { DecisionModel } from "./generated/DecisionModel";
 import type { ConfigSource } from "./generated/ConfigSource";
 import type { EnvList } from "./generated/EnvList";
+import type { Hook } from "./generated/Hook";
+import type { HookRun } from "./generated/HookRun";
+import type { HooksOverview } from "./generated/HooksOverview";
+import type { McpServerInput } from "./generated/McpServerInput";
+import type { McpTestResult } from "./generated/McpTestResult";
+import type { McpView } from "./generated/McpView";
+import type { PermChange } from "./generated/PermChange";
+import type { PermissionsView } from "./generated/PermissionsView";
+import type { RulesOverview } from "./generated/RulesOverview";
 import type { EnvVarInput } from "./generated/EnvVarInput";
 import type { Event } from "./generated/Event";
 import type { SessionTrace } from "./generated/SessionTrace";
@@ -463,6 +472,35 @@ export const workflowsApi = {
   save: (project: string | null, workflow: Workflow) => request<Workflow>("PUT", "/workflows", { project: project ?? undefined, workflow }),
   remove: (project: string | null, id: string) => request("DELETE", "/workflows", { project: project ?? undefined, id }),
   stats: (id: string, project: string | null) => request<WorkflowStats>("GET", `/workflows/${encodeURIComponent(id)}/stats${scopeQ(project)}`),
+};
+
+/** Configure › Rules: the context files agents read at session start. */
+export const rulesApi = {
+  list: (project: string | null) => request<RulesOverview>("GET", `/rules${scopeQ(project)}`),
+  write: (project: string | null, path: string, body: string) => request<RulesOverview>("PUT", "/rules", { project: project ?? undefined, path, body }),
+  remove: (project: string | null, path: string) => request<RulesOverview>("DELETE", "/rules", { project: project ?? undefined, path }),
+  readers: (project: string | null, path: string, readers: string[]) => request<RulesOverview>("PUT", "/rules/readers", { project: project ?? undefined, path, readers }),
+};
+
+/** Configure › Hooks: commands MAP runs around a task. */
+export const hooksApi = {
+  list: (project: string | null) => request<HooksOverview>("GET", `/hooks${scopeQ(project)}`),
+  save: (project: string | null, hooks: Hook[]) => request<HooksOverview>("PUT", "/hooks", { project: project ?? undefined, hooks }),
+  test: (project: string | null, command: string, timeout_secs: number) => request<HookRun>("POST", "/hooks/test", { project: project ?? undefined, command, timeout_secs }),
+};
+
+/** Configure › Permissions: tool rules × CLI, written to each CLI's settings. */
+export const permsApi = {
+  get: (project: string | null) => request<PermissionsView>("GET", `/permissions${scopeQ(project)}`),
+  set: (project: string | null, cells: PermChange[]) => request<PermissionsView>("PUT", "/permissions", { project: project ?? undefined, cells }),
+};
+
+/** Configure › MCP servers, across the CLIs' own files. */
+export const mcpApi = {
+  list: (project: string | null) => request<McpView>("GET", `/mcp${scopeQ(project)}`),
+  save: (project: string | null, server: McpServerInput, providers: string[]) => request<McpView>("PUT", "/mcp", { project, server, providers }),
+  remove: (project: string | null, name: string) => request<McpView>("DELETE", "/mcp", { project, name }),
+  test: (project: string | null, name: string) => request<McpTestResult>("POST", "/mcp/test", { project, name }),
 };
 
 export const configureApi = {
