@@ -141,6 +141,12 @@ async fn persistent_lanes_open_persist_stop_and_close() {
     assert!(hub.lanes.config("map-lane-app-docs").is_some());
     let lanes = project_lanes(&hub, &slug).await.unwrap();
     assert_eq!((lanes.len(), lanes[0].stopped, lanes[0].project.as_deref()), (1, false, Some("app")));
+    assert_eq!((lanes[0].role.as_deref(), lanes[0].label.as_str(), lanes[0].added), (Some("developer"), "docs", false), "opened without a role: developer");
+    let body = OpenLane { name: "lead".into(), role: Some("Manager".into()), ..Default::default() };
+    open_lane(&hub, &slug, body, "owner").await.unwrap();
+    assert_eq!(hub.lanes.config("map-lane-app-lead").unwrap().role.as_deref(), Some("manager"));
+    assert!(open_lane(&hub, &slug, OpenLane { name: "watch".into(), ..Default::default() }, "owner").await.is_err(), "reserved");
+    close_lane(&hub, &slug, "lead", true).await.unwrap();
 
     // Gone: shown stopped, not relaunched by itself; Start brings it back.
     term.exit("map-lane-app-docs");

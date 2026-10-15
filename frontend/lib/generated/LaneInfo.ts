@@ -34,9 +34,28 @@ history: Array<LaneAction>, checked_at: string | null,
  */
 error: string | null, 
 /**
- * MAP-owned lanes: the project, and `manager` or `lane`. `None`: a `[[lanes]]` block (someone else's session).
+ * The project (slug) the lane belongs to: a MAP-owned lane's, a lane's `project` key, else the project whose
+ * folder is the lane's `path`. `None`: no project.
  */
-project: string | null, owned: string | null, 
+project: string | null, 
+/**
+ * MAP-owned lanes: `manager` or `lane`. `None`: someone else's session (a `[[lanes]]` block or added from the
+ * dashboard).
+ */
+owned: string | null, 
+/**
+ * `manager`, `developer` or another lowercase word; `None`: not given.
+ */
+role: string | null, 
+/**
+ * What the dashboard shows: a persistent lane's short name, else the lane's name.
+ */
+label: string, 
+/**
+ * Added from the dashboard to watch an existing session (`POST /api/projects/{slug}/lanes/watch`): stored in the
+ * database, removable and renamable there. False: map.toml or MAP-owned.
+ */
+added: boolean, 
 /**
  * A MAP-owned lane whose tmux session is gone (it is not relaunched by itself: `POST …/lanes/{name}/start`).
  */

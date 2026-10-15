@@ -327,9 +327,16 @@ and reset, stall alerts and pauses. It also shows the status file (card, state, 
 counts and a git line. It has toggles for watch, actions and auto `/clear`, the last actions and the queued tells
 (cancel). **Tell** queues a clear, an ask with a note, or a pause of N minutes. The screen tail folds open, and the
 status prompt can be edited. **Import watcher settings** reads an agent-watcher `config.json`. Context shows as
-`81.6k / 200k (41%)` when it comes from the Claude transcript. MAP's own lanes (a project's [manager](#project-manager)
-and its [persistent lanes](#persistent-lanes)) are grouped by project above the `[[lanes]]` blocks; a persistent lane
-whose session is gone shows **stopped** with **Start**, and has **Close lane** / **Force close**.
+`81.6k / 200k (41%)` when it comes from the Claude transcript. The screen shows the current project's lanes (the
+top-bar switcher); **All projects** shows every lane grouped under a header per project, lanes of no project last.
+Each card shows the lane's role. A persistent lane whose session is gone shows **stopped** with **Start**, and has
+**Close lane** / **Force close**; a lane added on the dashboard has **Remove** (the tmux session is untouched).
+
+Each project has **+ Add lane**: a role (manager, developer or other), a name (default `<role>-<slug>`), and either
+**Watch an existing session** (picked from `GET /api/tmux/sessions`, tmux's default server or a named socket) or
+**Start a MAP session** (a [persistent lane](#persistent-lanes): provider, model, first prompt). A project without a
+manager or developer lane shows that slot with **Set up**. The command centre's left column has the project's
+**Lanes** card (role, name, state, context %, a link to `#lanes/<name>`); in all-projects mode, a count per project.
 
 ### Activity graph (`#command/activity`)
 
@@ -674,6 +681,24 @@ MAP never creates, kills, renames or resizes a lane session (`backend/src/lanes.
 database over `map.toml`. `POST /api/lanes/import-watcher` fills a lane's `status_prompt`, thresholds and the
 Telegram chat and users from an agent-watcher `config.json` (read only, never the token, only inside your home).
 
+Every lane belongs to a project: a MAP-owned lane's, a block's `project` key, else the project whose folder is the
+block's `path` (canonical paths compared), else none. A lane has a `role`: `manager` and `developer` are the standard
+pair, named `<role>-<project short name>`; any other lowercase word is allowed. A project's manager has role
+`manager`; a persistent lane the role it was opened with (default `developer`).
+
+A project can also watch an existing session from the dashboard (`POST /api/projects/{slug}/lanes/watch`, `{name?,
+role, session, socket?}`): the session must be listed by that server's `list-sessions` and must not be one of MAP's
+own (`session_prefix`) sessions, the name (default `<role>-<slug>`, `a-z 0-9 . _ -`) must be unused, and no other lane
+may already watch the session. MAP never edits `map.toml`, so these lanes live in the database (`watch_lanes`) with
+`path` the project folder, actions off (watch only) and watch on; a `[[lanes]]` block with the same name wins.
+`DELETE /api/projects/{slug}/lanes/watch/{name}` forgets only the definition, never the session.
+
+**Renaming.** Lane names key the stored overrides, memory, tells and history. For a `[[lanes]]` block, change `name`
+and add `rename_from = "<old name>"`: at startup MAP moves the old name's rows in one transaction when the old name
+has rows and the new one none (so it runs once). With `session_match` empty, the effective `session_match` is `[name,
+rename_from]`, so a session still called by the old name keeps matching (and `map-tell`, which posts the session's
+name, still finds the lane). A lane added on the dashboard is renamed with `PATCH /api/lanes/{name}` `{"name"}`.
+
 Every `[lane_watch] interval_secs` (60) MAP reads each lane:
 
 - **State**: busy (a spinner that is not `<verb> for <time>`, `esc to interrupt`, or a pane still moving between two
@@ -729,7 +754,7 @@ token, and redacts it from every error, because a Bot API URL contains it.
 
 - **The full report** goes out on `report_minute` (45) of every hour, and whenever 70 minutes passed without one.
   It shows every lane as the last tick saw it, with one `⏸ paused via /watch` line for a muted lane, and a line
-  about MAP's tasks and waiting plans.
+  about MAP's tasks and waiting plans. Lanes of more than one project are grouped under `📁 <slug>` headers.
 - **Sent at once**: a card finished, a stall alert, a lane parked at or resumed after the limit, a `/clear` or a
   prompt typed, a MAP task done, failed or held by intake (`task.held`), and a plan draft waiting for approval. A
   muted lane sends nothing.
@@ -892,7 +917,7 @@ running?", "why did #12 fail?", "approve plan 7", "pause the project", "open a l
 
 ### Persistent lanes
 
-`POST /api/projects/{slug}/lanes` (`{name, provider?, model?, prompt?, clear_when?, status_prompt?}`, from you or the
+`POST /api/projects/{slug}/lanes` (`{name, role?, provider?, model?, prompt?, clear_when?, status_prompt?}`, from you or the
 manager) starts an interactive session `<session_prefix>lane-<slug>-<name>` in the project's folder on MAP's tmux
 server and registers it as a lane with actions on and the project's lane rules (a `[[lanes]]` block watching the same
 folder, else the defaults; `clear_when` off unless given). Lanes are stored in the database (`owned_lanes`) and
@@ -1328,8 +1353,9 @@ All routes are under `/api`. When `server.api_token` is set, send `Authorization
 | POST | `/plans/{id}/reject` | `{"reason"?}` |
 | GET/POST | `/projects/{slug}/planner`, `/workspace/planner` | The planner's session and default provider; or start it (`{"provider"?, "model"?}`; returns the running one if live) |
 | GET | `/planner/instructions` | The planner's instructions and their source (built in or `[templates] planner_agent`) |
-| GET | `/lanes` | Every lane (`LaneInfo`): settings, sessions with state, context %, rate-limit line, stall, pause; status file and age, card counts, git, queued tells, history |
-| PATCH | `/lanes/{name}` | `{"watch"?, "actions"?, "clear_enabled"?, "status_prompt"?}`: kept over map.toml; returns the lane |
+| GET | `/lanes?project=` | Every lane, or one project's (`LaneInfo`): project, role, label, added; settings, sessions with state, context %, rate-limit line, stall, pause; status file and age, card counts, git, queued tells, history |
+| PATCH | `/lanes/{name}` | `{"name"?, "watch"?, "actions"?, "clear_enabled"?, "status_prompt"?}`: kept over map.toml; `name` renames a lane added on the dashboard (its rows move); returns the lane |
+| GET | `/tmux/sessions?socket=` | `[{name, attached, lane}]`: that tmux server's sessions (read only; MAP's own left out), with the lane already watching each |
 | GET | `/lanes/{name}/screen?session=&lines=` | The last capture's tail, ANSI stripped (default: the lane's first session, 60 lines) |
 | POST | `/lanes/{name}/tell` | `{"verb": "clear" \| "ask" \| "pause", "note"?, "mins"?, "session"?}`; `{name}` may be a session a lane watches (what `map-tell` sends) |
 | GET | `/lanes/{name}/tells`, `/lanes/tells` | Queued tells of the lane (or session), or of every lane |
@@ -1347,7 +1373,9 @@ All routes are under `/api`. When `server.api_token` is set, send `Authorization
 | GET/PATCH/DELETE | `/projects/{slug}/tasks/{id}` | A task of the project; `PATCH {action, note?}` as `/tasks/{id}` (the manager: cancel, retry, start_anyway, clarify only) or `{title?, prompt?}` to edit a pending one; delete |
 | GET | `/projects/{slug}/tasks/{id}/trace` | The task's decisions |
 | POST | `/projects/{slug}/plans/{id}/approve`, `…/reject` | Decide a draft of this project |
-| GET/POST | `/projects/{slug}/lanes` | The project's lanes (MAP's own and `[[lanes]]` watching its folder); or open a persistent lane |
+| GET/POST | `/projects/{slug}/lanes` | The project's lanes (MAP's own, added on the dashboard, and `[[lanes]]` naming it or watching its folder); or open a persistent lane (`role` default `developer`) |
+| POST | `/projects/{slug}/lanes/watch` | `{name?, role, session, socket?}`: watch an existing tmux session as a lane of the project (owner only; 201 with the `LaneInfo`) |
+| DELETE | `/projects/{slug}/lanes/watch/{name}` | Forget a lane added on the dashboard; the tmux session is untouched |
 | DELETE | `/projects/{slug}/lanes/{name}?force=` | Close a persistent lane (409 while used; `force` is the owner's) |
 | POST | `/projects/{slug}/lanes/{name}/start`, `…/tell` | Start a stopped persistent lane; queue a tell |
 | GET | `/projects/{slug}/lanes/{name}/screen?lines=` | The lane's screen tail |

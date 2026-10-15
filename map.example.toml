@@ -409,11 +409,21 @@ skip_pct = 90
 # clear_settle_secs = 4
 # key_delay_ms = 600
 
+# Every lane belongs to a project: `project` (a slug), else the project whose folder is `path`, else none. The
+# standard is two per project, roles manager and developer, named <role>-<project short name>. A project can also
+# add lanes on the dashboard (watch an existing session, or start a MAP session); those live in the database, not
+# here, and a block here with the same name wins.
 # [[lanes]]
-# name = "groove-agos"
+# name = "developer-groove"
+# project = "groove-clinic"
+# manager, developer or any other lowercase word.
+# role = "developer"
+# The lane's previous name: at startup its overrides, memory, queued tells and history move to `name` (once, when
+# `name` has none yet). With session_match empty, the old name also keeps matching the session (map-tell sends it).
+# rename_from = "groove-agos"
 # "" = tmux's default server (no -L).
 # socket = ""
-# Globs; default [name].
+# Globs; default [name] (plus rename_from).
 # session_match = ["groove*"]
 # path = "~/project/groove"
 # The agent writes {card, state: done|working|blocked, need_clear, note, at} here.
@@ -450,7 +460,11 @@ skip_pct = 90
 # repeat_mins = 120
 #
 # [[lanes]]
-# name = "manager-agos"
+# name = "manager-groove"
+# project = "groove-clinic"
+# role = "manager"
+# Its tmux session is still called manager-agos: with session_match empty, rename_from keeps it matched.
+# rename_from = "manager-agos"
 # actions = false
 
 # Telegram: the hourly lane report, and at once: a card finished, a lane stuck, cleared, prompted or parked at the

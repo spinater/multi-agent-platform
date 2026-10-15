@@ -13,17 +13,55 @@ use serde_json::{Value, json};
 use super::{ApiError, ApiResult, not_found};
 use crate::hub::Hub;
 use crate::lanes::{self, LanePatch};
-use crate::model::{LaneImport, LaneInfo, LaneScreen, LaneTell, TelegramInfo, TellVerb};
+use crate::model::{LaneImport, LaneInfo, LaneScreen, LaneTell, TelegramInfo, TellVerb, TmuxSessionInfo, WatchLane};
 
-pub async fn list(State(hub): State<Arc<Hub>>) -> ApiResult<Vec<LaneInfo>> {
-    Ok(Json(hub.lanes.infos(&hub).await?))
+#[derive(Deserialize)]
+pub struct ListQuery {
+    project: Option<String>,
+}
+
+/// Every lane, or `?project=<slug>`'s.
+pub async fn list(State(hub): State<Arc<Hub>>, Query(q): Query<ListQuery>) -> ApiResult<Vec<LaneInfo>> {
+    let project = q.project.as_deref().map(str::trim).filter(|p| !p.is_empty());
+    Ok(Json(hub.lanes.infos_for(&hub, project).await?))
+}
+
+#[derive(Deserialize)]
+pub struct SocketQuery {
+    socket: Option<String>,
+}
+
+/// `GET /api/tmux/sessions?socket=`: a tmux server's sessions for the lane picker (read only; MAP's own left out).
+pub async fn tmux_sessions(State(hub): State<Arc<Hub>>, Query(q): Query<SocketQuery>) -> ApiResult<Vec<TmuxSessionInfo>> {
+    lanes::watch::sessions(&hub, q.socket.as_deref().unwrap_or("")).await.map(Json).map_err(|e| ApiError(StatusCode::BAD_REQUEST, format!("{e:#}")))
+}
+
+/// `POST /api/projects/{slug}/lanes/watch`: watch an existing tmux session as one of the project's lanes.
+pub async fn add_watch(State(hub): State<Arc<Hub>>, UrlPath(slug): UrlPath<String>, Json(b): Json<WatchLane>) -> Result<(StatusCode, Json<LaneInfo>), ApiError> {
+    if hub.store.project(&slug).await?.is_none() {
+        return Err(not_found("project"));
+    }
+    let cfg = lanes::watch::add(&hub, &slug, b).await.map_err(|e| ApiError(StatusCode::BAD_REQUEST, format!("{e:#}")))?;
+    hub.lanes.refresh_projects(&hub).await;
+    Ok((StatusCode::CREATED, Json(hub.lanes.info(&hub, &cfg, Utc::now()).await?)))
+}
+
+/// `DELETE /api/projects/{slug}/lanes/watch/{name}`: forget the lane; the tmux session is never touched.
+pub async fn remove_watch(State(hub): State<Arc<Hub>>, UrlPath((slug, name)): UrlPath<(String, String)>) -> ApiResult<Value> {
+    if !hub.lanes.config(&name).is_some_and(|c| c.added && c.project.as_deref() == Some(slug.as_str())) {
+        return Err(not_found("lane added to this project"));
+    }
+    lanes::watch::remove(&hub, &slug, &name).await?;
+    Ok(Json(json!({ "ok": true })))
 }
 
 pub async fn update(State(hub): State<Arc<Hub>>, UrlPath(name): UrlPath<String>, Json(patch): Json<LanePatch>) -> ApiResult<LaneInfo> {
     if hub.lanes.config(&name).is_none() {
         return Err(not_found("lane"));
     }
-    let cfg = hub.lanes.update(&hub, &name, patch).await?;
+    let renaming = patch.name.is_some();
+    let cfg = hub.lanes.update(&hub, &name, patch).await.map_err(|e| if renaming { ApiError(StatusCode::BAD_REQUEST, format!("{e:#}")) } else { e.into() })?;
+    hub.lanes.refresh_projects(&hub).await;
     Ok(Json(hub.lanes.info(&hub, &cfg, Utc::now()).await?))
 }
 

@@ -3008,9 +3008,19 @@ pub struct LaneInfo {
     pub checked_at: Option<DateTime<Utc>>,
     /// The last tick failed for this lane (e.g. tmux not reachable).
     pub error: Option<String>,
-    /// MAP-owned lanes: the project, and `manager` or `lane`. `None`: a `[[lanes]]` block (someone else's session).
+    /// The project (slug) the lane belongs to: a MAP-owned lane's, a lane's `project` key, else the project whose
+    /// folder is the lane's `path`. `None`: no project.
     pub project: Option<String>,
+    /// MAP-owned lanes: `manager` or `lane`. `None`: someone else's session (a `[[lanes]]` block or added from the
+    /// dashboard).
     pub owned: Option<String>,
+    /// `manager`, `developer` or another lowercase word; `None`: not given.
+    pub role: Option<String>,
+    /// What the dashboard shows: a persistent lane's short name, else the lane's name.
+    pub label: String,
+    /// Added from the dashboard to watch an existing session (`POST /api/projects/{slug}/lanes/watch`): stored in the
+    /// database, removable and renamable there. False: map.toml or MAP-owned.
+    pub added: bool,
     /// A MAP-owned lane whose tmux session is gone (it is not relaunched by itself: `POST …/lanes/{name}/start`).
     pub stopped: bool,
 }
@@ -3076,6 +3086,9 @@ pub struct OwnedLaneRecord {
     /// Who opened it: `owner` or `manager`.
     pub opened_by: String,
     pub created_at: DateTime<Utc>,
+    /// The lane's role in the project (`developer` when opened without one; older records have none).
+    #[serde(default)]
+    pub role: Option<String>,
 }
 
 /// `POST /api/projects/{slug}/lanes`.
@@ -3091,6 +3104,34 @@ pub struct OpenLane {
     pub prompt: Option<String>,
     pub clear_when: Option<LaneClearWhen>,
     pub status_prompt: Option<String>,
+    /// `developer` (default), `manager` or another lowercase word.
+    pub role: Option<String>,
+}
+
+/// `POST /api/projects/{slug}/lanes/watch`: watch an existing tmux session as one of the project's lanes. MAP only
+/// reads it (actions off) until the lane's settings say otherwise; it never creates, kills or renames the session.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, TS)]
+#[serde(deny_unknown_fields)]
+#[ts(export)]
+pub struct WatchLane {
+    /// Default `<role>-<slug>`; 1-48 of `a-z 0-9 . _ -`, unique across all lanes.
+    pub name: Option<String>,
+    pub role: String,
+    /// The tmux session's exact name (from `GET /api/tmux/sessions`).
+    pub session: String,
+    /// `tmux -L <socket>`; empty or none: tmux's default server.
+    pub socket: Option<String>,
+}
+
+/// `GET /api/tmux/sessions?socket=`: one session of a tmux server, for the lane picker (read only).
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct TmuxSessionInfo {
+    pub name: String,
+    /// A terminal is attached to it.
+    pub attached: bool,
+    /// The lane that already watches it, if any.
+    pub lane: Option<String>,
 }
 
 /// `GET /api/projects/{slug}/overview`: what a project's manager (or the owner) needs to answer "how is it going".
