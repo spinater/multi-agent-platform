@@ -11,7 +11,7 @@ use serde::de::DeserializeOwned;
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions, SqliteRow};
 use sqlx::{Row, SqlitePool};
 
-use crate::model::{CaseScore, Decision, DecisionStats, DecisionSummary, Event, HourBucket, Lane, LaneSummary, Level, Plan, PlanStatus, PlanTask, Project, ReflexCase, Session, Task, TaskStatus};
+use crate::model::{CaseScore, Decision, DecisionStats, DecisionSummary, Event, HourBucket, Lane, LaneAction, LaneSummary, LaneTell, Level, Plan, PlanStatus, PlanTask, Project, ReflexCase, Session, Task, TaskStatus, TellVerb};
 use crate::savings;
 
 #[derive(Clone)]
@@ -517,6 +517,114 @@ impl Store {
             }
         }
         Ok(stats)
+    }
+
+    // ---- lanes (lanes.rs)
+
+    /// Each lane's dashboard changes, as stored JSON.
+    pub async fn lane_overrides(&self) -> Result<Vec<(String, String)>> {
+        let rows = sqlx::query("SELECT lane, data FROM lane_overrides").fetch_all(&self.pool).await?;
+        Ok(rows.iter().map(|r| (r.get("lane"), r.get("data"))).collect())
+    }
+
+    pub async fn set_lane_override(&self, lane: &str, data: &str) -> Result<()> {
+        sqlx::query("INSERT INTO lane_overrides (lane, data) VALUES (?, ?) ON CONFLICT(lane) DO UPDATE SET data = excluded.data")
+            .bind(lane)
+            .bind(data)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    /// `(session, data)` rows of one lane; session `""` is the lane's own memory.
+    pub async fn lane_memory(&self, lane: &str) -> Result<Vec<(String, String)>> {
+        let rows = sqlx::query("SELECT session, data FROM lane_memory WHERE lane = ?").bind(lane).fetch_all(&self.pool).await?;
+        Ok(rows.iter().map(|r| (r.get("session"), r.get("data"))).collect())
+    }
+
+    pub async fn set_lane_memory(&self, lane: &str, session: &str, data: &str) -> Result<()> {
+        sqlx::query("INSERT INTO lane_memory (lane, session, data) VALUES (?, ?, ?) ON CONFLICT(lane, session) DO UPDATE SET data = excluded.data")
+            .bind(lane)
+            .bind(session)
+            .bind(data)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    /// Replaces the lane's tell with the same session and verb.
+    pub async fn put_lane_tell(&self, t: &LaneTell) -> Result<()> {
+        sqlx::query(
+            "INSERT INTO lane_tells (lane, session, verb, note, mins, at) VALUES (?, ?, ?, ?, ?, ?)
+             ON CONFLICT(lane, session, verb) DO UPDATE SET note = excluded.note, mins = excluded.mins, at = excluded.at",
+        )
+        .bind(&t.lane)
+        .bind(&t.session)
+        .bind(enum_str(&t.verb))
+        .bind(&t.note)
+        .bind(t.mins.map(i64::from))
+        .bind(t.at)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    /// Tells queued at or after `since` (older ones are deleted), oldest first; every lane when `lane` is `None`.
+    pub async fn lane_tells(&self, lane: Option<&str>, since: DateTime<Utc>, ttl: chrono::Duration) -> Result<Vec<LaneTell>> {
+        sqlx::query("DELETE FROM lane_tells WHERE at < ?").bind(since).execute(&self.pool).await?;
+        let rows = sqlx::query("SELECT * FROM lane_tells WHERE (?1 IS NULL OR lane = ?1) ORDER BY at, lane, session, verb").bind(lane).fetch_all(&self.pool).await?;
+        rows.iter()
+            .map(|r| {
+                let at: DateTime<Utc> = r.get("at");
+                let mins: Option<i64> = r.get("mins");
+                Ok(LaneTell {
+                    lane: r.get("lane"),
+                    session: r.get("session"),
+                    verb: parse_enum(r.get("verb"))?,
+                    note: r.get("note"),
+                    mins: mins.and_then(|m| u32::try_from(m).ok()),
+                    at,
+                    expires_at: at + ttl,
+                })
+            })
+            .collect()
+    }
+
+    /// Removes the tell; `at` (when given) must match, so a tell re-queued meanwhile survives.
+    pub async fn delete_lane_tell(&self, lane: &str, session: &str, verb: TellVerb, at: Option<DateTime<Utc>>) -> Result<bool> {
+        let done = sqlx::query("DELETE FROM lane_tells WHERE lane = ? AND session = ? AND verb = ? AND (?4 IS NULL OR at = ?4)")
+            .bind(lane)
+            .bind(session)
+            .bind(enum_str(&verb))
+            .bind(at)
+            .execute(&self.pool)
+            .await?;
+        Ok(done.rows_affected() > 0)
+    }
+
+    /// Records one lane action and keeps the newest 500 per lane.
+    pub async fn insert_lane_action(&self, lane: &str, session: Option<&str>, kind: &str, message: &str) -> Result<LaneAction> {
+        let at = Utc::now();
+        let id: i64 = sqlx::query("INSERT INTO lane_history (lane, session, kind, message, at) VALUES (?, ?, ?, ?, ?) RETURNING id")
+            .bind(lane)
+            .bind(session)
+            .bind(kind)
+            .bind(message)
+            .bind(at)
+            .fetch_one(&self.pool)
+            .await?
+            .get("id");
+        sqlx::query("DELETE FROM lane_history WHERE lane = ?1 AND id <= ?2 - 500").bind(lane).bind(id).execute(&self.pool).await?;
+        Ok(LaneAction { id, at, session: session.map(String::from), kind: kind.into(), message: message.into() })
+    }
+
+    /// Newest first.
+    pub async fn lane_history(&self, lane: &str, limit: i64) -> Result<Vec<LaneAction>> {
+        let rows = sqlx::query("SELECT * FROM lane_history WHERE lane = ? ORDER BY id DESC LIMIT ?").bind(lane).bind(limit).fetch_all(&self.pool).await?;
+        Ok(rows
+            .iter()
+            .map(|r| LaneAction { id: r.get("id"), at: r.get("at"), session: r.get("session"), kind: r.get("kind"), message: r.get("message") })
+            .collect())
     }
 
     // ---- events

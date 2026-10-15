@@ -45,6 +45,9 @@ pub struct Hub {
     pub finishing: Arc<Mutex<std::collections::HashSet<i64>>>,
     /// The parallel analyst's runs per project (`parallel.rs`).
     pub analyses: crate::parallel::Analyses,
+    /// Tmux sessions someone else owns that MAP watches (`lanes.rs`).
+    pub lanes: crate::lanes::Lanes,
+    pub telegram: crate::telegram::Telegram,
 }
 
 pub struct LaunchRequest {
@@ -70,6 +73,8 @@ impl Hub {
         let usage = crate::usage::UsageState::new(&config);
         let updates = crate::updates::UpdatesState::new(&config);
         let max_parallel = config.orchestrator.max_parallel;
+        let lanes = crate::lanes::Lanes::new(&config);
+        let telegram = crate::telegram::Telegram::new(&config);
         let gates = crate::decide::Target {
             port: config.reflex.gates_port.unwrap_or(config.reflex.port_base.saturating_sub(1)),
             threshold: config.reflex.gates_threshold,
@@ -90,6 +95,8 @@ impl Hub {
             updates,
             finishing: Default::default(),
             analyses: Default::default(),
+            lanes,
+            telegram,
         })
     }
 
@@ -403,6 +410,8 @@ impl Hub {
 
     /// Settings the dashboard changed earlier, read once at startup.
     pub async fn load_runtime_settings(&self) {
+        self.lanes.load(&self.store).await;
+        self.telegram.load(&self.store).await;
         if let Ok(Some(v)) = self.store.runtime_setting("orchestrator.max_parallel").await
             && let Ok(n) = v.parse::<usize>()
             && n > 0

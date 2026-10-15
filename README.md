@@ -314,9 +314,17 @@ all projects, read-only):
   column lists projects with "Open →", and cards offer only "Open in <project> →".
 
 Deep links: `#command/tasks`, `#command/tasks/<id>`, `#command/tasks/new`, `#command/sessions/<name>`,
-`#command/sessions/new`, `#projects/<slug>`, `#projects/init/<slug>`, `#settings/git`, `#settings/agents`,
-`#settings/server`. Every layout number lives in `TUNING` in
+`#command/sessions/new`, `#projects/<slug>`, `#projects/init/<slug>`, `#lanes`, `#lanes/<name>`, `#settings/git`,
+`#settings/agents`, `#settings/telegram`, `#settings/server`. Every layout number lives in `TUNING` in
 `frontend/components/graph/layouts.ts`.
+
+### Lanes (`#lanes`, `#lanes/<name>`)
+
+One card per [lane](#lanes). Each card shows the state of every session and its why, context %, the rate-limit line
+and reset, stall alerts and pauses. It also shows the status file (card, state, `need_clear`, note, age), the card
+counts and a git line. It has toggles for watch, actions and auto `/clear`, the last actions and the queued tells
+(cancel). **Tell** queues a clear, an ask with a note, or a pause of N minutes. The screen tail folds open, and the
+status prompt can be edited. **Import watcher settings** reads an agent-watcher `config.json`.
 
 ### Skills (`#skills`, `#skills/<name>`)
 
@@ -590,12 +598,84 @@ Either way MAP removes `TMUX` and `TMUX_PANE` from the environment of its tmux c
 inside a tmux session never targets that server by accident. Changing the socket of a running install leaves its
 sessions on the old server: MAP no longer sees them.
 
+## Lanes
+
+A lane is a tmux session someone else owns, such as an agent you started yourself on tmux's default server or on a
+named socket. MAP watches it and reports it to [Telegram](#telegram). It types into a lane only when you allow it.
+MAP never creates, kills, renames or resizes a lane session (`backend/src/lanes.rs`; ported from agent-watcher's
+`watcher.py`). Declare lanes in `map.toml` (`[[lanes]]`, see `map.example.toml`). Change `watch`, `actions`, auto
+`/clear` and `status_prompt` on the **Lanes** screen (`#lanes`) or with `/watch`; those changes are kept in the
+database over `map.toml`. `POST /api/lanes/import-watcher` fills a lane's `status_prompt`, thresholds and the
+Telegram chat and users from an agent-watcher `config.json` (read only, never the token, only inside your home).
+
+Every `[lane_watch] interval_secs` (60) MAP reads each lane:
+
+- **State**: busy (a spinner that is not `<verb> for <time>`, `esc to interrupt`, or a pane still moving between two
+  captures `confirm_secs` apart, timers ignored), waiting (a dialog with a `❯` option), unsent text on the input line
+  (faint suggestions do not count), idle, or rate-limited (the CLI's limit line *with* its reset time on the same or
+  next line; `(UTC)` or local, a time over 15 minutes past means tomorrow).
+- **Facts**: context % and the `new task? … /clear` hint, the agent's status file (`{card, state, need_clear, note,
+  at}`), git (branch, last commit, uncommitted and unpushed counts, `GIT_OPTIONAL_LOCKS=0`), and `todo/` /
+  `todo-human/` / `done/` counts.
+
+It types only when `actions` is on, the session is idle, nobody is attached and nothing is on the input line, and
+one session per lane per tick (`max_sessions_per_round`):
+
+| Move | When |
+| --- | --- |
+| `/clear` | `clear_when.enabled`; never while the limit line is on screen; not within `cooldown_mins`; with `only_when_done`, only after a fresh status file says `done`; then the agent's `need_clear` decides (true skips `idle_mins`, false wins over the CLI), else the CLI's hint or `context_pct` after `idle_mins`. MAP checks the pane afterwards (hint gone, context under 50%) and types `status_prompt` in the same round |
+| `status_prompt` | After the usage limit reset (beats the cooldown and an empty `todo/`; `resume_cooldown_mins`); when the status file says `done` (`resume_cooldown_mins`); idle and unchanged `idle_stale_mins` (`cooldown_mins`). An empty `todo/` stops the last two, never the notices |
+| tells | `POST /api/lanes/{name}/tell` or `deploy/map-tell`: `clear`, `ask` (the note is typed; none: the status prompt), `pause` (`mins`, automatic moves only). They beat every rule but "idle, nobody attached", wait while the limit line is on screen, expire after 3 hours; the same verb again replaces the queued one |
+
+A pane stuck where MAP cannot act alerts after `stall_when.stall_mins`, again every `repeat_mins`: a dialog, unsent
+text, or still parked after the reset. A card done is announced once per card (card + time written). Every move is a
+`lane.*` event (`lane.clear`, `lane.ask`, `lane.resume`, `lane.stall`, `lane.card_done`, `lane.rate_limited`,
+`lane.tell`, `lane.watch`) and a line of the lane's history.
+
+`deploy/map-tell` mirrors `watcher.py --tell` from inside the lane's session (it reads the session name from tmux):
+
+```sh
+map-tell --tell clear --note "card 200 done"   # /clear, then the status prompt, once idle
+map-tell --tell ask --note "do card 188 next"
+map-tell --tell pause --mins 90
+map-tell --tell clear --session groove-agos    # another session
+map-tell --tells
+```
+
+It reads `MAP_URL` and `MAP_TOKEN` (`server.api_token`) from the environment or `~/.config/map/tell.env`, and passes
+the token to curl on stdin.
+
+## Telegram
+
+`[telegram]` (`backend/src/telegram.rs`; ported from agent-watcher) sends plain text to `chat_id`. Messages are split
+at 3900 characters, each piece is tried 3 times, and link previews are off. MAP reads the token when it sends:
+`token_env` from its environment, else that variable's line in `env_file`. MAP never stores, logs or returns the
+token, and redacts it from every error, because a Bot API URL contains it.
+
+- **The full report** goes out on `report_minute` (45) of every hour, and whenever 70 minutes passed without one.
+  It shows every lane as the last tick saw it, with one `⏸ paused via /watch` line for a muted lane, and a line
+  about MAP's tasks and waiting plans.
+- **Sent at once**: a card finished, a stall alert, a lane parked at or resumed after the limit, a `/clear` or a
+  prompt typed, a MAP task done, failed or held by intake (`task.held`), and a plan draft waiting for approval. A
+  muted lane sends nothing.
+- **Commands** (`commands = true`) run on a getUpdates long-poll, with the offset kept in the database:
+  - `/watch` (or `/start`, `/menu`) shows one button per lane (✅ watching / ⏸ off); a press toggles the lane's
+    `watch`.
+  - `/status` sends the full report now.
+
+  At start MAP sets the bot's command list and clears any old reply keyboard. Commands come from
+  `allowed_user_ids`, or from anyone in `chat_id` when that list is empty. MAP ignores everyone else silently.
+  Telegram allows one getUpdates consumer per token. When it answers 409, MAP logs one `telegram.conflict` warning
+  and backs off; stop the other consumer, or set `commands = false`.
+- **Settings → Telegram** (`#settings/telegram`) shows whether the token is set (never its value), the chat, the
+  users, the listener's state, the last send and error (redacted), and has a **Send test** button.
+
 ## Settings
 
 The **Settings** screen (`#settings`, the gear in the top bar, or the last nav entry) is what someone who installs
 MAP sets up once (`frontend/components/screens/settings.tsx`, `components/settings/`; `backend/src/settings.rs`).
 Its sections are listed on the left (stacked on a phone) and have their own links: `#settings/git`,
-`#settings/agents`, `#settings/server`. No secret is ever typed or shown there: only public keys, and whether a
+`#settings/agents`, `#settings/telegram`, `#settings/server`. No secret is ever typed or shown there: only public keys, and whether a
 token is set.
 
 - **Git & SSH** (`#settings/git`): the SSH method (MAP's own key, or this machine's `~/.ssh` and ssh-agent; see
@@ -1038,6 +1118,15 @@ All routes are under `/api`. When `server.api_token` is set, send `Authorization
 | POST | `/plans/{id}/reject` | `{"reason"?}` |
 | GET/POST | `/projects/{slug}/planner`, `/workspace/planner` | The planner's session and default provider; or start it (`{"provider"?, "model"?}`; returns the running one if live) |
 | GET | `/planner/instructions` | The planner's instructions and their source (built in or `[templates] planner_agent`) |
+| GET | `/lanes` | Every lane (`LaneInfo`): settings, sessions with state, context %, rate-limit line, stall, pause; status file and age, card counts, git, queued tells, history |
+| PATCH | `/lanes/{name}` | `{"watch"?, "actions"?, "clear_enabled"?, "status_prompt"?}`: kept over map.toml; returns the lane |
+| GET | `/lanes/{name}/screen?session=&lines=` | The last capture's tail, ANSI stripped (default: the lane's first session, 60 lines) |
+| POST | `/lanes/{name}/tell` | `{"verb": "clear" \| "ask" \| "pause", "note"?, "mins"?, "session"?}`; `{name}` may be a session a lane watches (what `map-tell` sends) |
+| GET | `/lanes/{name}/tells`, `/lanes/tells` | Queued tells of the lane (or session), or of every lane |
+| DELETE | `/lanes/{name}/tells/{verb}?session=` | Cancel a queued tell (no session: the "any session" one) |
+| POST | `/lanes/import-watcher` | `{"path"}`: fill lane settings and the Telegram chat and users from an agent-watcher `config.json` inside your home (never the token); returns `updated`, `skipped` |
+| GET | `/telegram` | `enabled`, `token_set` (never the token), `token_env`, `chat_id`, `allowed_user_ids`, `commands`, `polling`, `last_send_ok`, `last_error` (redacted), last send and report |
+| POST | `/telegram/test` | `{}`: send a test message; `ok`, `message` |
 | GET | `/ws` | Pushes `ServerMessage` JSON (see `frontend/lib/generated/ServerMessage.ts`) |
 
 Git: `git clone http://127.0.0.1:4400/git/<slug>/corpus.git`. With `api_token` set, git asks for a password: use the
@@ -1050,7 +1139,8 @@ token (any user name). Only corpus repos are served; a project's code stays in i
 - Browsers do not apply CORS to WebSockets, so `/api/ws` checks `Origin` itself.
 - State-changing routes take JSON, which a cross-site form cannot send without a CORS preflight.
 - Prompts are typed with `send-keys -l`, so their text is never read as key names. Only allow-listed keys can be sent.
-- Only sessions under `session_prefix` are managed. The platform never lists, types into or kills anything else.
+- Only sessions under `session_prefix` are managed. Outside it, MAP reads only the `[[lanes]]` you declare, types into
+  them only as [Lanes](#lanes) describes, and never creates, kills, renames or resizes them.
 
 Agents run with whatever permissions their flags grant (e.g. `--dangerously-skip-permissions`). Run the platform as
 a user, and against a workspace, you are comfortable letting agents change.
@@ -1077,6 +1167,12 @@ outside it still loading with the warning. Agent-login tests resolve every provi
 that launch scripts export `CLAUDE_CONFIG_DIR` / `CODEX_HOME` / `HOME` in isolated mode and nothing extra in shared
 mode, and that credentials, usage, skills, agents and trust paths follow the folder (all in temporary folders); the
 tmux backend's command builder is tested for `-L <socket>` and for dropping `TMUX` / `TMUX_PANE`, without running tmux.
+Lane tests port agent-watcher's `selftest-ratelimit.py` cases (reset times, the limit line, resume, stalls, never
+clearing while parked) and cover the clear and prompt rules, tells, card notices once per card and the watcher import.
+One test runs a fake Claude pane on a private tmux server (`tmux -L map-lanes-test-<pid>`, killed afterwards; skipped
+without tmux) and checks that `/clear` and the status prompt are typed only once it is idle. Telegram tests use a
+fake Bot API on a local port: chunking, retries, token redaction, the allowed-user filter, the offset, `/watch` and
+the 409 back-off.
 
 ## Roadmap
 

@@ -1,7 +1,7 @@
 "use client";
 
 import clsx from "clsx";
-import { Bot, KeyRound, Server, Zap } from "lucide-react";
+import { Bot, KeyRound, Send, Server, Zap } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 
 import { gitApi } from "@/lib/api";
@@ -13,6 +13,7 @@ import { AgentClis } from "../settings/agent-clis";
 import { GitSshSettings } from "../settings/git-ssh";
 import { ReflexGatesSettings } from "../settings/reflex-gates";
 import { ServerSettingsView } from "../settings/server";
+import { TelegramSettings } from "../settings/telegram";
 import { Main, PageHeader } from "../shell/page";
 import { TopBar } from "../shell/top-bar";
 
@@ -20,6 +21,7 @@ const SECTIONS = [
   { id: "git", label: "Git & SSH", sub: "GitHub, GitLab, any ssh host", icon: KeyRound },
   { id: "agents", label: "Agent CLIs", sub: "versions, sign-in, updates", icon: Bot },
   { id: "gates", label: "Reflex gates", sub: "shared Reflex, threshold, corpus", icon: Zap },
+  { id: "telegram", label: "Telegram", sub: "notifications, /watch", icon: Send },
   { id: "server", label: "Server", sub: "map.toml, read only", icon: Server },
 ] as const;
 
@@ -27,9 +29,9 @@ type SectionId = (typeof SECTIONS)[number]["id"];
 
 const isSection = (s: string | null): s is SectionId => SECTIONS.some((x) => x.id === s);
 
-/** Settings (`#settings`, `#settings/git`, `#settings/agents`, `#settings/gates`, `#settings/server`): what someone who installs MAP
+/** Settings (`#settings`, `#settings/git`, `#settings/agents`, `#settings/gates`, `#settings/telegram`, `#settings/server`): what someone who installs MAP
  * sets up once. Git & SSH is editable (the SSH method, MAP's key, hosts, identity); Agent CLIs reuse the sign-in
- * modal and the update flow; Server is `map.toml`, read only. No secret is ever taken or shown here. */
+ * modal and the update flow; Telegram and Server are `map.toml`, read only. No secret is ever taken or shown here. */
 export function SettingsScreen() {
   const { route, go } = useApp();
   const [settings, setSettings] = useState<SettingsInfo | null>(null);
@@ -100,6 +102,9 @@ export function SettingsScreen() {
               lead="Before an LLM, the orchestrator can ask Reflex: is this task clear, does it need planning, which model, does it need an audit. These gates have their own Reflex, shared by every project; each project turns them on in its settings."
             >
               <ReflexGatesSettings />
+            </Section>
+            <Section id="telegram" title="Telegram" lead="Lane reports and alerts go to one Telegram chat, and /watch or /status there talk back to MAP. Read only: these come from map.toml's [telegram].">
+              <TelegramSettings />
             </Section>
             <Section id="server" title="Server" lead="How this server is set up. Read only: these come from map.toml.">
               <ServerSettingsView settings={settings} error={error} />

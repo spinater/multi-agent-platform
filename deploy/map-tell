@@ -1,0 +1,93 @@
+#!/bin/sh
+# map-tell — queue an instruction for a lane session MAP watches (agent-watcher's `watcher.py --tell`, over MAP's API).
+#
+#   map-tell --tell clear --note "card 200 done"    /clear (then the lane's status prompt) once the session is idle
+#   map-tell --tell ask --note "do card 188 next"    type the note (empty: the status prompt) once it is idle
+#   map-tell --tell pause --mins 90                  no automatic /clear or prompt for 90 minutes
+#   map-tell --tell clear --session groove-agos      for another session (default: the tmux session you are in)
+#   map-tell --tells                                 what is queued (for this session, or every lane outside tmux)
+#
+# MAP_URL (default http://127.0.0.1:4400) and MAP_TOKEN (map.toml's server.api_token) come from the environment or
+# from ~/.config/map/tell.env (MAP_URL=… and MAP_TOKEN=… lines). The token is passed to curl on stdin, never argv.
+# A tell waits until the session is idle, and expires after 3 hours; a second tell with the same verb replaces it.
+set -eu
+
+conf="${XDG_CONFIG_HOME:-$HOME/.config}/map/tell.env"
+if [ -f "$conf" ]; then
+  # Only the two variables, read as data (the file is not sourced).
+  [ -n "${MAP_URL:-}" ] || MAP_URL=$(sed -n 's/^[[:space:]]*\(export[[:space:]]*\)\{0,1\}MAP_URL=//p' "$conf" | tail -n 1 | tr -d "\"'")
+  [ -n "${MAP_TOKEN:-}" ] || MAP_TOKEN=$(sed -n 's/^[[:space:]]*\(export[[:space:]]*\)\{0,1\}MAP_TOKEN=//p' "$conf" | tail -n 1 | tr -d "\"'")
+fi
+MAP_URL="${MAP_URL:-http://127.0.0.1:4400}"
+MAP_URL="${MAP_URL%/}"
+MAP_TOKEN="${MAP_TOKEN:-}"
+
+usage() {
+  sed -n '2,13p' "$0" | sed 's/^# \{0,1\}//'
+  exit "${1:-2}"
+}
+
+verb="" note="" mins="" session="" list=0
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --tell) verb="${2:-}"; shift 2 || usage ;;
+    --note) note="${2:-}"; shift 2 || usage ;;
+    --mins) mins="${2:-}"; shift 2 || usage ;;
+    --session) session="${2:-}"; shift 2 || usage ;;
+    --tells) list=1; shift ;;
+    -h|--help) usage 0 ;;
+    *) echo "map-tell: unknown argument $1" >&2; usage ;;
+  esac
+done
+
+if [ -z "$session" ] && [ -n "${TMUX:-}" ]; then
+  session=$(tmux display-message -p '#S' 2>/dev/null || true)
+fi
+
+# JSON string: backslashes and quotes escaped, control characters (newlines, tabs) turned into spaces.
+json_str() {
+  printf '%s' "$1" | tr '\000-\037' ' ' | sed 's/\\/\\\\/g; s/"/\\"/g'
+}
+
+# curl with the token from stdin (a config line), so it never shows up in `ps`.
+api() {
+  method="$1" path="$2" body="${3:-}"
+  {
+    if [ -n "$MAP_TOKEN" ]; then printf 'header = "Authorization: Bearer %s"\n' "$MAP_TOKEN"; fi
+  } | if [ -n "$body" ]; then
+    curl -sS --fail-with-body -K - -X "$method" -H 'Content-Type: application/json' --data "$body" "$MAP_URL/api$path"
+  else
+    curl -sS --fail-with-body -K - -X "$method" "$MAP_URL/api$path"
+  fi
+}
+
+if [ "$list" = 1 ]; then
+  if [ -n "$session" ]; then api GET "/lanes/$session/tells"; else api GET "/lanes/tells"; fi
+  echo
+  exit 0
+fi
+
+case "$verb" in
+  clear|ask|pause) ;;
+  "") usage ;;
+  *) echo "map-tell: --tell must be clear, ask or pause" >&2; exit 2 ;;
+esac
+if [ -z "$session" ]; then
+  echo "map-tell: no target session: pass --session or run it from inside tmux" >&2
+  exit 1
+fi
+case "$session" in
+  *[!A-Za-z0-9._-]*) echo "map-tell: session name '$session' has characters MAP lane names never use" >&2; exit 1 ;;
+esac
+
+body="{\"verb\":\"$verb\""
+[ -n "$note" ] && body="$body,\"note\":\"$(json_str "$note")\""
+if [ "$verb" = pause ]; then
+  mins="${mins:-60}"
+  case "$mins" in *[!0-9]*|"") echo "map-tell: --mins must be a number" >&2; exit 2 ;; esac
+  body="$body,\"mins\":$mins"
+fi
+body="$body}"
+
+api POST "/lanes/$session/tell" "$body"
+echo

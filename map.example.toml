@@ -378,3 +378,76 @@ skip_pct = 90
 # interval_secs = 21600
 # Limit for each version command and each request for the latest version.
 # timeout_secs = 15
+
+# Lanes: tmux sessions someone else owns (an agent you started yourself, on tmux's default server or a named
+# socket) that MAP watches. Each tick MAP reads the pane (busy / idle / dialog / unsent text / parked at the usage
+# limit, context %, the CLI's /clear hint), the agent's status file, git and the card folders, and reports to
+# Telegram. It types into a lane only when `actions` is on and the session is idle with nobody attached: `/clear`
+# when the card is done and the CLI says it is time, then `status_prompt`; the resume prompt after a usage-limit
+# reset. It never creates, kills, renames or resizes a lane session. The dashboard (Lanes) and Telegram's /watch
+# change watch / actions / clear / status_prompt at runtime; POST /api/lanes/import-watcher fills the rest from an
+# agent-watcher config.json.
+[lane_watch]
+# interval_secs = 60
+# Two captures this far apart: a pane still moving is busy.
+# confirm_secs = 3
+# After /clear, wait this long before checking it took.
+# clear_settle_secs = 4
+# key_delay_ms = 600
+
+# [[lanes]]
+# name = "groove-agos"
+# "" = tmux's default server (no -L).
+# socket = ""
+# Globs; default [name].
+# session_match = ["groove*"]
+# path = "~/project/groove"
+# The agent writes {card, state: done|working|blocked, need_clear, note, at} here.
+# status_file = ".scratch/agent-status.json"
+# todo/, todo-human/, done/ are counted when todo/ exists; an empty todo/ stops the status prompt (not the notices).
+# tasks_dir = "tasks"
+# false: watch and notify only, never type.
+# actions = true
+# Typed as one line; or status_prompt_file = "~/prompts/groove-status.txt".
+# status_prompt = "Read .scratch/agent-status.json; finish the card if unfinished, else take the next from tasks/todo/."
+# [lanes.clear_when]
+# enabled = true
+# idle_mins = 30
+# cooldown_mins = 30
+# context_pct = 15
+# Never mid-card: only after the status file says done (and is no older than status_max_age_mins).
+# only_when_done = true
+# status_max_age_mins = 180
+# [lanes.ask_when]
+# 0 = never prompt only because the pane sat idle.
+# idle_stale_mins = 30
+# cooldown_mins = 60
+# After a card is done or the usage limit reset.
+# resume_cooldown_mins = 10
+# status_max_age_mins = 180
+# max_sessions_per_round = 1
+# [lanes.stall_when]
+# A dialog, unsent text or a pane still parked after the reset, unchanged this long, alerts; again every repeat_mins.
+# stall_mins = 20
+# repeat_mins = 120
+#
+# [[lanes]]
+# name = "manager-agos"
+# actions = false
+
+# Telegram: the hourly lane report, and at once: a card finished, a lane stuck, cleared, prompted or parked at the
+# limit, a MAP task done, failed or held by intake, a plan waiting for approval. MAP never stores the token: it reads
+# token_env from its environment, else the `TOKEN_ENV=value` line of env_file. Only one process per bot token may
+# run the command listener (Telegram answers a second one with 409): stop any other consumer, or set commands = false.
+[telegram]
+enabled = false
+# token_env = "TELOXIDE_TOKEN"
+# env_file = "~/.config/map/telegram.env"
+# chat_id = -1001234567890
+# Users whose /watch and /status are obeyed; empty = anyone in chat_id. Others are ignored silently.
+# allowed_user_ids = []
+# api_base = "https://api.telegram.org"
+# /watch (per-lane on/off buttons) and /status over getUpdates.
+# commands = true
+# The full report on this minute of every hour (and whenever 70 minutes passed without one).
+# report_minute = 45

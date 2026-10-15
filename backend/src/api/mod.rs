@@ -4,6 +4,7 @@ mod agents;
 mod fs;
 mod git;
 mod git_access;
+mod lanes;
 mod plans;
 mod projects;
 mod skills;
@@ -157,6 +158,17 @@ pub fn router(hub: Arc<Hub>) -> Router {
         .route("/projects/{slug}/planner", get(plans::project_planner).post(plans::project_start))
         .route("/workspace/planner", get(plans::workspace_planner).post(plans::workspace_start))
         .route("/planner/instructions", get(plans::instructions))
+        // ---- lanes: tmux sessions someone else owns that MAP watches (lanes.rs), and Telegram (telegram.rs)
+        .route("/lanes", get(lanes::list))
+        .route("/lanes/tells", get(lanes::all_tells))
+        .route("/lanes/import-watcher", post(lanes::import_watcher))
+        .route("/lanes/{name}", axum::routing::patch(lanes::update))
+        .route("/lanes/{name}/screen", get(lanes::screen))
+        .route("/lanes/{name}/tell", post(lanes::tell))
+        .route("/lanes/{name}/tells", get(lanes::tells))
+        .route("/lanes/{name}/tells/{verb}", axum::routing::delete(lanes::cancel_tell))
+        .route("/telegram", get(lanes::telegram))
+        .route("/telegram/test", post(lanes::telegram_test))
         .route("/ws", get(ws::handler))
         .layer(middleware::from_fn_with_state(hub.clone(), require_token))
         .with_state(hub.clone());

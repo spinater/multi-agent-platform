@@ -12,6 +12,7 @@ import { AgentsScreen } from "./screens/agents";
 import { CommandScreen } from "./screens/command";
 import { DecisionsScreen } from "./screens/decisions";
 import { KnowledgeScreen } from "./screens/knowledge";
+import { LanesScreen } from "./screens/lanes";
 import { ProjectsScreen } from "./screens/projects";
 import { ReflexScreen } from "./screens/reflex";
 import { SettingsScreen } from "./screens/settings";
@@ -82,6 +83,8 @@ function Router() {
   switch (route.screen) {
     case "projects":
       return <ProjectsScreen />;
+    case "lanes":
+      return <LanesScreen />;
     case "skills":
       return <SkillsScreen />;
     case "agents":

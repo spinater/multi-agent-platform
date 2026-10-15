@@ -32,6 +32,13 @@ pub struct Config {
     pub projects: ProjectsConfig,
     #[serde(default)]
     pub agents_home: AgentsHomeConfig,
+    /// `[[lanes]]`: tmux sessions someone else owns that MAP watches (`lanes.rs`).
+    #[serde(default)]
+    pub lanes: Vec<LaneConfig>,
+    #[serde(default)]
+    pub lane_watch: LaneWatchConfig,
+    #[serde(default)]
+    pub telegram: TelegramConfig,
     /// Overrides merged onto the built-in `claude`, `codex` and `gemini` specs; new names add providers.
     #[serde(default, rename = "providers")]
     provider_overrides: BTreeMap<String, ProviderOverride>,
@@ -663,6 +670,177 @@ impl ProjectsConfig {
         };
         self.default_root = Some(roots[self.default_index].name.clone());
         self.roots = Some(roots);
+        Ok(())
+    }
+}
+
+/// One `[[lanes]]` block: a tmux session (or several, by glob) that someone else owns. MAP reads its pane, the agent's
+/// status file, git and the card folders; it types into it only when `actions` is on and the session is idle with
+/// nobody attached. It never creates, kills, renames or resizes a lane session.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct LaneConfig {
+    pub name: String,
+    /// `tmux -L <socket>`; empty: tmux's default server.
+    #[serde(default)]
+    pub socket: String,
+    /// Globs (`*`, `?`) of session names; empty: `[name]`.
+    #[serde(default)]
+    pub session_match: Vec<String>,
+    /// The project folder the agent works in (status file, git, cards); none: the pane only.
+    #[serde(default)]
+    pub path: Option<PathBuf>,
+    #[serde(default = "default_status_file")]
+    pub status_file: String,
+    #[serde(default = "default_tasks_dir")]
+    pub tasks_dir: String,
+    #[serde(default = "default_true")]
+    pub actions: bool,
+    #[serde(default = "default_true")]
+    pub watch: bool,
+    /// Typed (as one line) to set the agent going again; `status_prompt_file` reads it from a file instead.
+    #[serde(default)]
+    pub status_prompt: String,
+    #[serde(default)]
+    pub status_prompt_file: Option<PathBuf>,
+    #[serde(default)]
+    pub clear_when: crate::model::LaneClearWhen,
+    #[serde(default)]
+    pub ask_when: crate::model::LaneAskWhen,
+    #[serde(default)]
+    pub stall_when: crate::model::LaneStallWhen,
+}
+
+fn default_status_file() -> String {
+    ".scratch/agent-status.json".into()
+}
+
+fn default_tasks_dir() -> String {
+    "tasks".into()
+}
+
+/// `[lane_watch]`: how often lanes are read.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct LaneWatchConfig {
+    pub interval_secs: u64,
+    /// The pane is captured twice this far apart: a pane still moving is busy.
+    pub confirm_secs: u64,
+    /// After `/clear`, wait this long before checking it took.
+    pub clear_settle_secs: u64,
+    /// Between typing a line and pressing Enter (a TUI may take a fast Enter as part of a paste).
+    pub key_delay_ms: u64,
+}
+
+impl Default for LaneWatchConfig {
+    fn default() -> Self {
+        Self { interval_secs: 60, confirm_secs: 3, clear_settle_secs: 4, key_delay_ms: 600 }
+    }
+}
+
+/// `[telegram]`: lane reports and MAP task news to one chat. MAP never stores the token: it reads `token_env` from
+/// its environment, else the `TOKEN_ENV=value` line of `env_file`.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct TelegramConfig {
+    pub enabled: bool,
+    pub token_env: String,
+    pub env_file: Option<PathBuf>,
+    pub chat_id: i64,
+    /// Telegram user ids whose commands are obeyed; empty: anyone in the chat. Others are ignored silently.
+    pub allowed_user_ids: Vec<i64>,
+    pub api_base: String,
+    /// Run the getUpdates listener (`/watch`, `/status`). Only one process per token may.
+    pub commands: bool,
+    /// The full report goes out on this minute of every hour (and whenever 70 minutes passed without one).
+    pub report_minute: u32,
+}
+
+impl Default for TelegramConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            token_env: "TELOXIDE_TOKEN".into(),
+            env_file: None,
+            chat_id: 0,
+            allowed_user_ids: vec![],
+            api_base: "https://api.telegram.org".into(),
+            commands: true,
+            report_minute: 45,
+        }
+    }
+}
+
+impl Config {
+    /// Checks `[[lanes]]`, `[lane_watch]` and `[telegram]`; resolves their paths and reads `status_prompt_file`.
+    fn resolve_lanes(&mut self, base: &Path) -> Result<()> {
+        let home = |p: &Path| {
+            let p = expand_home(p);
+            if p.is_absolute() { p } else { base.join(p) }
+        };
+        let mut seen = std::collections::BTreeSet::new();
+        for lane in &mut self.lanes {
+            let name = lane.name.trim().to_string();
+            if name.is_empty() || name.len() > 48 || !name.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.')) {
+                bail!("lanes: name `{}` must be 1-48 letters, digits, -, _ or .", lane.name);
+            }
+            if matches!(name.as_str(), "tells" | "import-watcher") {
+                bail!("lanes: `{name}` is reserved");
+            }
+            if !seen.insert(name.clone()) {
+                bail!("lanes: `{name}` is defined twice");
+            }
+            lane.name = name.clone();
+            lane.socket = lane.socket.trim().to_string();
+            if !lane.socket.is_empty() && (!lane.socket.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.')) || lane.socket.starts_with('.')) {
+                bail!("lanes.{name}.socket `{}` may use only letters, digits, -, _ and . (a name, not a path)", lane.socket);
+            }
+            lane.session_match.retain(|g| !g.trim().is_empty());
+            if lane.session_match.is_empty() {
+                lane.session_match.push(name.clone());
+            }
+            for (key, rel) in [("status_file", &lane.status_file), ("tasks_dir", &lane.tasks_dir)] {
+                let p = Path::new(rel);
+                if p.is_absolute() || p.components().any(|c| c == std::path::Component::ParentDir) {
+                    bail!("lanes.{name}.{key} `{rel}` must be relative to the lane's path and stay inside it");
+                }
+            }
+            lane.path = lane.path.as_deref().map(home);
+            if let Some(p) = &lane.path
+                && !p.is_dir()
+            {
+                self.warnings.push(format!("lanes.{name}.path {} does not exist", p.display()));
+            }
+            if let Some(file) = lane.status_prompt_file.take() {
+                let file = home(&file);
+                if lane.status_prompt.trim().is_empty() {
+                    lane.status_prompt = std::fs::read_to_string(&file).with_context(|| format!("lanes.{name}.status_prompt_file {}", file.display()))?;
+                }
+                lane.status_prompt_file = Some(file);
+            }
+            if lane.ask_when.max_sessions_per_round == 0 {
+                lane.ask_when.max_sessions_per_round = 1;
+            }
+        }
+        self.lane_watch.interval_secs = self.lane_watch.interval_secs.max(5);
+        self.lane_watch.confirm_secs = self.lane_watch.confirm_secs.min(30);
+        self.lane_watch.clear_settle_secs = self.lane_watch.clear_settle_secs.min(60);
+        self.lane_watch.key_delay_ms = self.lane_watch.key_delay_ms.min(5000);
+        let tg = &mut self.telegram;
+        if !valid_var(&tg.token_env) {
+            bail!("telegram.token_env `{}` is not a valid variable name", tg.token_env);
+        }
+        tg.api_base = tg.api_base.trim().trim_end_matches('/').to_string();
+        if !(tg.api_base.starts_with("https://") || tg.api_base.starts_with("http://")) {
+            bail!("telegram.api_base must start with https:// or http://");
+        }
+        if tg.report_minute > 59 {
+            bail!("telegram.report_minute must be 0-59");
+        }
+        tg.env_file = tg.env_file.take().filter(|p| !p.as_os_str().is_empty()).map(|p| home(&p));
+        if tg.enabled && tg.chat_id == 0 {
+            self.warnings.push("telegram is enabled but chat_id is 0; set it (or import it from the agent-watcher config)".into());
+        }
         Ok(())
     }
 }
@@ -1348,6 +1526,7 @@ impl Config {
             }
         }
         config.rebase_provider_paths();
+        config.resolve_lanes(base)?;
         if let Some(sock) = config.workspace.tmux_socket.take().map(|s| s.trim().to_string()).filter(|s| !s.is_empty()) {
             if !sock.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.')) || sock.starts_with('.') {
                 bail!("workspace.tmux_socket `{sock}` may use only letters, digits, -, _ and . (it is a name, not a path)");

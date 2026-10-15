@@ -58,6 +58,13 @@ import type { DecisionFeedback } from "./generated/DecisionFeedback";
 import type { DecisionSummary } from "./generated/DecisionSummary";
 import type { ReflexCase } from "./generated/ReflexCase";
 import type { SavingsReport } from "./generated/SavingsReport";
+// Lanes screen and Settings → Telegram.
+import type { LaneImport } from "./generated/LaneImport";
+import type { LaneInfo } from "./generated/LaneInfo";
+import type { LaneScreen } from "./generated/LaneScreen";
+import type { LaneTell } from "./generated/LaneTell";
+import type { TelegramInfo } from "./generated/TelegramInfo";
+import type { TellVerb } from "./generated/TellVerb";
 
 const TOKEN_KEY = "map.apiToken";
 
@@ -306,6 +313,36 @@ export const decisionsApi = {
   trace: (id: number, limit = 300) => request<Event[]>("GET", `/tasks/${id}/trace?limit=${limit}`),
   /** One orchestrator tick while it is paused. */
   step: () => request<StepResult>("POST", "/orchestrator/step"),
+};
+
+// ---- lanes (backend lanes.rs): tmux sessions someone else owns that MAP watches, and Telegram. Only booleans come
+// back for the bot token, never its value.
+
+export type LanePatch = { watch?: boolean; actions?: boolean; clear_enabled?: boolean; status_prompt?: string };
+
+const lanePath = (name: string) => `/lanes/${encodeURIComponent(name)}`;
+const sessionQuery = (session?: string | null) => (session ? `session=${encodeURIComponent(session)}` : "");
+
+export const lanesApi = {
+  list: () => request<LaneInfo[]>("GET", "/lanes"),
+  /** The dashboard's changes over map.toml: watch, actions, `/clear` on or off, the status prompt. */
+  update: (name: string, body: LanePatch) => request<LaneInfo>("PATCH", lanePath(name), body),
+  /** The tail of the last capture (ANSI stripped); without `session`, the lane's first session. */
+  screen: (name: string, session?: string | null, lines = 60) =>
+    request<LaneScreen>("GET", `${lanePath(name)}/screen?lines=${lines}${session ? `&${sessionQuery(session)}` : ""}`),
+  /** Queues an instruction, done on the next tick the session is idle and nobody is attached; expires after 3 h. */
+  tell: (name: string, body: { verb: TellVerb; note?: string; mins?: number; session?: string }) => request<LaneTell>("POST", `${lanePath(name)}/tell`, body),
+  tells: (name: string) => request<LaneTell[]>("GET", `${lanePath(name)}/tells`),
+  /** Cancels a queued tell; `session` empty: the one for any session. */
+  cancelTell: (name: string, verb: TellVerb, session?: string | null) => {
+    const q = sessionQuery(session);
+    return request<{ ok: boolean }>("DELETE", `${lanePath(name)}/tells/${verb}${q ? `?${q}` : ""}`);
+  },
+  /** Fills lane settings (and the Telegram chat) from an agent-watcher `config.json` on this machine. */
+  importWatcher: (path: string) => request<LaneImport>("POST", "/lanes/import-watcher", { path }),
+  telegram: () => request<TelegramInfo>("GET", "/telegram"),
+  /** Sends a test message to the configured chat. */
+  telegramTest: () => request<{ ok: boolean; message: string }>("POST", "/telegram/test", {}),
 };
 
 // ----

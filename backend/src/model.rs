@@ -2709,3 +2709,273 @@ pub struct GatesInfo {
     pub projects: Vec<String>,
 }
 
+
+// ---- lanes: tmux sessions someone else owns, which MAP watches (lanes.rs), and Telegram (telegram.rs)
+
+/// A lane session's state on the last tick. `RateLimited` is an idle pane parked at the CLI's usage limit.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum LaneState {
+    Busy,
+    Idle,
+    /// A question or permission dialog is open; MAP never answers it.
+    Waiting,
+    /// Unsent text on the input line.
+    PendingInput,
+    RateLimited,
+    /// The tmux session is gone.
+    Missing,
+}
+
+/// `[lanes.clear_when]`: when MAP types `/clear` into an idle lane session.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(default, deny_unknown_fields)]
+#[ts(export)]
+pub struct LaneClearWhen {
+    pub enabled: bool,
+    /// The pane must be unchanged this long (skipped when the agent's status file asks for the clear).
+    pub idle_mins: u32,
+    /// Never clear again within this long.
+    pub cooldown_mins: u32,
+    /// Context used (the CLI's `N% context used`) from which a clear is due.
+    pub context_pct: u32,
+    /// Only after the status file says the card is `done` (and is fresh).
+    pub only_when_done: bool,
+    /// A status file older than this is ignored.
+    pub status_max_age_mins: u32,
+}
+
+impl Default for LaneClearWhen {
+    fn default() -> Self {
+        Self { enabled: false, idle_mins: 30, cooldown_mins: 30, context_pct: 15, only_when_done: true, status_max_age_mins: 180 }
+    }
+}
+
+/// `[lanes.ask_when]`: when MAP types the lane's `status_prompt`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(default, deny_unknown_fields)]
+#[ts(export)]
+pub struct LaneAskWhen {
+    /// Idle with an unchanged pane this long; 0 = never for this reason.
+    pub idle_stale_mins: u32,
+    /// No second prompt within this long (a card reported done uses `resume_cooldown_mins`).
+    pub cooldown_mins: u32,
+    /// The shorter cooldown after a card is done or the usage limit reset.
+    pub resume_cooldown_mins: u32,
+    pub status_max_age_mins: u32,
+    /// Sessions of one lane prompted per tick (1: two agents in one folder never grab the same card).
+    pub max_sessions_per_round: u32,
+}
+
+impl Default for LaneAskWhen {
+    fn default() -> Self {
+        Self { idle_stale_mins: 30, cooldown_mins: 60, resume_cooldown_mins: 10, status_max_age_mins: 180, max_sessions_per_round: 1 }
+    }
+}
+
+/// `[lanes.stall_when]`: a pane stuck where MAP cannot act (a dialog, unsent text, parked after the quota reset).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(default, deny_unknown_fields)]
+#[ts(export)]
+pub struct LaneStallWhen {
+    pub stall_mins: u32,
+    /// Alert again after this long while it stays stuck.
+    pub repeat_mins: u32,
+}
+
+impl Default for LaneStallWhen {
+    fn default() -> Self {
+        Self { stall_mins: 20, repeat_mins: 120 }
+    }
+}
+
+/// The agent's own status file (`.scratch/agent-status.json`).
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct LaneStatusFile {
+    #[serde(default)]
+    pub card: Option<String>,
+    /// `done`, `working` or `blocked`.
+    #[serde(default)]
+    pub state: Option<String>,
+    #[serde(default)]
+    pub need_clear: Option<bool>,
+    #[serde(default)]
+    pub note: Option<String>,
+    /// ISO-8601 with offset, as the agent wrote it.
+    #[serde(default)]
+    pub at: Option<String>,
+}
+
+/// Cards in the lane's `tasks_dir` (`todo/`, `todo-human/`, `done/`).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct LaneTasks {
+    pub todo: u32,
+    pub todo_human: u32,
+    pub done: u32,
+    /// The most recently finished card (file name without `.md`).
+    pub last_done: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct LaneGit {
+    pub branch: String,
+    pub sha: String,
+    pub subject: String,
+    /// `3 hours ago`.
+    pub when: String,
+    /// Uncommitted files.
+    pub dirty: u32,
+    /// Commits not on `origin/<branch>`; `None` without an upstream.
+    pub ahead: Option<u32>,
+    pub behind: Option<u32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct LaneSession {
+    pub name: String,
+    pub state: LaneState,
+    /// Why that state (`unsent text in input box: "…"`, the spinner line).
+    pub why: String,
+    /// A terminal is attached: MAP does not type.
+    pub attached: bool,
+    pub context_pct: Option<u32>,
+    /// The CLI suggests `/clear` (`new task? … /clear`).
+    pub clear_hint: bool,
+    pub rate_limit_line: Option<String>,
+    pub rate_limit_resets: Option<DateTime<Utc>>,
+    /// Minutes the pane has not changed (volatile timers and counters ignored).
+    #[ts(type = "number")]
+    pub unchanged_mins: i64,
+    /// The stall alert on screen now, if any.
+    pub stall: Option<String>,
+    /// `pause` tell in force until then.
+    pub paused_until: Option<DateTime<Utc>>,
+    pub last_clear: Option<DateTime<Utc>>,
+    pub last_ask: Option<DateTime<Utc>>,
+    /// Sub-agent rows under the input box.
+    pub sub_agents: Vec<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum TellVerb {
+    /// `/clear` (then the status prompt) as soon as the session is idle.
+    Clear,
+    /// Type the note (or the status prompt) as soon as it is idle.
+    Ask,
+    /// No automatic clear or prompt for `mins`.
+    Pause,
+}
+
+/// A queued instruction for a lane session (`POST /api/lanes/{name}/tell`, `deploy/map-tell`); expires after 3 h.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct LaneTell {
+    pub lane: String,
+    /// The tmux session; empty: whichever session of the lane is idle first.
+    pub session: String,
+    pub verb: TellVerb,
+    pub note: String,
+    pub mins: Option<u32>,
+    pub at: DateTime<Utc>,
+    pub expires_at: DateTime<Utc>,
+}
+
+/// One thing MAP did or noticed in a lane (also a `lane.*` event).
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct LaneAction {
+    #[ts(type = "number")]
+    pub id: i64,
+    pub at: DateTime<Utc>,
+    pub session: Option<String>,
+    /// `clear`, `ask`, `resume`, `stall`, `card_done`, `tell`, `rate_limited`, `watch`.
+    pub kind: String,
+    pub message: String,
+}
+
+/// `GET /api/lanes`: a lane's settings (map.toml, then the dashboard's changes) and what the last tick saw.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct LaneInfo {
+    pub name: String,
+    /// `tmux -L <socket>`; empty: tmux's default server.
+    pub socket: String,
+    pub session_match: Vec<String>,
+    pub path: Option<String>,
+    /// Off: no notifications and no typing (screen still read). Toggled by `/watch` on Telegram too.
+    pub watch: bool,
+    /// Off: watch and notify only, never type.
+    pub actions: bool,
+    pub clear_when: LaneClearWhen,
+    pub ask_when: LaneAskWhen,
+    pub stall_when: LaneStallWhen,
+    pub status_prompt: String,
+    pub sessions: Vec<LaneSession>,
+    pub status: Option<LaneStatusFile>,
+    #[ts(type = "number | null")]
+    pub status_age_mins: Option<i64>,
+    pub tasks: Option<LaneTasks>,
+    pub git: Option<LaneGit>,
+    pub tells: Vec<LaneTell>,
+    /// Newest first.
+    pub history: Vec<LaneAction>,
+    pub checked_at: Option<DateTime<Utc>>,
+    /// The last tick failed for this lane (e.g. tmux not reachable).
+    pub error: Option<String>,
+}
+
+/// `GET /api/lanes/{name}/screen`: the tail of the last capture, ANSI stripped.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct LaneScreen {
+    pub lane: String,
+    pub session: Option<String>,
+    pub text: String,
+    pub at: Option<DateTime<Utc>>,
+}
+
+/// `POST /api/lanes/import-watcher`: what the agent-watcher's `config.json` filled in.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct LaneImport {
+    /// Lanes whose settings were filled from a watcher target.
+    pub updated: Vec<String>,
+    /// Targets with no matching lane, and why.
+    pub skipped: Vec<String>,
+    #[ts(type = "number | null")]
+    pub chat_id: Option<i64>,
+    #[ts(type = "number[]")]
+    pub allowed_user_ids: Vec<i64>,
+}
+
+/// `GET /api/telegram`. The token is never returned: only whether it is set.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct TelegramInfo {
+    pub enabled: bool,
+    pub token_set: bool,
+    /// The variable the token is read from (and `env_file`, when set).
+    pub token_env: String,
+    pub env_file: Option<String>,
+    #[ts(type = "number")]
+    pub chat_id: i64,
+    #[ts(type = "number[]")]
+    pub allowed_user_ids: Vec<i64>,
+    /// This MAP runs the getUpdates listener (`/watch`, `/status`).
+    pub commands: bool,
+    /// The listener is connected (not backing off).
+    pub polling: bool,
+    pub last_send_ok: Option<bool>,
+    /// Redacted: never contains the token.
+    pub last_error: Option<String>,
+    pub last_sent_at: Option<DateTime<Utc>>,
+    pub last_report_at: Option<DateTime<Utc>>,
+    pub report_minute: u32,
+}
