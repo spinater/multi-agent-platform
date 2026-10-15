@@ -3,6 +3,7 @@
 mod activity;
 mod agents;
 mod env;
+mod configure;
 mod fs;
 mod git;
 mod git_access;
@@ -101,6 +102,10 @@ pub fn router(hub: Arc<Hub>) -> Router {
         // ---- agents: custom sub-agents for Claude, Codex and agy, per workspace and user-wide (agents.rs)
         .route("/agents", get(agents::overview).put(agents::save))
         .route("/agents/{name}", get(agents::detail).delete(agents::delete))
+        // ---- Configure: tool permissions per CLI and MCP servers, in the CLIs' own files (permissions.rs, mcp.rs)
+        .route("/permissions", get(configure::permissions).put(configure::set_permissions))
+        .route("/mcp", get(configure::mcp).put(configure::save_mcp).delete(configure::delete_mcp))
+        .route("/mcp/test", post(configure::test_mcp))
         // ---- project settings and provider sign-in
         .route("/projects/defaults", get(projects::defaults))
         .route("/projects/inspect", post(projects::inspect))

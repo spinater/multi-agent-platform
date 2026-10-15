@@ -55,6 +55,8 @@ pub struct Hub {
     providers_sig: Mutex<Option<String>>,
     /// Each project's manager supervisor state (`manager.rs`).
     pub managers: crate::manager::Managers,
+    /// The last connection test of each MCP server (`mcp.rs`, Configure → MCP).
+    pub mcp_tests: crate::mcp::Tests,
 }
 
 pub struct LaunchRequest {
@@ -106,6 +108,7 @@ impl Hub {
             telegram,
             providers_sig: Mutex::new(None),
             managers: Default::default(),
+            mcp_tests: Default::default(),
         })
     }
 

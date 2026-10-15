@@ -183,7 +183,7 @@ fn codex_toml(text: &str, folder: &str) -> Result<(Marked, Option<String>)> {
 
 /// Writes `bytes` to a temporary file next to `path` and renames it over `path`, keeping its mode, unless `path`
 /// no longer holds `expected` (`None`: it did not exist). False when it changed, so the caller reads it again.
-fn replace_if_unchanged(path: &Path, expected: Option<&[u8]>, bytes: &[u8]) -> Result<bool> {
+pub(crate) fn replace_if_unchanged(path: &Path, expected: Option<&[u8]>, bytes: &[u8]) -> Result<bool> {
     let dir = path.parent().context("no parent folder")?;
     if !dir.is_dir() {
         // The CLI is installed but has not run yet (no ~/.codex); it creates the same folder itself.

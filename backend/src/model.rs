@@ -3191,6 +3191,250 @@ pub struct EnvDelete {
     pub key: String,
 }
 
+/// Which files a Configure call reads and writes: the provider CLIs' own (machine) files, or a project's.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum ConfigScope {
+    Machine,
+    Project,
+}
+
+/// The settings dialect a provider CLI reads (`claude` and `openrouter` both run Claude Code).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum CliKind {
+    Claude,
+    Codex,
+    Gemini,
+    /// A CLI whose permission and MCP files MAP does not know.
+    Other,
+}
+
+/// One column of the Permissions matrix and one CLI an MCP server can be given to: a provider MAP runs
+/// (`orchestrator.provider_order`, then the audit chain).
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct ConfigCli {
+    /// The provider's name in `map.toml`.
+    pub name: String,
+    pub kind: CliKind,
+    /// What this CLI can and cannot do on this tab (Codex: no per-tool rules; its approval policy).
+    pub note: Option<String>,
+}
+
+/// A file a Configure tab reads (and writes) for one provider and scope.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct ConfigFile {
+    pub provider: String,
+    pub scope: ConfigScope,
+    pub path: String,
+    pub exists: bool,
+    /// MAP edits it (false: only read, e.g. Claude's shared `.claude/settings.json`).
+    pub writable: bool,
+    /// Why it could not be read (invalid JSON or TOML); MAP does not write it then.
+    pub error: Option<String>,
+}
+
+// ---- Configure → Permissions: tool rules × CLI
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum PermValue {
+    Allow,
+    Ask,
+    Deny,
+    /// The CLI has no setting for this rule (Codex: none at all); read only.
+    Unsupported,
+}
+
+/// One rule for one CLI. In project scope it is the value the CLI will use: the stricter of the project's and the
+/// machine's (Claude Code and Gemini both merge the lists, and a deny anywhere wins).
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct PermCell {
+    pub provider: String,
+    pub value: PermValue,
+    /// Which file the value comes from; `None`: no file sets it (the CLI's default, `value`) or unsupported.
+    pub source: Option<ConfigSource>,
+    /// Partly set, a project value the machine one outweighs, agy having no "ask" list, …
+    pub note: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct PermRow {
+    /// `Read / Grep`, `Bash(git *)`, `mcp__github__*`, …
+    pub rule: String,
+    pub description: String,
+    /// The MCP server of an `mcp__<name>__*` row.
+    pub mcp_server: Option<String>,
+    pub cells: Vec<PermCell>,
+}
+
+/// `GET /api/permissions?project=`: no project is the machine scope.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct PermissionsView {
+    pub project: Option<String>,
+    pub scope: ConfigScope,
+    pub providers: Vec<ConfigCli>,
+    pub rows: Vec<PermRow>,
+    pub files: Vec<ConfigFile>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct PermChange {
+    pub rule: String,
+    pub provider: String,
+    /// `None`: clear it from this scope's file (inherit the machine value, or the CLI's default).
+    pub value: Option<PermValue>,
+}
+
+/// `PUT /api/permissions`; returns the fresh [`PermissionsView`].
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct PermissionsUpdate {
+    #[serde(default)]
+    pub project: Option<String>,
+    pub cells: Vec<PermChange>,
+}
+
+// ---- Configure → MCP servers
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum McpTransport {
+    Stdio,
+    /// Streamable HTTP (an SSE-only server reads as this too, with a note).
+    Http,
+}
+
+/// An environment variable or HTTP header of a server: its name and whether it has a value. Values are never
+/// returned: they are often tokens.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct McpKey {
+    pub key: String,
+    pub set: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum McpState {
+    NotTested,
+    Connected,
+    Failed,
+}
+
+/// The last `POST /api/mcp/test` of a server in this scope (kept in memory until MAP restarts).
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct McpStatus {
+    pub state: McpState,
+    /// `connected · 12 tools`, `failed: <reason>`, `not tested`.
+    pub label: String,
+    pub tools: Option<u32>,
+    pub tested_at: Option<DateTime<Utc>>,
+}
+
+/// One MCP server across the CLIs: the same name in several CLIs' files is one server.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct McpServer {
+    pub name: String,
+    pub transport: McpTransport,
+    pub command: Option<String>,
+    pub args: Vec<String>,
+    pub url: Option<String>,
+    pub env_keys: Vec<McpKey>,
+    pub header_keys: Vec<McpKey>,
+    /// The CLIs that get it (in project scope: from the project's file or inherited from the machine's).
+    pub providers: Vec<String>,
+    pub source: ConfigSource,
+    pub status: McpStatus,
+    /// The CLIs' definitions differ, an SSE server, …
+    pub notes: Vec<String>,
+}
+
+/// `GET /api/mcp?project=`: no project is the machine scope.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct McpView {
+    pub project: Option<String>,
+    pub scope: ConfigScope,
+    /// The CLIs a server can be given to.
+    pub providers: Vec<ConfigCli>,
+    pub servers: Vec<McpServer>,
+    pub files: Vec<ConfigFile>,
+}
+
+/// An environment variable or header to write. `value: None` keeps the value the server already has.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct McpValueInput {
+    pub key: String,
+    #[serde(default)]
+    pub value: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct McpServerInput {
+    pub name: String,
+    pub transport: McpTransport,
+    #[serde(default)]
+    pub command: Option<String>,
+    #[serde(default)]
+    pub args: Vec<String>,
+    #[serde(default)]
+    pub url: Option<String>,
+    /// The whole list: a variable left out is removed.
+    #[serde(default)]
+    pub env: Vec<McpValueInput>,
+    #[serde(default)]
+    pub headers: Vec<McpValueInput>,
+}
+
+/// `PUT /api/mcp`: write the server into the scope's file of each CLI in `providers` and remove it from the scope's
+/// files of the other CLIs; returns the fresh [`McpView`].
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct McpSave {
+    #[serde(default)]
+    pub project: Option<String>,
+    pub server: McpServerInput,
+    pub providers: Vec<String>,
+}
+
+/// `DELETE /api/mcp` (removes it from every file of the scope) and `POST /api/mcp/test`.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct McpNameRequest {
+    #[serde(default)]
+    pub project: Option<String>,
+    pub name: String,
+}
+
+/// `POST /api/mcp/test`: `initialize`, then `tools/list`, within 15 s.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct McpTestResult {
+    pub ok: bool,
+    pub tools: u32,
+    /// The first 30.
+    pub tool_names: Vec<String>,
+    pub error: Option<String>,
+    #[ts(type = "number")]
+    pub duration_ms: u64,
+}
+
 // ---- activity graph (trace.rs): who made what, and what each agent used
 
 /// One thing an agent did, read from its CLI's transcript (aggregated: the same command head `×count`).
