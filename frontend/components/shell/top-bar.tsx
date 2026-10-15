@@ -4,7 +4,8 @@ import clsx from "clsx";
 import { Hexagon, Moon, Settings, Sun } from "lucide-react";
 import { useState, type ReactNode } from "react";
 
-import { NAV, SCREEN_LABEL } from "@/lib/nav";
+import { setLang, useLang, useT, type MsgKey } from "@/lib/i18n";
+import { NAV } from "@/lib/nav";
 
 import { useApp } from "../app-context";
 import { UpdatesBell } from "../updates-bell";
@@ -87,8 +88,30 @@ function ProjectSwitcher() {
   );
 }
 
+/** EN | TH: the interface language (design: LangSwitch.dc.html). */
+export function LangSwitch() {
+  const lang = useLang();
+  const t = useT();
+  return (
+    <div title={t("lang.title")} className="flex gap-0.5 rounded-[7px] border border-line-2 p-0.5">
+      {(["en", "th"] as const).map((l) => (
+        <button
+          key={l}
+          onClick={() => setLang(l)}
+          aria-pressed={lang === l}
+          className="h-[22px] min-w-[30px] cursor-pointer rounded-[5px] px-[7px] font-mono text-[10.5px] font-medium"
+          style={{ background: lang === l ? "color-mix(in srgb, var(--accent) 14%, transparent)" : "transparent", color: lang === l ? "var(--accent-soft)" : "var(--muted)" }}
+        >
+          {l.toUpperCase()}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 function Nav() {
   const { route, go } = useApp();
+  const t = useT();
   return (
     <nav className="flex max-w-full min-w-0 gap-0.5 overflow-x-auto">
       {NAV.map((s) => (
@@ -104,7 +127,7 @@ function Nav() {
             route.screen === s || (s === "configure" && (route.screen === "skills" || route.screen === "agents")) ? "bg-accent-tint text-accent-soft hover:text-accent-soft" : "text-nav hover:bg-white/5 hover:text-text",
           )}
         >
-          {SCREEN_LABEL[s]}
+          {t(`nav.${s}` as MsgKey)}
         </a>
       ))}
     </nav>
@@ -134,6 +157,7 @@ export function TopBar({ extra }: { extra?: ReactNode }) {
       </div>
       <div className="flex items-center gap-3">
         <UpdatesBell />
+        <LangSwitch />
         <UsageMini />
         <Clock />
         <a

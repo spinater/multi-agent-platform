@@ -7,6 +7,7 @@ import clsx from "clsx";
 import { createContext, useContext, type ReactNode } from "react";
 
 import type { ConfigSource } from "@/lib/generated/ConfigSource";
+import { TAB_DESC_TH, useLang, useT } from "@/lib/i18n";
 
 export type Scope = "project" | "machine";
 
@@ -208,12 +209,16 @@ export const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.strin
 
 /** A tab's header: title, one-line description, where it saves, and its add action. */
 export function TabHead({ title, desc, savesTo, add }: { title: string; desc: ReactNode; savesTo: ReactNode; add?: { label: string; onClick: () => void; disabled?: boolean } }) {
+  const lang = useLang();
+  const t = useT();
   return (
     <div className="flex flex-wrap items-end justify-between gap-3 border-b border-line pb-3.5">
       <div className="flex max-w-[640px] flex-col gap-[7px]">
         <h2 className="text-[22px] leading-[1.15] font-semibold tracking-[-0.01em]">{title}</h2>
-        <p className="text-[13px] leading-normal text-text-2">{desc}</p>
-        <span className="font-mono text-[10.5px] leading-[1.3] text-muted">saves to {savesTo}</span>
+        <p className="text-[13px] leading-normal text-text-2">{lang === "th" && TAB_DESC_TH[title] ? TAB_DESC_TH[title] : desc}</p>
+        <span className="font-mono text-[10.5px] leading-[1.3] text-muted">
+          {t("cfg.savesTo")} {savesTo}
+        </span>
       </div>
       {add && (
         <button onClick={add.onClick} disabled={add.disabled} className={primaryCls}>

@@ -8,6 +8,8 @@
 import clsx from "clsx";
 import { useCallback, useMemo, useState, type ReactNode } from "react";
 
+import { useT, type MsgKey } from "@/lib/i18n";
+
 import { useApp } from "../app-context";
 import { AgentsTab } from "../configure/agents";
 import { BranchesTab, GitTab, ParallelTab } from "../configure/git";
@@ -76,6 +78,7 @@ export function ConfigureScreen() {
   const [visited, setVisited] = useState<TabId[]>([tab]);
   const [pending, setPendingState] = useState<Record<string, Pending>>({});
   const [saving, setSaving] = useState(false);
+  const t = useT();
 
   if (!visited.includes(tab)) setVisited([...visited, tab]);
 
@@ -123,7 +126,7 @@ export function ConfigureScreen() {
     setSaving(true);
     try {
       for (const p of Object.values(pending)) await p.save();
-      toast("Saved");
+      toast(t("cfg.saved"));
     } catch (e) {
       toast((e as Error).message, "bad");
     } finally {
@@ -132,12 +135,12 @@ export function ConfigureScreen() {
   };
   const discardAll = () => {
     for (const p of Object.values(pending)) p.discard();
-    toast("Discarded changes", "warn");
+    toast(t("cfg.discarded"), "warn");
   };
   // Switching scope with unsaved edits would mix them up: ask first.
   const changeScope = (s: Scope) => {
     if (s === scope) return;
-    if (count && !window.confirm(`${count} unsaved change${count === 1 ? "" : "s"} will be discarded. Switch anyway?`)) return;
+    if (count && !window.confirm(t("cfg.switchConfirm", { n: count }))) return;
     discardAll();
     setScope(s);
   };
@@ -148,26 +151,25 @@ export function ConfigureScreen() {
       <Main className="gap-[22px] pb-[90px]">
         <div className="flex flex-wrap items-end justify-between gap-[18px]">
           <div className="flex max-w-[720px] flex-col gap-2.5">
-            <span className="label">{scope === "project" ? `Project · ${projectName} · machine values shown where not overridden` : "Machine · every project on this computer"}</span>
-            <h1 className="text-[30px] leading-[1.05] font-semibold tracking-[-0.02em] sm:text-[38px]">Configure</h1>
+            <span className="label">{scope === "project" ? t("cfg.kProject", { p: projectName }) : t("cfg.kMachine")}</span>
+            <h1 className="text-[30px] leading-[1.05] font-semibold tracking-[-0.02em] sm:text-[38px]">{t("cfg.title")}</h1>
             <p className="text-sm leading-[1.55] text-text-2">
-              Agents, workflows and everything they run with. Machine settings apply to every project; a project can override any of them, and each item shows where its value comes
-              from.
+              {t("cfg.intro")}
             </p>
           </div>
           <div className="flex flex-col items-end gap-2">
             <div className="flex gap-0.5 rounded-[9px] border border-line-2 p-[3px]">
               {(
                 [
-                  ["project", "Project", projectName],
-                  ["machine", "Machine", "all projects"],
+                  ["project", t("cfg.project"), projectName],
+                  ["machine", t("cfg.machine"), t("cfg.allProjects")],
                 ] as const
               ).map(([s, l, sub]) => (
                 <button
                   key={s}
                   onClick={() => changeScope(s)}
                   disabled={s === "project" && project === null}
-                  title={s === "project" && project === null ? "Pick a project in the switcher first" : undefined}
+                  title={s === "project" && project === null ? t("cfg.pickFirst") : undefined}
                   className="flex cursor-pointer flex-col items-start gap-1 rounded-[7px] px-3 py-[7px] text-left disabled:cursor-not-allowed disabled:opacity-50"
                   style={{ background: scope === s ? "var(--accent-tint)" : "transparent", color: scope === s ? "var(--accent-soft)" : "var(--nav)" }}
                 >
@@ -177,10 +179,10 @@ export function ConfigureScreen() {
               ))}
             </div>
             <div className="flex items-center gap-1.5 font-mono text-[10.5px] text-muted">
-              <span>config language</span>
+              <span>{t("cfg.cfgLang")}</span>
               {(
                 [
-                  ["en", "English · recommended"],
+                  ["en", t("cfg.english")],
                   ["th", "ไทย"],
                 ] as const
               ).map(([l, label]) => {
@@ -208,11 +210,10 @@ export function ConfigureScreen() {
         {cfgLang === "th" && (
           <div className="flex flex-wrap items-center gap-x-4 gap-y-2.5 rounded-[10px] border px-3.5 py-3" style={{ borderColor: "color-mix(in srgb, var(--warn) 40%, transparent)", background: "color-mix(in srgb, var(--warn) 6%, transparent)" }}>
             <span className="flex-[1_1_420px] text-[13px] leading-normal text-text">
-              Config is set to Thai. Rules, prompts and generated config will be written in Thai. Not recommended: Thai text usually costs more tokens than the same text in English, on
-              every session that loads it, and agents follow English instructions more reliably.
+              {t("cfg.thaiWarn")}
             </span>
             <button onClick={() => setLang("en")} className="h-[30px] cursor-pointer rounded-[7px] border px-3 text-[12px] font-semibold whitespace-nowrap text-warn" style={{ borderColor: "color-mix(in srgb, var(--warn) 50%, transparent)" }}>
-              Use English
+              {t("cfg.backToEn")}
             </button>
           </div>
         )}
@@ -221,7 +222,7 @@ export function ConfigureScreen() {
           <aside className="flex max-w-full flex-[1_1_200px] flex-col gap-3.5 lg:sticky lg:top-16 lg:max-w-[240px]">
             {TABS.map((g) => (
               <div key={g.group} className="flex flex-col gap-0.5">
-                <span className="px-2.5 pb-1.5 font-mono text-[9.5px] leading-none font-medium tracking-[0.16em] text-muted/80 uppercase">{g.group}</span>
+                <span className="px-2.5 pb-1.5 font-mono text-[9.5px] leading-none font-medium tracking-[0.16em] text-muted/80 uppercase">{t(`cfg.group.${g.group}` as MsgKey)}</span>
                 {g.tabs.map(([id, label, glyph, color]) => {
                   const on = tab === id;
                   return (
@@ -244,15 +245,15 @@ export function ConfigureScreen() {
             <div className="flex flex-col gap-1.5 rounded-[9px] border border-line p-2.5 font-mono text-[10.5px] leading-[1.3] text-muted">
               <span className="flex items-center gap-1.5">
                 <SourceBadge source="machine" />
-                every project
+                {t("cfg.lgMachine")}
               </span>
               <span className="flex items-center gap-1.5">
                 <SourceBadge source="project" />
-                this project only
+                {t("cfg.lgProject")}
               </span>
               <span className="flex items-center gap-1.5">
                 <SourceBadge source="override" />
-                replaces machine here
+                {t("cfg.lgOverride")}
               </span>
             </div>
           </aside>
@@ -270,15 +271,15 @@ export function ConfigureScreen() {
       {count > 0 && (
         <div className="fixed bottom-5 left-1/2 z-50 flex max-w-[calc(100vw-24px)] -translate-x-1/2 flex-wrap items-center gap-x-4 gap-y-2.5 rounded-xl border border-accent/40 bg-menu py-2.5 pr-3 pl-4 shadow-[0_14px_40px_rgba(0,0,0,.55)]">
           <span className="text-[12.5px] leading-[1.3] font-medium">
-            {count} unsaved change{count === 1 ? "" : "s"}
+            {t("cfg.unsaved", { n: count })}
           </span>
           <span className="font-mono text-[10.5px] leading-[1.3] text-muted">{files.join(" · ")}</span>
           <div className="flex gap-1.5">
             <button onClick={discardAll} className={btnCls}>
-              Discard
+              {t("cfg.discard")}
             </button>
             <button onClick={saveAll} disabled={saving} className={clsx(primaryCls, "h-[30px]")}>
-              {saving ? "Saving…" : "Save"}
+              {saving ? t("cfg.saving") : t("cfg.save")}
             </button>
           </div>
         </div>

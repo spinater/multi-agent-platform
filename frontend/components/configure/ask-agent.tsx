@@ -11,6 +11,8 @@ import { configureApi, type AskReply, type ConfigOp } from "@/lib/api";
 import { providerColor } from "@/lib/colors";
 import type { JsonValue } from "@/lib/generated/serde_json/JsonValue";
 
+import { useT } from "@/lib/i18n";
+
 import { useApp } from "../app-context";
 import { Seg, useConfigure } from "./ui";
 
@@ -65,6 +67,7 @@ export function AskAgent({
   const [on, setOn] = useState<Record<number, boolean>>({});
   const [error, setError] = useState("");
   const copy = COPY[tab];
+  const t = useT();
   const fromRuns = !!allowRuns && !prompt.trim();
   const m = model ?? info?.default_model ?? "";
 
@@ -97,15 +100,16 @@ export function AskAgent({
   };
   const [effLabel, effNote] = EFFORT_LABEL[prov] ?? ["effort", ""];
   const thaiPrompt = /[฀-๿]/.test(prompt);
-  const outLang = cfgLang === "th" ? "writes config in Thai · uses more tokens" : thaiPrompt ? "your prompt is in Thai; the config is still written in English (change it in config language)" : "writes config in English";
+  const outLang = cfgLang === "th" ? t("ai.outTh") : thaiPrompt ? t("ai.outEnTh") : t("ai.outEn");
 
   return (
     <div className="flex flex-col gap-3 rounded-xl border p-3.5" style={{ borderColor: `color-mix(in srgb, var(--accent) ${phase === "ready" ? 40 : 20}%, transparent)`, background: "color-mix(in srgb, var(--accent) 3.5%, transparent)" }}>
       <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
         <span className="flex items-center gap-2 text-[13px] leading-none font-semibold">
-          <span className="text-accent">✦</span>Ask an agent to do it
+          <span className="text-accent">✦</span>
+          {t("ai.title")}
         </span>
-        <span className="text-[11.5px] leading-[1.3] text-muted">Describe what you want in plain words. You review the changes before anything is applied.</span>
+        <span className="text-[11.5px] leading-[1.3] text-muted">{t("ai.sub")}</span>
         <div className="ml-auto flex gap-0.5 rounded-[7px] border border-line-2 p-0.5">
           {usable.map((p) => (
             <button
@@ -160,7 +164,7 @@ export function AskAgent({
           className="min-h-11 flex-none cursor-pointer rounded-lg border border-accent px-4 text-[12.5px] font-semibold whitespace-nowrap"
           style={{ background: phase === "thinking" ? "var(--accent-tint)" : "var(--accent)", color: phase === "thinking" ? "var(--accent-soft)" : "var(--accent-text)" }}
         >
-          {phase === "thinking" ? `${prov} · ${m} · ${effort}${fromRuns ? " · reading the last 30 runs" : ""}…` : fromRuns ? "✦ Suggest from runs" : "✦ Generate"}
+          {phase === "thinking" ? `${prov} · ${m} · ${effort}${fromRuns ? " · reading the last 30 runs" : ""}…` : fromRuns ? "✦ Suggest from runs" : t("ai.generate")}
         </button>
       </div>
       <div className="flex flex-wrap gap-1.5">
@@ -211,7 +215,7 @@ export function AskAgent({
           <div className="flex flex-wrap gap-2">
             {onApply && (
               <button onClick={apply} disabled={!chosen.length} className="h-8 cursor-pointer rounded-[7px] border border-accent bg-accent px-3.5 text-[12.5px] font-semibold whitespace-nowrap text-accent-text disabled:opacity-50">
-                Apply {chosen.length} change{chosen.length === 1 ? "" : "s"}
+                {t("ai.apply", { n: chosen.length })}
               </button>
             )}
             <button onClick={() => setPhase("idle")} className="h-8 cursor-pointer rounded-[7px] border border-line-3 px-3.5 text-[12.5px] font-medium text-nav">
