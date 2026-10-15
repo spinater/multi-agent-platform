@@ -1,10 +1,12 @@
 //! HTTP API under `/api` and the dashboard's static files.
 
+mod activity;
 mod agents;
 mod fs;
 mod git;
 mod git_access;
 mod lanes;
+mod manager;
 mod plans;
 mod projects;
 mod skills;
@@ -63,6 +65,7 @@ pub fn router(hub: Arc<Hub>) -> Router {
         .route("/sessions/{name}/key", post(key))
         .route("/sessions/{name}/trust", post(trust_session))
         .route("/tasks", get(tasks).post(create_task))
+        .route("/tasks/page", get(task_page))
         .route("/tasks/{id}", axum::routing::patch(update_task).delete(delete_task))
         .route("/orchestrator", get(orchestrator).post(set_orchestrator))
         .route("/gates", get(gates_info).post(set_gates))
@@ -114,6 +117,7 @@ pub fn router(hub: Arc<Hub>) -> Router {
         .route("/projects/{slug}/knowledge/search", get(projects::knowledge_search))
         .route("/projects/{slug}/knowledge/doc", get(projects::knowledge_doc))
         .route("/providers/{name}/login", get(projects::login_state).post(projects::login_start))
+        .route("/providers/{name}/login/code", post(projects::login_code))
         // ---- usage: plan limits per provider (usage.rs)
         .route("/usage", get(usage))
         .route("/usage/refresh", post(refresh_usage))
@@ -167,6 +171,27 @@ pub fn router(hub: Arc<Hub>) -> Router {
         .route("/lanes/{name}/tell", post(lanes::tell))
         .route("/lanes/{name}/tells", get(lanes::tells))
         .route("/lanes/{name}/tells/{verb}", axum::routing::delete(lanes::cancel_tell))
+        // ---- a project's manager (manager.rs) and the project-scoped routes its token opens (manager_scope)
+        .route("/projects/{slug}/manager", get(manager::get).put(manager::put))
+        .route("/projects/{slug}/manager/start", post(manager::start))
+        .route("/manager/instructions", get(manager::instructions))
+        .route("/projects/{slug}/overview", get(manager::overview))
+        // ---- the activity graph (trace.rs)
+        .route("/projects/{slug}/activity", get(activity::project))
+        .route("/sessions/{name}/trace", get(activity::session))
+        .route("/projects/{slug}/orchestrator", get(manager::orchestrator))
+        .route("/projects/{slug}/pause", post(manager::pause))
+        .route("/projects/{slug}/resume", post(manager::resume))
+        .route("/projects/{slug}/tasks", get(manager::tasks).post(manager::create_task))
+        .route("/projects/{slug}/tasks/{id}", get(manager::task).patch(manager::patch_task).delete(manager::delete_task))
+        .route("/projects/{slug}/tasks/{id}/trace", get(manager::task_trace))
+        .route("/projects/{slug}/plans/{id}/approve", post(manager::approve_plan))
+        .route("/projects/{slug}/plans/{id}/reject", post(manager::reject_plan))
+        .route("/projects/{slug}/lanes", get(manager::lanes).post(manager::open_lane))
+        .route("/projects/{slug}/lanes/{name}", axum::routing::delete(manager::close_lane))
+        .route("/projects/{slug}/lanes/{name}/start", post(manager::start_lane))
+        .route("/projects/{slug}/lanes/{name}/tell", post(manager::tell_lane))
+        .route("/projects/{slug}/lanes/{name}/screen", get(manager::lane_screen))
         .route("/telegram", get(lanes::telegram))
         .route("/telegram/test", post(lanes::telegram_test))
         .route("/ws", get(ws::handler))
@@ -227,14 +252,58 @@ pub(crate) fn project_scope<'a>(method: &axum::http::Method, path: &'a str) -> O
     (ok && !slug.is_empty()).then_some(slug)
 }
 
+/// What a project's manager token (`$MAP_MANAGER_TOKEN`) may call, and for which project: everything its project
+/// token may, plus that project's owner-level routes (overview, tasks, plan decisions, pause and resume, the
+/// orchestrator's status, knowledge, decisions, lanes, git status, fetch and push). Never MAP's global settings,
+/// sign-ins, Telegram, other projects, provider installs, the manager's own settings or deleting the project.
+pub(crate) fn manager_scope<'a>(method: &axum::http::Method, path: &'a str) -> Option<&'a str> {
+    use axum::http::Method;
+    if let Some(slug) = project_scope(method, path) {
+        return Some(slug);
+    }
+    let rest = path.strip_prefix("/api").unwrap_or(path).strip_prefix("/projects/")?;
+    let (slug, tail) = rest.split_once('/').unwrap_or((rest, ""));
+    if slug.is_empty() || matches!(slug, "defaults" | "inspect") {
+        return None;
+    }
+    let seg: Vec<&str> = if tail.is_empty() { vec![] } else { tail.split('/').collect() };
+    let id = |s: &str| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit());
+    let name = |s: &str| !s.is_empty() && s.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_');
+    let ok = match (method, seg.as_slice()) {
+        (&Method::GET, [] | ["overview" | "orchestrator" | "manager" | "tasks" | "plans" | "lanes" | "git" | "knowledge" | "decisions" | "thai" | "activity"]) => true,
+        (&Method::GET, ["decisions", "summary"] | ["knowledge", "search" | "doc"]) => true,
+        (&Method::GET, ["tasks", t] | ["tasks", t, "trace"]) => id(t),
+        (&Method::GET, ["lanes", n, "screen"]) => name(n),
+        (&Method::POST, ["pause" | "resume" | "tasks" | "lanes" | "plans"]) => true,
+        (&Method::POST, ["knowledge", "accept" | "dismiss" | "reindex"] | ["git", "fetch" | "push"]) => true,
+        (&Method::POST, ["plans", p, "approve" | "reject"]) => id(p),
+        (&Method::POST, ["lanes", n, "tell" | "start"]) => name(n),
+        (&Method::PATCH | &Method::DELETE, ["tasks", t]) => id(t),
+        (&Method::DELETE, ["lanes", n]) => name(n),
+        _ => false,
+    };
+    ok.then_some(slug)
+}
+
+/// Who called: the owner (the API token, or an open API), an agent's project token, a project's manager, or the
+/// default workspace's planner. Handlers that treat the manager differently read it from the request.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Caller {
+    Owner,
+    Project(String),
+    Manager(String),
+    Workspace,
+}
+
 /// What the default workspace's planner token may call: submitting and listing the default workspace's plans.
 pub(crate) fn workspace_scope(method: &axum::http::Method, path: &str) -> bool {
     use axum::http::Method;
     path.strip_prefix("/api").unwrap_or(path) == "/workspace/plans" && matches!(*method, Method::GET | Method::POST)
 }
 
-async fn require_token(State(hub): State<Arc<Hub>>, headers: HeaderMap, request: Request, next: Next) -> Response {
+async fn require_token(State(hub): State<Arc<Hub>>, headers: HeaderMap, mut request: Request, next: Next) -> Response {
     let Some(expected) = hub.config.server.api_token.as_deref() else {
+        request.extensions_mut().insert(Caller::Owner);
         return next.run(request).await;
     };
     let bearer = headers.get("authorization").and_then(|v| v.to_str().ok()).and_then(|v| v.strip_prefix("Bearer "));
@@ -245,6 +314,7 @@ async fn require_token(State(hub): State<Arc<Hub>>, headers: HeaderMap, request:
         .and_then(|q| q.split('&').find_map(|kv| kv.strip_prefix("token=")))
         .map(String::from);
     if bearer.is_some_and(|t| same(t, expected)) || query.is_some_and(|t| same(&t, expected)) {
+        request.extensions_mut().insert(Caller::Owner);
         return next.run(request).await;
     }
     // An agent's project token opens only its own project's decisions and corpus.
@@ -252,13 +322,32 @@ async fn require_token(State(hub): State<Arc<Hub>>, headers: HeaderMap, request:
     if let (Some(token), Some(slug)) = (bearer, project_scope(request.method(), &path))
         && hub.project_token(slug).is_some_and(|t| same(token, &t))
     {
+        let caller = Caller::Project(slug.to_string());
+        request.extensions_mut().insert(caller);
+        return next.run(request).await;
+    }
+    // A manager's token opens its own project's owner-level routes.
+    if let (Some(token), Some(slug)) = (bearer, manager_scope(request.method(), &path))
+        && hub.manager_token(slug).is_some_and(|t| same(token, &t))
+    {
+        let caller = Caller::Manager(slug.to_string());
+        request.extensions_mut().insert(caller);
         return next.run(request).await;
     }
     if let Some(token) = bearer
         && workspace_scope(request.method(), &path)
         && hub.workspace_token().is_some_and(|t| same(token, &t))
     {
+        request.extensions_mut().insert(Caller::Workspace);
         return next.run(request).await;
+    }
+    // A real project or manager token used outside its scope (another project, a global route) is forbidden, not
+    // unauthenticated: the agent learns it may not, rather than that its token is wrong.
+    if let Some(token) = bearer
+        && let Ok(projects) = hub.store.projects().await
+        && projects.iter().any(|p| hub.manager_token(&p.slug).is_some_and(|t| same(token, &t)) || hub.project_token(&p.slug).is_some_and(|t| same(token, &t)))
+    {
+        return ApiError(StatusCode::FORBIDDEN, "this token may not call this route (it opens its own project only; the rest needs the owner's API token)".into()).into_response();
     }
     ApiError(StatusCode::UNAUTHORIZED, "missing or wrong API token".into()).into_response()
 }
@@ -389,8 +478,39 @@ async fn trust_session(State(hub): State<Arc<Hub>>, UrlPath(name): UrlPath<Strin
     }
 }
 
-async fn tasks(State(hub): State<Arc<Hub>>) -> ApiResult<Vec<Task>> {
-    Ok(Json(hub.store.tasks().await?))
+/// `GET /api/tasks` and `/api/tasks/page` filters. `project` absent: every project; empty: the default workspace.
+#[derive(Deserialize, Default)]
+struct TasksQuery {
+    status: Option<crate::model::TaskStatus>,
+    q: Option<String>,
+    project: Option<String>,
+    limit: Option<i64>,
+    offset: Option<i64>,
+}
+
+impl TasksQuery {
+    fn any(&self) -> bool {
+        self.status.is_some() || self.q.is_some() || self.project.is_some() || self.limit.is_some() || self.offset.is_some()
+    }
+
+    fn store(self, default_limit: i64) -> crate::store::TaskQuery {
+        crate::store::TaskQuery { status: self.status, project: self.project, q: self.q, limit: self.limit.unwrap_or(default_limit), offset: self.offset.unwrap_or(0) }
+    }
+}
+
+/// Without parameters every task, oldest first (as always). With any filter: the matching tasks, newest change first,
+/// at most `limit` (default 500) from `offset`.
+async fn tasks(State(hub): State<Arc<Hub>>, Query(q): Query<TasksQuery>) -> ApiResult<Vec<Task>> {
+    if !q.any() {
+        return Ok(Json(hub.store.tasks().await?));
+    }
+    Ok(Json(hub.store.task_page(&q.store(500)).await?.items.into_iter().map(|i| i.task).collect()))
+}
+
+/// One page of tasks with the total (the Done tasks screen: `?status=done&project=<slug>&q=<title or #id>`), newest
+/// change first; `limit` 1–500 (default 50).
+async fn task_page(State(hub): State<Arc<Hub>>, Query(q): Query<TasksQuery>) -> ApiResult<crate::model::TaskPage> {
+    Ok(Json(hub.store.task_page(&q.store(50)).await?))
 }
 
 #[derive(Deserialize)]

@@ -324,7 +324,35 @@ One card per [lane](#lanes). Each card shows the state of every session and its 
 and reset, stall alerts and pauses. It also shows the status file (card, state, `need_clear`, note, age), the card
 counts and a git line. It has toggles for watch, actions and auto `/clear`, the last actions and the queued tells
 (cancel). **Tell** queues a clear, an ask with a note, or a pause of N minutes. The screen tail folds open, and the
-status prompt can be edited. **Import watcher settings** reads an agent-watcher `config.json`.
+status prompt can be edited. **Import watcher settings** reads an agent-watcher `config.json`. Context shows as
+`81.6k / 200k (41%)` when it comes from the Claude transcript. MAP's own lanes (a project's [manager](#project-manager)
+and its [persistent lanes](#persistent-lanes)) are grouped by project above the `[[lanes]]` blocks; a persistent lane
+whose session is gone shows **stopped** with **Start**, and has **Close lane** / **Force close**.
+
+### Activity graph (`#command/activity`)
+
+The command centre's **Activity** tab shows a project's task flow, live. Each task is a row, left to right: who
+created it (the manager, the planner or the owner) → the task → the orchestrator's pick, with the gates that routed
+it (intake verdict, Reflex tier, the provider chosen) → the agent session (provider · model) → verify → audit → land →
+done or failed. A retry goes round again through a new pick and agent, and a dashed edge leads to each task it
+unblocked. Lanes the manager opened hang off the manager. What each agent used is read from its CLI's own transcript
+(read only, tail first; Claude Code's `--name` session `.jsonl`, Codex's rollout file): commands grouped by head
+(`cargo test` ×12) with secrets masked, skills, knowledge cards and sub-agents, collapsed to counts under the agent.
+It reloads on WebSocket events (no polling): touched nodes pulse, a dot runs along a hand-off in progress, running
+nodes show their elapsed time. Filter by 1 h / 24 h / all; done tasks fade out unless **show done** is on. Click a
+task to open its card, an agent to filter to its edges and open its console, a command for its invocations, a
+knowledge card to open it. API: `GET /api/projects/{slug}/activity?since=&all=&task=` (`{nodes, edges}`; the manager
+token may call it) and `GET /api/sessions/{name}/trace` (one session's raw items, owner only). Tasks record
+`created_by` (`owner`, `manager`, `planner`), sessions `spawned_by` (`orchestrator`, `owner`, `map`, `manager:<slug>`).
+
+### Done tasks (`#command/done`)
+
+Finished tasks leave the command centre's live views (lists, graph, columns), so they show what is still moving. The
+task queue and the stats line show "N done →", which opens the **Done tasks** page. It lists the current project's
+done tasks, or every project's in the all-projects view: newest finished first, searchable by title or `#id`, 50 per
+page. Each row shows the provider/model, when it finished, how long it took (from its first session), the result
+summary and its branch/commit or PR. Clicking a row opens its card in the command centre. Failed and cancelled tasks
+stay in the command centre.
 
 ### Skills (`#skills`, `#skills/<name>`)
 
@@ -589,6 +617,17 @@ to isolated, every provider shows **not signed in yet — Sign in** under Settin
 provider's own login in a helper session with MAP's folder. The per-provider fields are `home_env`, `default_home`,
 `home_subdir`, `isolated_dir` and `home_keep` (see `map.example.toml`); `home_env = ""` keeps one provider shared.
 
+**The sign-in session.** For a CLI that signs in from its TUI (`login_send`, agy's `/login`), MAP does not type
+blindly after `startup_secs`: it watches the pane for up to 60 s, answers the provider's known harmless first-run
+pickers with Enter (`login_onboarding`; agy's colour-scheme picker, `[Next]`, `enter Confirm`, and its login-method picker, where Enter takes Google OAuth), and types
+`login_send` only once the CLI's prompt shows (`login_ready`, else `idle_markers`). A folder-trust or permission
+question is never answered (`detect::trust_prompt`); it waits for you in the console. `GET
+/api/providers/{name}/login` returns a `phase` (`starting`, `onboarding`, `ready`, `browser`, `waiting_for_code`,
+`success`, `console`, `ended`) and a `hint` the sign-in modal shows, and a pasted code goes through `POST
+…/login/code`, which types it only while the code prompt is the last line on screen. A sign-in finished anywhere
+(the modal, a terminal) reaches the dashboard without a reload: the watcher compares each provider's availability,
+sign-in, API key and cooldown every tick and pushes a `providers` WebSocket message when one changes.
+
 ## tmux socket
 
 By default MAP's sessions live on tmux's default server, next to any tmux you use yourself. With
@@ -614,16 +653,25 @@ Every `[lane_watch] interval_secs` (60) MAP reads each lane:
   captures `confirm_secs` apart, timers ignored), waiting (a dialog with a `❯` option), unsent text on the input line
   (faint suggestions do not count), idle, or rate-limited (the CLI's limit line *with* its reset time on the same or
   next line; `(UTC)` or local, a time over 15 minutes past means tomorrow).
-- **Facts**: context % and the `new task? … /clear` hint, the agent's status file (`{card, state, need_clear, note,
+- **Facts**: context used and the `new task? … /clear` hint, the agent's status file (`{card, state, need_clear, note,
   at}`), git (branch, last commit, uncommitted and unpushed counts, `GIT_OPTIONAL_LOCKS=0`), and `todo/` /
   `todo-human/` / `done/` counts.
+
+**Context used.** The pane's `N% context used` line wins when the CLI prints one. The current Claude Code no longer
+does, so for a Claude pane (its input box between two rules) in a lane with a `path`, MAP reads the newest
+`<claude_dir>/projects/<path with every non-alphanumeric character as ->/*.jsonl` (a `/clear` starts a new file): only
+its last 256 KB, the last main-thread assistant message's `message.usage`, `input_tokens + cache_read_input_tokens +
+cache_creation_input_tokens`, over the lane's `context_window` (200000). `claude_dir` defaults to `~/.claude` (lanes are
+your own sessions; read only); MAP's own lanes use the provider's folder MAP launched them with. The lane API returns
+`context_pct`, `context_tokens`, `context_window` and `context_source` (`pane` or `transcript`), and the percentage
+feeds `clear_when.context_pct`.
 
 It types only when `actions` is on, the session is idle, nobody is attached and nothing is on the input line, and
 one session per lane per tick (`max_sessions_per_round`):
 
 | Move | When |
 | --- | --- |
-| `/clear` | `clear_when.enabled`; never while the limit line is on screen; not within `cooldown_mins`; with `only_when_done`, only after a fresh status file says `done`; then the agent's `need_clear` decides (true skips `idle_mins`, false wins over the CLI), else the CLI's hint or `context_pct` after `idle_mins`. MAP checks the pane afterwards (hint gone, context under 50%) and types `status_prompt` in the same round |
+| `/clear` | `clear_when.enabled`; never while the limit line is on screen; not within `cooldown_mins`; with `only_when_done`, only after a fresh status file says `done`; then the agent's `need_clear` decides (true skips `idle_mins`, false wins over the CLI), else the CLI's hint or `context_pct` after `idle_mins`. MAP checks the pane afterwards (hint gone, and the context under 50%, or, when it came from the transcript, a new transcript file or fewer tokens in it) and types `status_prompt` in the same round |
 | `status_prompt` | After the usage limit reset (beats the cooldown and an empty `todo/`; `resume_cooldown_mins`); when the status file says `done` (`resume_cooldown_mins`); idle and unchanged `idle_stale_mins` (`cooldown_mins`). An empty `todo/` stops the last two, never the notices |
 | tells | `POST /api/lanes/{name}/tell` or `deploy/map-tell`: `clear`, `ask` (the note is typed; none: the status prompt), `pause` (`mins`, automatic moves only). They beat every rule but "idle, nobody attached", wait while the limit line is on screen, expire after 3 hours; the same verb again replaces the queued one |
 
@@ -662,6 +710,11 @@ token, and redacts it from every error, because a Bot API URL contains it.
   - `/watch` (or `/start`, `/menu`) shows one button per lane (✅ watching / ⏸ off); a press toggles the lane's
     `watch`.
   - `/status` sends the full report now.
+  - `/ask <slug> <text>` (or a reply to a manager's message, which starts with `🤵 <slug> ·`) queues the text as an
+    `ask` tell for that project's [manager](#project-manager): typed only when it is idle, nobody is attached and
+    nothing is on its input line (MAP ticks that lane at once, then on every round). Once it is idle again, its last
+    message (`detect::last_assistant_message`) goes back to the chat, trimmed to 3500 characters.
+  - `/managers` lists the projects with a manager on and their state.
 
   At start MAP sets the bot's command list and clears any old reply keyboard. Commands come from
   `allowed_user_ids`, or from anyone in `chat_id` when that list is empty. MAP ignores everyone else silently.
@@ -773,6 +826,53 @@ you approve them.
   planner gets a token of its own that opens only `/workspace/plans`. Approving, rejecting, editing and starting the
   planner need the API token. Events: `planner.started`, `plan.created`, `plan.updated`, `plan.superseded`,
   `plan.approved`, `plan.rejected`; every change is pushed as a `plan` WebSocket message.
+
+## Project manager
+
+A project can have a **manager** (`backend/src/manager.rs`): an always-on agent session `<session_prefix>mgr-<slug>`
+in the project's folder that you talk to about the project, so you can steer everything without the web: "what is
+running?", "why did #12 fail?", "approve plan 7", "pause the project", "open a lane for the docs".
+
+- **On/off** in the project page's **Manager** panel (off for existing projects): provider and model (default: the
+  project's first installed, signed-in provider, as the planner), state (`off`, `starting`, `running`,
+  `restarting`, `stopped`, `failed`), the inline console and the "Open lane" form. The command centre shows its
+  state chip. Stored in the project's settings as `manager: {enabled, provider, model}`; `PUT
+  /api/projects/{slug}/manager` changes it (turning it off ends the session, 409 while someone uses it unless
+  `force`).
+- **Kept alive.** MAP starts it at boot and a supervisor (every 15 s) starts it again when its session is gone.
+  Three failures within ten minutes stop the restarts with a `manager.stopped` warning until you press **Start
+  now**. A restart resumes the conversation when the provider can: MAP starts it with `session_id_args`
+  (`--session-id <uuid>` for Claude) and restarts it with `resume_args` (`--resume <uuid>`) once that transcript
+  exists, with a one-line "MAP restarted this session" prompt instead of the instructions. Not `--continue`: in a
+  shared folder the latest conversation may be a worker's.
+- **A session like the planner's:** supervisor role, no task (the orchestrator never treats it as a worker), the
+  watcher and the human protection apply. It is also a MAP-owned [lane](#lanes) (rate-limit wake, stall alerts,
+  Telegram notices; never auto-cleared or nudged), and Telegram's `/ask` talks to it.
+- **Instructions:** `backend/templates/manager-agent.md` (or `[templates] manager_agent`) plus "This session" (the
+  project, folder, cards, providers and models, orchestrator state, open tasks, plans waiting, lanes). It talks in
+  your language, answers status questions from the API (never guessing), changes things only when asked, approves,
+  cancels, deletes or pushes only on your explicit words and says what it did, turns implementation work into tasks
+  (or points to the planner) unless you ask it to edit directly, keeps replies short and never prints a token. The
+  file carries a curl cheat-sheet for every allowed call.
+- **Its token.** `$MAP_MANAGER_TOKEN` is HMAC-SHA256 of the slug under `api_token` with its own label, so it never
+  equals the project token (which the session also gets). It opens that project's owner-level routes only (see
+  `api::manager_scope`): the project, overview, orchestrator status, tasks (list, create, edit a pending one, cancel,
+  retry, start anyway, clarify, delete), plans (list, submit, approve, reject), pause/resume, knowledge (overview with
+  the suggestion, accept, dismiss, reindex, search, doc), decisions, lanes (list, open, tell, start, screen, close
+  without force), git status, fetch and push. Never MAP's settings, sign-ins, the API token, Telegram, other
+  projects, provider installs or updates, its own manager settings, or deleting the project: those answer 403 (a
+  token that is wrong answers 401).
+
+### Persistent lanes
+
+`POST /api/projects/{slug}/lanes` (`{name, provider?, model?, prompt?, clear_when?, status_prompt?}`, from you or the
+manager) starts an interactive session `<session_prefix>lane-<slug>-<name>` in the project's folder on MAP's tmux
+server and registers it as a lane with actions on and the project's lane rules (a `[[lanes]]` block watching the same
+folder, else the defaults; `clear_when` off unless given). Lanes are stored in the database (`owned_lanes`) and
+registered again at boot. One whose session is gone is shown as stopped with a **Start** button (`POST
+…/lanes/{name}/start`, resuming its conversation like the manager), never relaunched by itself. `DELETE
+…/lanes/{name}` closes it; it is refused while someone is attached or has typed on its input line, unless `?force=true`
+from the owner's token.
 
 ## Writing tasks
 
@@ -1127,6 +1227,24 @@ All routes are under `/api`. When `server.api_token` is set, send `Authorization
 | POST | `/lanes/import-watcher` | `{"path"}`: fill lane settings and the Telegram chat and users from an agent-watcher `config.json` inside your home (never the token); returns `updated`, `skipped` |
 | GET | `/telegram` | `enabled`, `token_set` (never the token), `token_env`, `chat_id`, `allowed_user_ids`, `commands`, `polling`, `last_send_ok`, `last_error` (redacted), last send and report |
 | POST | `/telegram/test` | `{}`: send a test message; `ok`, `message` |
+| GET/PUT | `/projects/{slug}/manager` | The manager's settings, state, warning, session and default provider; `PUT {enabled, provider?, model?, force?}` (owner only) |
+| POST | `/projects/{slug}/manager/start` | `{}`: start it now, clearing the back-off (owner only) |
+| GET | `/manager/instructions` | The manager's instructions and their source |
+| GET | `/projects/{slug}/overview` | The project, orchestrator status, task counts, open tasks, recent done, draft plans, sessions, lanes and the manager |
+| GET | `/projects/{slug}/orchestrator` | The orchestrator's status (read only) |
+| POST | `/projects/{slug}/pause`, `/projects/{slug}/resume` | `{}`: pause or resume the project |
+| GET/POST | `/projects/{slug}/tasks?status=&limit=` | The project's tasks, newest first; or create one in it (`title`, `prompt`, `depends_on`, `provider?`, `model?`) |
+| GET/PATCH/DELETE | `/projects/{slug}/tasks/{id}` | A task of the project; `PATCH {action, note?}` as `/tasks/{id}` (the manager: cancel, retry, start_anyway, clarify only) or `{title?, prompt?}` to edit a pending one; delete |
+| GET | `/projects/{slug}/tasks/{id}/trace` | The task's decisions |
+| POST | `/projects/{slug}/plans/{id}/approve`, `…/reject` | Decide a draft of this project |
+| GET/POST | `/projects/{slug}/lanes` | The project's lanes (MAP's own and `[[lanes]]` watching its folder); or open a persistent lane |
+| DELETE | `/projects/{slug}/lanes/{name}?force=` | Close a persistent lane (409 while used; `force` is the owner's) |
+| POST | `/projects/{slug}/lanes/{name}/start`, `…/tell` | Start a stopped persistent lane; queue a tell |
+| GET | `/projects/{slug}/lanes/{name}/screen?lines=` | The lane's screen tail |
+| GET | `/projects/{slug}/activity?since=&all=&task=` | The task flow graph (`nodes`, `edges`) for the Activity tab |
+| GET | `/sessions/{name}/trace` | One session's activity items from its transcript (owner only) |
+| GET | `/tasks/page?status=&project=&q=&limit=&offset=` | One page of tasks (`{items: [{task, started_at}], total}`), newest change first; `project` empty = default workspace, `q` a title or `#id`. `GET /tasks` takes the same filters; with none it returns every task as before |
+| POST | `/providers/{name}/login/code` | `{"code"}`: type the pasted authorization code into the sign-in session, only while its pane asks for one (409 otherwise) |
 | GET | `/ws` | Pushes `ServerMessage` JSON (see `frontend/lib/generated/ServerMessage.ts`) |
 
 Git: `git clone http://127.0.0.1:4400/git/<slug>/corpus.git`. With `api_token` set, git asks for a password: use the
@@ -1139,6 +1257,8 @@ token (any user name). Only corpus repos are served; a project's code stays in i
 - Browsers do not apply CORS to WebSockets, so `/api/ws` checks `Origin` itself.
 - State-changing routes take JSON, which a cross-site form cannot send without a CORS preflight.
 - Prompts are typed with `send-keys -l`, so their text is never read as key names. Only allow-listed keys can be sent.
+- Agent tokens are scoped: a project token opens its decisions, corpus, plans and knowledge search; a manager token
+  its project's owner-level routes (see [Project manager](#project-manager)); either answers 403 elsewhere.
 - Only sessions under `session_prefix` are managed. Outside it, MAP reads only the `[[lanes]]` you declare, types into
   them only as [Lanes](#lanes) describes, and never creates, kills, renames or resizes them.
 

@@ -252,6 +252,9 @@ pub async fn approve(hub: &Hub, id: i64) -> PlanResult<PlanApproved> {
             .create_task(NewTask { title: t.title.clone(), prompt: t.prompt.clone(), depends_on, provider: t.provider.clone(), model: t.model.clone(), project: plan.project.clone() })
             .await?;
         hub.store.set_plan_task_id(id, &t.key, task.id).await?;
+        hub.store.set_task_created_by(task.id, "planner").await?;
+        let mut task = task;
+        task.created_by = "planner".into();
         ids.insert(t.key.clone(), task.id);
         hub.announce_task(&task);
         hub.event(Level::Info, "task.created", None, Some(task.id), format!("Task #{} created: {} (plan #{id} · {})", task.id, task.title, t.key)).await;
@@ -328,7 +331,7 @@ fn marked_parts(text: &str, keep: bool) -> String {
 
 /// The providers the planner starts on when none is picked, best first: the project's list, else `provider_order`,
 /// then any other configured provider; installed ones only, signed in before sign-in unknown, never signed out.
-fn provider_choices(hub: &Hub, project: Option<&Project>) -> Vec<String> {
+pub fn provider_choices(hub: &Hub, project: Option<&Project>) -> Vec<String> {
     let mut names: Vec<String> = match project {
         Some(p) if !p.settings.providers.is_empty() => p.settings.providers.iter().map(|x| x.name.clone()).collect(),
         _ => hub.config.orchestrator.provider_order.clone(),

@@ -11,6 +11,18 @@ why: string,
  */
 attached: boolean, context_pct: number | null, 
 /**
+ * Context tokens in use, read from the Claude transcript (`None` when the pane gave the percentage).
+ */
+context_tokens: number | null, 
+/**
+ * The lane's `context_window` the percentage is of (with `context_tokens`).
+ */
+context_window: number | null, 
+/**
+ * `pane` (the CLI printed `N% context used`) or `transcript`.
+ */
+context_source: string | null, 
+/**
  * The CLI suggests `/clear` (`new task? … /clear`).
  */
 clear_hint: boolean, rate_limit_line: string | null, rate_limit_resets: string | null, 

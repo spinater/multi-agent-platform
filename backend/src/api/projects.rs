@@ -124,7 +124,8 @@ pub async fn update(State(hub): State<Arc<Hub>>, UrlPath(slug): UrlPath<String>,
     }
     if let Some(s) = b.settings {
         // The source is fixed at creation, and the Thai words have their own endpoint (`thai/words`).
-        let s = ProjectSettings { source: p.settings.source.clone(), thai_glossary: p.settings.thai_glossary.clone(), ..project_settings::normalize(s) };
+        // The manager has its own endpoint (`PUT …/manager`), which also starts and stops it.
+        let s = ProjectSettings { source: p.settings.source.clone(), thai_glossary: p.settings.thai_glossary.clone(), manager: p.settings.manager.clone(), ..project_settings::normalize(s) };
         project_settings::validate(&hub, &s)?;
         p.settings = s;
     }
@@ -349,6 +350,17 @@ pub async fn login_state(State(hub): State<Arc<Hub>>, UrlPath(name): UrlPath<Str
     Ok(Json(crate::login::state(&hub, &name).await?))
 }
 
+#[derive(Deserialize)]
+pub struct LoginCode {
+    code: String,
+}
+
+/// Types the pasted authorization code into the sign-in session, only while its pane asks for one (409 otherwise).
+pub async fn login_code(State(hub): State<Arc<Hub>>, UrlPath(name): UrlPath<String>, Json(b): Json<LoginCode>) -> ApiResult<crate::model::LoginState> {
+    crate::login::send_code(&hub, &name, &b.code).await.map_err(|e| ApiError(StatusCode::CONFLICT, format!("{e:#}")))?;
+    Ok(Json(crate::login::state(&hub, &name).await?))
+}
+
 // ---- reflex screen: calibration cases, decision feedback and summary, corpus archive
 
 pub async fn cases(State(hub): State<Arc<Hub>>, UrlPath(slug): UrlPath<String>) -> ApiResult<Vec<ReflexCase>> {
@@ -521,6 +533,7 @@ fn searched_by(hub: &Hub, slug: &str, headers: &axum::http::HeaderMap) -> &'stat
     let bearer = headers.get("authorization").and_then(|v| v.to_str().ok()).and_then(|v| v.strip_prefix("Bearer "));
     match (bearer, hub.project_token(slug)) {
         (Some(b), Some(t)) if b == t => "agent",
+        _ if bearer.is_some() && bearer.map(String::from) == hub.manager_token(slug) => "manager",
         _ => "owner",
     }
 }

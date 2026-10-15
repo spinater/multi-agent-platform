@@ -8,6 +8,7 @@ import { api } from "@/lib/api";
 import { providerColor } from "@/lib/colors";
 import type { LoginState } from "@/lib/generated/LoginState";
 import { attachCommand } from "@/lib/tmux";
+import { refreshProviders } from "@/lib/use-dashboard";
 
 import { useApp } from "./app-context";
 import { Btn, Inset, Segmented, TextInput, errText } from "./project-ui";
@@ -54,6 +55,7 @@ function AuthDialog({ provider, onClose }: { provider: string; onClose: () => vo
         const fresh = s.signed_in === true && s.credentials_updated_at !== null && s.credentials_updated_at !== before;
         if (s.success || fresh) {
           setPhase("done");
+          void refreshProviders();
           toast(`${provider} signed in · new tasks can use it`);
         }
       } catch (e) {
@@ -205,8 +207,14 @@ function AuthDialog({ provider, onClose }: { provider: string; onClose: () => vo
                   <UrlLink url={state.url} />
                 </div>
               ) : (
-                <p className="font-mono text-[12px] text-info">
-                  {live ? `Waiting for ${login?.command} to show a sign-in URL${dots}` : session ? "The login session has ended." : `Starting${dots}`}
+                <p className={clsx("font-mono text-[12px]", state?.phase === "console" || state?.phase === "failed" ? "text-warn" : "text-info")}>
+                  {live
+                    ? state?.hint
+                      ? `${state.hint}${state.phase === "onboarding" ? dots : ""}`
+                      : `Waiting for ${login?.command} to show a sign-in URL${dots}`
+                    : session
+                      ? "The login session has ended."
+                      : `Starting${dots}`}
                 </p>
               )}
               {state?.wants_code && live && session && (
@@ -217,7 +225,7 @@ function AuthDialog({ provider, onClose }: { provider: string; onClose: () => vo
                     disabled={!code.trim()}
                     onClick={() =>
                       send(async () => {
-                        await api.prompt(session.name, code.trim());
+                        await api.loginCode(provider, code.trim());
                         setCode("");
                       })
                     }
@@ -227,7 +235,7 @@ function AuthDialog({ provider, onClose }: { provider: string; onClose: () => vo
                 </div>
               )}
               {lines.length > 0 && (
-                <Inset className="gap-0 text-[11px]">
+                <Inset className={clsx("gap-0 text-[11px]", state?.phase === "console" && "ring-1 ring-warn/60")}>
                   <span className="text-muted">$ {login?.command}</span>
                   {lines.map((l, i) => (
                     <span key={i} className="break-all whitespace-pre-wrap text-text-2">
@@ -291,7 +299,10 @@ function AuthDialog({ provider, onClose }: { provider: string; onClose: () => vo
                 tone="primary"
                 onClick={async () => {
                   const s = await api.loginState(provider).catch(() => null);
-                  if (s?.signed_in) setPhase("done");
+                  if (s?.signed_in) {
+                    setPhase("done");
+                    void refreshProviders();
+                  }
                   else setError(`${provider} has no valid credential file yet. Finish the sign-in in the browser, or check the session's terminal.`);
                 }}
               >

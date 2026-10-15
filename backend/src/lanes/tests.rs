@@ -522,10 +522,10 @@ async fn import_watcher_fills_settings_and_refuses_outside_home() {
 // ---- a real tmux server on a private socket
 
 /// Kills only the private test server, also when the test fails.
-struct PrivateTmux(String);
+pub(crate) struct PrivateTmux(pub(crate) String);
 
 impl PrivateTmux {
-    fn cmd(&self) -> std::process::Command {
+    pub(crate) fn cmd(&self) -> std::process::Command {
         let mut c = std::process::Command::new("tmux");
         c.env_remove("TMUX").env_remove("TMUX_PANE").arg("-L").arg(&self.0);
         c
@@ -637,4 +637,107 @@ async fn integration_private_tmux() {
     assert!(tg.texts().iter().any(|t| t.contains("context cleared")));
     assert!(tg.tokens().iter().all(|t| t == "123456:TESTTOKENtesttokenTESTTOKEN"));
     drop(tmux);
+}
+
+// ---- context used, from the Claude transcript
+
+fn usage_line(kind: &str, sidechain: bool, input: u64, read: u64, create: u64) -> String {
+    serde_json::json!({
+        "type": kind, "isSidechain": sidechain,
+        "message": { "role": kind, "usage": { "input_tokens": input, "cache_read_input_tokens": read, "cache_creation_input_tokens": create, "output_tokens": 599 } }
+    })
+    .to_string()
+}
+
+fn write_transcript(dir: &Path, name: &str, lines: &[String]) -> std::path::PathBuf {
+    std::fs::create_dir_all(dir).unwrap();
+    let f = dir.join(name);
+    std::fs::write(&f, lines.join("\n") + "\n").unwrap();
+    f
+}
+
+#[test]
+fn transcript_folder_name_and_tokens() {
+    let base = Path::new("/c");
+    assert_eq!(claude_project_dir(base, Path::new("/home/linus/project/lim/groove-clinic")), Path::new("/c/projects/-home-linus-project-lim-groove-clinic"));
+    assert_eq!(claude_project_dir(base, Path::new("/a/my.app_x")), Path::new("/c/projects/-a-my-app-x"));
+
+    let d = tempfile::tempdir().unwrap();
+    let f = write_transcript(
+        d.path(),
+        "a.jsonl",
+        &[
+            usage_line("assistant", false, 1, 1000, 0),
+            usage_line("assistant", false, 2, 80390, 1216),
+            // A sub-agent's turn and a user line after it do not count.
+            usage_line("assistant", true, 5, 150_000, 0),
+            serde_json::json!({ "type": "user", "message": { "role": "user", "content": "hi" } }).to_string(),
+        ],
+    );
+    assert_eq!(transcript_tokens(&f), Some(81608));
+    assert_eq!(pct_of(81608, 200_000), 41);
+    assert_eq!(fmt_tokens(81608, 200_000), "81.6k / 200k");
+
+    // Only the tail is read: a huge head of junk and a cut first line are fine.
+    let big = d.path().join("big.jsonl");
+    let mut text = "x".repeat(600 * 1024);
+    text.push('\n');
+    text.push_str(&usage_line("assistant", false, 10, 20, 30));
+    text.push('\n');
+    std::fs::write(&big, text).unwrap();
+    assert_eq!(transcript_tokens(&big), Some(60));
+    let empty = write_transcript(d.path(), "empty.jsonl", &[serde_json::json!({ "type": "user" }).to_string()]);
+    assert_eq!(transcript_tokens(&empty), None);
+}
+
+#[test]
+fn newest_transcript_wins_and_clear_is_seen() {
+    let claude = tempfile::tempdir().unwrap();
+    let folder = Path::new("/work/app");
+    let dir = claude_project_dir(claude.path(), folder);
+    let old = write_transcript(&dir, "old.jsonl", &[usage_line("assistant", false, 0, 150_000, 0)]);
+    let before = transcript_usage(claude.path(), folder).unwrap();
+    assert_eq!((before.file.clone(), before.tokens), (old.clone(), Some(150_000)));
+    assert!(!transcript_cleared(Some(&before), Some(&before)), "same file, same tokens: not cleared");
+
+    std::thread::sleep(std::time::Duration::from_millis(20));
+    let new = write_transcript(&dir, "new.jsonl", &[serde_json::json!({ "type": "user" }).to_string()]);
+    let after = transcript_usage(claude.path(), folder).unwrap();
+    assert_eq!((after.file.clone(), after.tokens), (new, None));
+    assert!(transcript_cleared(Some(&before), Some(&after)), "a new file after /clear");
+    let fewer = TranscriptUsage { file: old, tokens: Some(9_000) };
+    assert!(transcript_cleared(Some(&before), Some(&fewer)), "tokens dropped");
+    assert!(transcript_usage(claude.path(), Path::new("/nowhere")).is_none());
+}
+
+#[tokio::test]
+async fn context_from_the_transcript_feeds_the_card_and_clear_when() {
+    let proj = tempfile::tempdir().unwrap();
+    let cdir = tempfile::tempdir().unwrap();
+    let dir = claude_project_dir(cdir.path(), proj.path());
+    write_transcript(&dir, "s.jsonl", &[usage_line("assistant", false, 2, 80390, 1216)]);
+    let extra = "only_when_done = false\nidle_mins = 30\ncontext_pct = 40\n";
+    let toml = format!("{}\n", lane_toml(proj.path(), extra)).replace("status_prompt = ", &format!("claude_dir = \"{}\"\nstatus_prompt = ", cdir.path().display()));
+    let (hub, term, _d) = test_hub(&toml).await;
+    // A Claude pane without the old `N% context used` line.
+    let pane = claude("● Card done.", "✻ Cooked for 3m 2s", "", "? for shortcuts");
+    add_session(&term, "groove-agos", &pane, 0);
+    let t0 = Utc::now();
+    tick(&hub, t0).await;
+    let s = hub.lanes.infos(&hub).await.unwrap().remove(0).sessions.remove(0);
+    assert_eq!((s.context_pct, s.context_tokens, s.context_window, s.context_source.as_deref()), (Some(41), Some(81608), Some(200_000), Some("transcript")));
+    assert!(term.sent("groove-agos").is_empty(), "not idle long enough");
+    assert!(hub.lanes.report(t0).contains("ctx 81.6k / 200k (41%)"), "{}", hub.lanes.report(t0));
+
+    // Idle 31 min at 41% ≥ 40%: the clear fires; the transcript did not change, so it is reported as not taken.
+    tick(&hub, t0 + Duration::minutes(31)).await;
+    assert_eq!(term.sent("groove-agos")[..2], ["/clear", "<Enter>"]);
+    let history = hub.lanes.infos(&hub).await.unwrap().remove(0).history;
+    assert!(history.iter().any(|a| a.kind == "clear" && a.message.contains("context at 41%") && a.message.contains("did not change")), "{history:?}");
+
+    // The pane's own line still wins.
+    let printed = claude("● ok", "✻ Cooked for 3m 2s", "", "12% context used");
+    let p = parse_pane(&printed, now(), ict());
+    let cfg = hub.lanes.config("groove-agos").unwrap();
+    assert_eq!(read_context(&cfg, &p).source, Some("pane"));
 }

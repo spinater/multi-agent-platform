@@ -1,3 +1,4 @@
+import type { ActivityGraph } from "./generated/ActivityGraph";
 import type { AgentDef } from "./generated/AgentDef";
 import type { AgentDetail } from "./generated/AgentDetail";
 import type { AgentPlan } from "./generated/AgentPlan";
@@ -8,6 +9,8 @@ import type { Decision } from "./generated/Decision";
 import type { DecisionCounts } from "./generated/DecisionCounts";
 import type { DecisionModel } from "./generated/DecisionModel";
 import type { Event } from "./generated/Event";
+import type { SessionTrace } from "./generated/SessionTrace";
+import type { ProviderInfo } from "./generated/ProviderInfo";
 import type { FolderTrust } from "./generated/FolderTrust";
 import type { FsListing } from "./generated/FsListing";
 import type { FsRoot } from "./generated/FsRoot";
@@ -47,6 +50,8 @@ import type { StepResult } from "./generated/StepResult";
 import type { SkillFile } from "./generated/SkillFile";
 import type { SkillsOverview } from "./generated/SkillsOverview";
 import type { Task } from "./generated/Task";
+import type { TaskPage } from "./generated/TaskPage";
+import type { TaskStatus } from "./generated/TaskStatus";
 import type { TemplateInfo } from "./generated/TemplateInfo";
 import type { ThaiPreview } from "./generated/ThaiPreview";
 import type { ThaiReport } from "./generated/ThaiReport";
@@ -61,6 +66,10 @@ import type { SavingsReport } from "./generated/SavingsReport";
 // Lanes screen and Settings → Telegram.
 import type { LaneImport } from "./generated/LaneImport";
 import type { LaneInfo } from "./generated/LaneInfo";
+import type { ManagerInfo } from "./generated/ManagerInfo";
+import type { ManagerSettings } from "./generated/ManagerSettings";
+import type { OpenLane } from "./generated/OpenLane";
+import type { OwnedLaneRecord } from "./generated/OwnedLaneRecord";
 import type { LaneScreen } from "./generated/LaneScreen";
 import type { LaneTell } from "./generated/LaneTell";
 import type { TelegramInfo } from "./generated/TelegramInfo";
@@ -135,6 +144,16 @@ export const api = {
   /** `note` (send_back, clarify) goes into the agent's next prompt. 409 with the reason when the task's status refuses it. */
   taskAction: (id: number, action: TaskAction, note?: string) => request<Task>("PATCH", `/tasks/${id}`, note ? { action, note } : { action }),
   deleteTask: (id: number) => request("DELETE", `/tasks/${id}`),
+  /** One page of tasks, newest change first. `project`: `undefined` every project, `null` the default workspace. */
+  taskPage: (f: { status?: TaskStatus; project?: string | null; q?: string; limit?: number; offset?: number }) => {
+    const p = new URLSearchParams();
+    if (f.status) p.set("status", f.status);
+    if (f.project !== undefined) p.set("project", f.project ?? "");
+    if (f.q?.trim()) p.set("q", f.q.trim());
+    if (f.limit != null) p.set("limit", String(f.limit));
+    if (f.offset != null) p.set("offset", String(f.offset));
+    return request<TaskPage>("GET", `/tasks/page?${p}`);
+  },
   /** Pause or run the orchestrator. */
   setOrchestrator: (running: boolean) => request<OrchestratorStatus>("POST", "/orchestrator", { running }),
   /** Live changes, no restart: `max_parallel` is tasks at once across all projects (0 resets to map.toml's value). */
@@ -209,8 +228,11 @@ export const api = {
   fsBrowse: (root: string, path: string, hidden = false) =>
     request<FsListing>("GET", `/fs/browse?root=${encodeURIComponent(root)}&path=${encodeURIComponent(path)}${hidden ? "&hidden=true" : ""}`),
   /** Starts (or returns the running) helper session that runs the provider's login command. */
+  providers: () => request<ProviderInfo[]>("GET", "/providers"),
   loginStart: (provider: string) => request<LoginState>("POST", `/providers/${encodeURIComponent(provider)}/login`),
   loginState: (provider: string) => request<LoginState>("GET", `/providers/${encodeURIComponent(provider)}/login`),
+  /** Types the pasted code into the sign-in session, only while it asks for one (409 otherwise). */
+  loginCode: (provider: string, code: string) => request<LoginState>("POST", `/providers/${encodeURIComponent(provider)}/login/code`, { code }),
   // ---- Reflex screen: calibration cases, decision feedback and summary, corpus archive
   cases: (slug: string) => request<ReflexCase[]>("GET", `/projects/${slug}/cases`),
   /** Adds cases (scored by Reflex at once). `expected` is an option's text, or yes/no for a yes/no question. */
@@ -343,6 +365,36 @@ export const lanesApi = {
   telegram: () => request<TelegramInfo>("GET", "/telegram"),
   /** Sends a test message to the configured chat. */
   telegramTest: () => request<{ ok: boolean; message: string }>("POST", "/telegram/test", {}),
+};
+
+// ---- a project's manager and its persistent lanes (backend manager.rs)
+
+const projPath = (slug: string) => `/projects/${encodeURIComponent(slug)}`;
+
+/** The activity graph (backend trace.rs): a project's task flow and what each agent used. */
+export const activityApi = {
+  /** `since`: tasks changed since then plus every open one (default: the last 24 h); `all`: every task. */
+  project: (slug: string, opts: { since?: string; all?: boolean; task?: number } = {}) => {
+    const q = new URLSearchParams();
+    if (opts.since) q.set("since", opts.since);
+    if (opts.all) q.set("all", "true");
+    if (opts.task != null) q.set("task", String(opts.task));
+    const qs = q.toString();
+    return request<ActivityGraph>("GET", `${projPath(slug)}/activity${qs ? `?${qs}` : ""}`);
+  },
+  session: (name: string) => request<SessionTrace>("GET", `/sessions/${encodeURIComponent(name)}/trace`),
+};
+
+export const managerApi = {
+  get: (slug: string) => request<ManagerInfo>("GET", `${projPath(slug)}/manager`),
+  /** On/off, provider, model. Turning it off ends the session (409 while someone uses it, unless `force`). */
+  set: (slug: string, body: ManagerSettings & { force?: boolean }) => request<ManagerInfo>("PUT", `${projPath(slug)}/manager`, body),
+  /** Start now, also after MAP stopped restarting it. */
+  start: (slug: string) => request<Session>("POST", `${projPath(slug)}/manager/start`, {}),
+  lanes: (slug: string) => request<LaneInfo[]>("GET", `${projPath(slug)}/lanes`),
+  openLane: (slug: string, body: OpenLane) => request<OwnedLaneRecord>("POST", `${projPath(slug)}/lanes`, body),
+  startLane: (slug: string, name: string) => request<Session>("POST", `${projPath(slug)}/lanes/${encodeURIComponent(name)}/start`, {}),
+  closeLane: (slug: string, name: string, force = false) => request<{ ok: boolean }>("DELETE", `${projPath(slug)}/lanes/${encodeURIComponent(name)}${force ? "?force=true" : ""}`),
 };
 
 // ----

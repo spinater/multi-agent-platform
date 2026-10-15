@@ -8,7 +8,7 @@ import clsx from "clsx";
 import { ChevronDown, ChevronRight, RefreshCw, X } from "lucide-react";
 import { useState, type ReactNode } from "react";
 
-import { lanesApi, type LanePatch } from "@/lib/api";
+import { lanesApi, managerApi, type LanePatch } from "@/lib/api";
 import type { LaneInfo } from "@/lib/generated/LaneInfo";
 import type { LaneScreen } from "@/lib/generated/LaneScreen";
 import type { LaneSession } from "@/lib/generated/LaneSession";
@@ -35,6 +35,12 @@ const LOUD: LaneState[] = ["waiting", "pending_input", "rate_limited", "missing"
 /** A status file this old (minutes) is likely older than what the screen shows. */
 const STALE_STATUS_MINS = 90;
 const HISTORY_SHOWN = 8;
+
+/** `81608` → `81.6k`, `200000` → `200k`. */
+export const kTokens = (n: number) => {
+  const k = n / 1000;
+  return k >= 100 || Math.abs(k - Math.round(k)) < 0.05 ? `${Math.round(k)}k` : `${k.toFixed(1)}k`;
+};
 
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
 
@@ -87,7 +93,12 @@ function SessionRow({ s, now }: { s: LaneSession; now: number }) {
         </Badge>
         {s.attached && <Badge tone="info">attached</Badge>}
         {s.context_pct !== null && (
-          <span className={clsx("font-mono text-[11px]", s.context_pct >= 80 ? "text-warn" : "text-muted")}>{s.context_pct}% context</span>
+          <span
+            className={clsx("font-mono text-[11px]", s.context_pct >= 80 ? "text-warn" : "text-muted")}
+            title={s.context_source === "transcript" ? "read from the Claude transcript (the last assistant message's usage)" : "printed by the CLI"}
+          >
+            {s.context_tokens !== null && s.context_window !== null ? `${kTokens(s.context_tokens)} / ${kTokens(s.context_window)} (${s.context_pct}%)` : `${s.context_pct}%`} context
+          </span>
         )}
         {s.clear_hint && <span className="font-mono text-[11px] text-muted">suggests /clear</span>}
         <span className="font-mono text-[11px] text-muted">unchanged {s.unchanged_mins} min</span>
@@ -352,6 +363,23 @@ export function LaneCard({ lane, onChange, onReload, focused }: { lane: LaneInfo
     }
   };
 
+  const owned = lane.owned !== null && lane.project !== null;
+  /** A persistent lane: Start when stopped, Close (refused while someone uses it; Force from the owner). */
+  const ownedAction = async (what: "start" | "close" | "force") => {
+    if (!lane.project) return;
+    setBusy(what);
+    try {
+      if (what === "start") await managerApi.startLane(lane.project, lane.name);
+      else await managerApi.closeLane(lane.project, lane.name, what === "force");
+      toast(`${lane.name}: ${what === "start" ? "started" : "closed"}`);
+      onReload();
+    } catch (e) {
+      toast(errText(e), "bad");
+    } finally {
+      setBusy("");
+    }
+  };
+
   const loud = lane.sessions.some((s) => LOUD.includes(s.state) || s.stall);
   const st = lane.status;
   const age = lane.status_age_mins;
@@ -373,15 +401,41 @@ export function LaneCard({ lane, onChange, onReload, focused }: { lane: LaneInfo
     <Card className={clsx("flex flex-col gap-3.5 p-[18px]", loud && "border-warn/45", focused && "border-accent/60")}>
       <div id={`lane-${lane.name}`} className="flex min-w-0 scroll-mt-20 flex-wrap items-start justify-between gap-2">
         <div className="flex min-w-0 flex-col gap-0.5">
-          <h2 className="font-mono text-[15px] font-semibold text-text">{lane.name}</h2>
+          <h2 className="flex flex-wrap items-center gap-2 font-mono text-[15px] font-semibold text-text">
+            {lane.name}
+            {owned && <Badge tone="accent">{lane.owned === "manager" ? "manager" : "MAP lane"}</Badge>}
+            {lane.stopped && <Badge tone="bad">stopped</Badge>}
+          </h2>
           <span className="font-mono text-[11px] break-all text-muted">
-            {lane.socket ? `tmux -L ${lane.socket}` : "default server"}
+            {owned ? "MAP's tmux server" : lane.socket ? `tmux -L ${lane.socket}` : "default server"}
             {lane.path && ` · ${lane.path}`}
             {lane.session_match.length > 0 && ` · sessions ${lane.session_match.join(", ")}`}
           </span>
         </div>
         <span className="font-mono text-[10.5px] text-muted">{lane.checked_at ? `checked ${relative(lane.checked_at, now)}` : "not checked yet"}</span>
       </div>
+
+      {owned && lane.owned === "lane" && (
+        <div className="flex flex-wrap items-center gap-2">
+          {lane.stopped ? (
+            <>
+              <span className="font-mono text-[11.5px] text-warn">The session is gone; MAP does not relaunch it by itself.</span>
+              <Btn size="sm" tone="primary" disabled={!!busy} onClick={() => void ownedAction("start")}>
+                Start
+              </Btn>
+            </>
+          ) : (
+            <>
+              <Btn size="sm" disabled={!!busy} onClick={() => void ownedAction("close")}>
+                Close lane
+              </Btn>
+              <Btn size="sm" tone="danger" disabled={!!busy} onClick={() => void ownedAction("force")}>
+                Force close
+              </Btn>
+            </>
+          )}
+        </div>
+      )}
 
       {lane.error && <p className="rounded-lg border border-bad/40 bg-bad/[.07] px-3 py-2 font-mono text-[11.5px] break-words text-bad">{lane.error}</p>}
 

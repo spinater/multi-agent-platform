@@ -10,6 +10,7 @@ mod hub;
 mod intake;
 mod knowledge;
 mod lanes;
+mod manager;
 mod login;
 mod model;
 mod orchestrator;
@@ -30,6 +31,7 @@ mod telegram;
 mod templates;
 mod terminal;
 mod thai;
+mod trace;
 mod trust;
 mod updates;
 mod usage;
@@ -129,6 +131,7 @@ async fn serve(config: Config) -> Result<()> {
     tokio::spawn(usage::run(hub.clone()));
     tokio::spawn(updates::run(hub.clone()));
     tokio::spawn(lanes::run(hub.clone()));
+    tokio::spawn(manager::run(hub.clone()));
     tokio::spawn(telegram::run(hub.clone()));
     {
         let hub = hub.clone();

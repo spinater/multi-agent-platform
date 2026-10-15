@@ -22,6 +22,20 @@ socket = ""                  # empty: tmux's default server
 session_match = ["my-agent*"] # globs; empty: the name
 path = "/path/to/project"     # status file, cards, git`;
 
+const WATCHED = "";
+
+/** MAP-owned lanes grouped by project (the manager first), then the `[[lanes]]` blocks. */
+function groupLanes(lanes: LaneInfo[]): [string, LaneInfo[]][] {
+  const by = new Map<string, LaneInfo[]>();
+  for (const l of lanes) {
+    const key = l.project ?? WATCHED;
+    by.set(key, [...(by.get(key) ?? []), l]);
+  }
+  const keys = [...by.keys()].filter((k) => k !== WATCHED).sort();
+  if (by.has(WATCHED)) keys.push(WATCHED);
+  return keys.map((k) => [k, (by.get(k) ?? []).sort((a, b) => (a.owned === "manager" ? -1 : b.owned === "manager" ? 1 : a.name.localeCompare(b.name)))]);
+}
+
 /** Lanes (`#lanes`, `#lanes/<name>` scrolls to one): tmux sessions someone else owns, which MAP watches, reports to
  * Telegram and, when allowed, nudges (`/clear`, the status prompt) while idle with nobody attached. */
 export function LanesScreen() {
@@ -115,9 +129,16 @@ export function LanesScreen() {
             </div>
           </Card>
         ) : (
-          <div className="grid min-w-0 gap-4 xl:grid-cols-2">
-            {lanes.map((l) => (
-              <LaneCard key={l.name} lane={l} onChange={replace} onReload={() => void load()} focused={focused === l.name} />
+          <div className="flex min-w-0 flex-col gap-6">
+            {groupLanes(lanes).map(([group, list]) => (
+              <section key={group} className="flex min-w-0 flex-col gap-3">
+                <SectionTitle note={group === WATCHED ? "map.toml [[lanes]]" : "MAP's own: the manager and persistent lanes"}>{group === WATCHED ? "Watched lanes" : `Project ${group}`}</SectionTitle>
+                <div className="grid min-w-0 gap-4 xl:grid-cols-2">
+                  {list.map((l) => (
+                    <LaneCard key={l.name} lane={l} onChange={replace} onReload={() => void load()} focused={focused === l.name} />
+                  ))}
+                </div>
+              </section>
             ))}
           </div>
         )}

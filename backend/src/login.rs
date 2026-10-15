@@ -132,13 +132,138 @@ pub fn parse(text: &str) -> Parsed {
     });
 
     let lower = text.to_lowercase();
-    let wants_code = ["paste code here", "paste the authorization code", "paste the code", "enter the authorization code", "authorization code here"]
+    let wants_code = ["paste code here", "paste the authorization code", "paste the code", "enter the authorization code", "authorization code here", "paste it below", "authorization code..."]
         .iter()
         .any(|k| lower.contains(k));
     let success = ["login successful", "successfully logged in", "logged in successfully", "signed in successfully", "successfully signed in", "authentication successful"]
         .iter()
         .any(|k| lower.contains(k));
     Parsed { url, code, wants_code, success }
+}
+
+/// What a sign-in pane shows before `login_send` can be typed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Readiness {
+    /// The CLI's input prompt (`login_ready`, else `idle_markers`) is in the bottom lines.
+    Ready,
+    /// One of the provider's known first-run pickers (`login_onboarding`): Enter takes the default.
+    Onboarding,
+    /// A folder-trust or permission question: a person must answer it.
+    Blocked,
+    /// Nothing recognised yet (starting, or a screen MAP does not know).
+    Unknown,
+}
+
+/// The bottom non-empty lines of a pane, ANSI stripped, joined.
+fn bottom(pane: &str, n: usize) -> String {
+    let text = crate::detect::strip_ansi(pane);
+    let lines: Vec<&str> = text.lines().filter(|l| !l.trim().is_empty()).collect();
+    lines[lines.len().saturating_sub(n)..].join("\n")
+}
+
+pub fn readiness(spec: &ProviderSpec, pane: &str) -> Readiness {
+    if crate::detect::trust_prompt(spec, pane).is_some() {
+        return Readiness::Blocked;
+    }
+    let tail = bottom(pane, 25);
+    let lower = tail.to_lowercase();
+    let blocked = ["do you want", "allow", "permission", "(y/n)", "trust"];
+    let ready = if spec.login_ready.is_empty() { &spec.idle_markers } else { &spec.login_ready };
+    // The picker first: a welcome screen may show the prompt's placeholder under it.
+    if spec.login_onboarding.iter().any(|m| !m.is_empty() && tail.contains(m.as_str())) {
+        // A known picker that also asks about trust or permissions is not harmless.
+        return if blocked.iter().any(|b| lower.contains(b)) { Readiness::Blocked } else { Readiness::Onboarding };
+    }
+    if ready.iter().any(|m| !m.is_empty() && tail.contains(m.as_str())) {
+        return Readiness::Ready;
+    }
+    Readiness::Unknown
+}
+
+/// The sign-in's phase as the modal shows it, and a hint for the person.
+pub fn phase(spec: &ProviderSpec, pane: &str, parsed: &Parsed, live: bool) -> (String, Option<String>) {
+    let (p, hint): (&str, Option<&str>) = if parsed.success {
+        ("success", None)
+    } else if bottom(pane, 4).to_lowercase().contains("got an error") {
+        // agy after a wrong or expired code: "Got an error: token exchange failed … Press any key to go back."
+        ("failed", Some("The CLI refused the code (wrong or expired). Start the sign-in again and paste the new code."))
+    } else if parsed.wants_code {
+        ("waiting_for_code", Some("Paste the code the browser gave you."))
+    } else if parsed.url.is_some() || parsed.code.is_some() {
+        ("browser", Some("Open the link and approve the sign-in in your browser."))
+    } else if !live {
+        ("ended", Some("The sign-in session has ended."))
+    } else if pane.trim().is_empty() {
+        ("starting", None)
+    } else {
+        match readiness(spec, pane) {
+            Readiness::Onboarding => ("onboarding", Some("The CLI is asking a first-run question; MAP answers it with the default.")),
+            Readiness::Ready => ("ready", None),
+            Readiness::Blocked => ("console", Some("The CLI is asking a question only you can answer: use the console below.")),
+            Readiness::Unknown => ("console", Some("The CLI is waiting for you in the console below.")),
+        }
+    };
+    (p.to_string(), hint.map(String::from))
+}
+
+/// How long the helper waits for the CLI's prompt before typing `login_send`, and how often it looks.
+pub const READY_WAIT: Duration = Duration::from_secs(60);
+const READY_POLL: Duration = Duration::from_millis(1000);
+
+/// Waits for the CLI's input prompt, answering known first-run pickers with Enter, then types `login_send`. Gives up
+/// (with an event) on a trust or permission question, or after `wait`.
+pub async fn send_when_ready(hub: &Hub, spec: &ProviderSpec, target: &str, text: &str, wait: Duration, poll: Duration) -> Result<bool> {
+    let deadline = tokio::time::Instant::now() + wait;
+    let mut answered = 0;
+    loop {
+        tokio::time::sleep(poll).await;
+        let pane = hub.term.capture(target, 60, false).await.unwrap_or_default();
+        // Some CLIs open straight onto the sign-in (agy signed out): a link or a code prompt means it is under way.
+        let shown = parse(&crate::detect::strip_ansi(&pane));
+        if shown.url.is_some() || shown.wants_code || shown.success {
+            return Ok(true);
+        }
+        match readiness(spec, &pane) {
+            Readiness::Ready => {
+                hub.term.send_text(target, text, true).await?;
+                return Ok(true);
+            }
+            Readiness::Onboarding if answered < 10 => {
+                answered += 1;
+                hub.term.send_key(target, "Enter").await?;
+                hub.event(Level::Info, "provider.login", Some(target), None, "The CLI asked a first-run question; answered with the default").await;
+            }
+            Readiness::Blocked => {
+                hub.event(Level::Warning, "provider.login", Some(target), None, format!("The CLI asks a question MAP does not answer; type {text} yourself after answering it")).await;
+                return Ok(false);
+            }
+            _ => {}
+        }
+        if tokio::time::Instant::now() >= deadline {
+            hub.event(Level::Warning, "provider.login", Some(target), None, format!("The CLI's prompt did not appear; type {text} in its console")).await;
+            return Ok(false);
+        }
+    }
+}
+
+/// Types the authorization code into the sign-in session, only while its pane asks for one.
+pub async fn send_code(hub: &Hub, provider: &str, code: &str) -> Result<()> {
+    let name = session_name(hub, provider);
+    hub.managed(&name).await?;
+    let pane = crate::detect::strip_ansi(&hub.term.capture(&name, 200, false).await?);
+    // The code prompt must be the last thing on screen: an old one above a typed code does not count.
+    // agy keeps a key hint under its input, whose empty placeholder reads "authorization code...".
+    let last = bottom(&pane, 1);
+    let empty_input = bottom(&pane, 3).to_lowercase().contains("authorization code...");
+    let parsed = parse(&pane);
+    if !parsed.wants_code || parsed.success || !(parse(&last).wants_code || empty_input) {
+        bail!("the sign-in is not asking for a code right now");
+    }
+    let code = code.trim();
+    if code.is_empty() || code.contains(char::is_whitespace) || code.len() > 4096 {
+        bail!("the code is one word");
+    }
+    hub.term.send_text(&name, code, true).await
 }
 
 /// Starts (or returns the running) helper session for `provider`'s sign-in.
@@ -162,8 +287,8 @@ pub async fn start(hub: &Arc<Hub>, provider: &str) -> Result<Session> {
     if let Some(text) = spec.login_send.clone() {
         let (hub, target) = (Arc::clone(hub), name.clone());
         tokio::spawn(async move {
-            tokio::time::sleep(Duration::from_secs(spec.startup_secs)).await;
-            if let Err(err) = hub.term.send_text(&target, &text, true).await {
+            // Not blindly after `startup_secs`: a first-run picker would swallow the command and the code after it.
+            if let Err(err) = send_when_ready(&hub, &spec, &target, &text, READY_WAIT, READY_POLL).await {
                 hub.event(Level::Error, "provider.login", Some(&target), None, format!("Could not type {text}: {err:#}")).await;
             }
         });
@@ -182,6 +307,11 @@ pub async fn state(hub: &Hub, provider: &str) -> Result<LoginState> {
         None => String::new(),
     };
     let parsed = parse(&text);
+    let live = session.as_ref().is_some_and(|s| s.state.is_live());
+    let (phase, hint) = phase(spec, &text, &parsed, live);
+    if parsed.success || session.as_ref().is_some_and(|s| !s.state.is_live()) {
+        hub.announce_providers_if_changed();
+    }
     let lines: Vec<&str> = text.trim_end().lines().collect();
     let tail = lines[lines.len().saturating_sub(40)..].join("\n");
     Ok(LoginState {
@@ -193,6 +323,8 @@ pub async fn state(hub: &Hub, provider: &str) -> Result<LoginState> {
         success: parsed.success,
         signed_in: signed_in(hub, spec),
         credentials_updated_at: credentials_updated_at(spec),
+        phase,
+        hint,
     })
 }
 
@@ -229,6 +361,21 @@ mod tests {
         assert!(url.ends_with("&state=xyz789"), "{url}");
         assert_eq!(p.code, None, "nothing in a URL is a code");
         assert!(p.wants_code);
+    }
+
+    /// agy signed out, as captured from the real CLI (Antigravity, 2026-10): it opens on a login-method picker, then a
+    /// link and an input whose placeholder is the prompt, with a key hint under it.
+    #[test]
+    fn real_agy_signed_out_screens() {
+        let spec = crate::config::builtin_providers()["gemini"].clone();
+        let picker = " Welcome to the Antigravity CLI. You are currently not signed in.\n Select login method:\n > 1. Google OAuth\n   2. Use a Google Cloud project\n   ↑/↓ Navigate · enter Select\n";
+        assert_eq!(readiness(&spec, picker), Readiness::Onboarding, "Enter takes Google OAuth");
+        let code = " Open the URL below in your browser:\n https://accounts.google.com/o/oauth2/auth?access_type=offline&state=s\n After authenticating, copy the code displayed in the browser and paste it below:\n authorization code...\n  shift+up/down Navigate\n";
+        let p = parse(code);
+        assert!(p.url.is_some() && p.wants_code);
+        assert!(bottom(code, 3).to_lowercase().contains("authorization code..."));
+        let refused = " Got an error: token exchange failed: oauth2: \"invalid_grant\" \"Bad Request\"\n Press any key to go back.\n  shift+up/down Navigate\n";
+        assert_eq!(phase(&spec, refused, &parse(refused), true).0, "failed");
     }
 
     #[test]
@@ -371,5 +518,93 @@ mod tests {
         let home = std::env::var("HOME").unwrap();
         assert_eq!(expand_home("~/.codex/auth.json"), PathBuf::from(home).join(".codex/auth.json"));
         assert_eq!(expand_home("/etc/x"), PathBuf::from("/etc/x"));
+    }
+
+    fn agy() -> ProviderSpec {
+        crate::config::builtin_providers()["gemini"].clone()
+    }
+
+    const PICKER: &str = "Welcome to Antigravity CLI!\nChoose your color scheme:\n > dark\n   light\n[Next]\n↑/↓ Navigate · enter Confirm\n";
+
+    #[test]
+    fn readiness_answers_only_known_pickers() {
+        let spec = agy();
+        assert_eq!(readiness(&spec, PICKER), Readiness::Onboarding);
+        assert_eq!(readiness(&spec, "Welcome back\n\n > Type your message or @path/to/file\n"), Readiness::Ready);
+        assert_eq!(readiness(&spec, "Do you trust the contents of this project?\n > Yes, I trust this folder\n   No\n"), Readiness::Blocked, "trust: never Enter");
+        assert_eq!(readiness(&spec, "Choose your color scheme\nAllow telemetry? (y/n)\n[Next]\n"), Readiness::Blocked, "a picker that asks permission");
+        assert_eq!(readiness(&spec, "loading…\n"), Readiness::Unknown);
+        let parsed = parse(PICKER);
+        assert_eq!(phase(&spec, PICKER, &parsed, true).0, "onboarding");
+        assert_eq!(phase(&spec, "something odd\n", &parse("something odd"), true).0, "console");
+        let code = "Please visit https://accounts.google.com/o/oauth2/auth?x=1\nOr, paste the authorization code here and press Enter:\n";
+        assert_eq!(phase(&spec, code, &parse(code), true).0, "waiting_for_code");
+        assert_eq!(phase(&spec, "Login successful", &parse("Login successful"), true).0, "success");
+    }
+
+    /// A fake `agy` on a private tmux socket: the colour-scheme picker, then the prompt, `/login`, the code prompt,
+    /// and a credential file written from the code.
+    #[tokio::test]
+    async fn agy_sign_in_gets_past_the_first_run_picker() {
+        if std::process::Command::new("tmux").arg("-V").output().is_err() {
+            eprintln!("tmux missing: skipped");
+            return;
+        }
+        let socket = format!("map-login-test-{}", std::process::id());
+        let tmux = crate::lanes::tests::PrivateTmux(socket.clone());
+        let dir = tempfile::tempdir().unwrap();
+        let cred = dir.path().join("token.json");
+        let script = dir.path().join("fake-agy.sh");
+        std::fs::write(
+            &script,
+            format!(
+                "#!/bin/bash\nprintf 'Welcome to Antigravity CLI!\\nChoose your color scheme:\\n > dark\\n   light\\n[Next]\\n  Navigate · enter Confirm\\n'\nread -r first\nprintf '%s\\n' \"$first\" > {d}/first.log\nclear\nprintf 'Type your message or @path/to/file\\n> '\nread -r cmd\nprintf '%s\\n' \"$cmd\" > {d}/cmd.log\nif [ \"$cmd\" = /login ]; then\n  printf 'Please visit https://accounts.google.com/o/oauth2/auth?client_id=x\\nOr, paste the authorization code here and press Enter:\\n'\n  read -r code\n  printf '{{\"token\": \"%s\"}}' \"$code\" > {cred}\n  printf 'Login successful\\n'\nfi\nsleep 60\n",
+                d = dir.path().display(),
+                cred = cred.display()
+            ),
+        )
+        .unwrap();
+        std::fs::set_permissions(&script, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+        let text = format!(
+            "[workspace]\ndir = \"{d}\"\ntmux_socket = \"{socket}\"\n[server]\ndata_dir = \"{d}/data\"\n[agents_home]\nmode = \"isolated\"\ndir = \"{d}/homes\"\n[providers.gemini]\nbinary = \"{s}\"\ncredentials = [\"{c}\"]\nstartup_secs = 0\n",
+            d = dir.path().display(),
+            s = script.display(),
+            c = cred.display()
+        );
+        let config = crate::config::Config::parse(&text, std::path::Path::new("/")).unwrap();
+        for d in config.create_agent_homes().unwrap() {
+            assert!(d.starts_with(dir.path()));
+        }
+        let hub = Hub::new(config, crate::store::Store::memory().await.unwrap(), Arc::new(crate::terminal::tmux::Tmux::new(Some(socket.clone()))));
+        let s = start(&hub, "gemini").await.unwrap();
+        let mut ok = false;
+        for _ in 0..40 {
+            tokio::time::sleep(Duration::from_millis(500)).await;
+            if std::fs::read_to_string(dir.path().join("cmd.log")).is_ok_and(|c| c.trim() == "/login") {
+                ok = true;
+                break;
+            }
+        }
+        assert!(ok, "the picker was answered and /login typed after it; pane:\n{}", hub.term.capture(&s.name, 40, false).await.unwrap_or_default());
+        assert_eq!(std::fs::read_to_string(dir.path().join("first.log")).unwrap().trim(), "", "Enter took the default; /login did not land in the picker");
+        let mut st = state(&hub, "gemini").await.unwrap();
+        for _ in 0..10 {
+            if st.wants_code {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(300)).await;
+            st = state(&hub, "gemini").await.unwrap();
+        }
+        assert_eq!((st.wants_code, st.phase.as_str()), (true, "waiting_for_code"));
+        send_code(&hub, "gemini", "4/abc-DEF").await.unwrap();
+        for _ in 0..20 {
+            if cred.exists() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(200)).await;
+        }
+        assert_eq!(signed_in(&hub, hub.spec("gemini").unwrap()), Some(true));
+        assert!(send_code(&hub, "gemini", "again").await.is_err(), "no code prompt any more: nothing typed");
+        drop(tmux);
     }
 }

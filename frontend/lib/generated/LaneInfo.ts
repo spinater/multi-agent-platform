@@ -32,4 +32,12 @@ history: Array<LaneAction>, checked_at: string | null,
 /**
  * The last tick failed for this lane (e.g. tmux not reachable).
  */
-error: string | null, };
+error: string | null, 
+/**
+ * MAP-owned lanes: the project, and `manager` or `lane`. `None`: a `[[lanes]]` block (someone else's session).
+ */
+project: string | null, owned: string | null, 
+/**
+ * A MAP-owned lane whose tmux session is gone (it is not relaunched by itself: `POST …/lanes/{name}/start`).
+ */
+stopped: boolean, };

@@ -182,9 +182,10 @@ mod tests {
             ("POST", format!("{base}/projects/{app}/planner"), Some(json!({}))),
             ("POST", format!("{base}/tasks"), Some(json!({"title": "t", "prompt": "p"}))),
         ] {
-            assert_eq!(call(method, &url, &token, body).await.0, 401, "{method} {url}");
+            // A real project token outside its scope is forbidden (403), not unauthenticated.
+            assert_eq!(call(method, &url, &token, body).await.0, 403, "{method} {url}");
         }
-        assert_eq!(call("GET", &format!("{base}/projects/{app}/plans"), &other_token, None).await.0, 401);
+        assert_eq!(call("GET", &format!("{base}/projects/{app}/plans"), &other_token, None).await.0, 403);
         assert_eq!(call("POST", &format!("{base}/plans/{id}/approve"), &ws_token, Some(json!({}))).await.0, 401);
         assert!(hub.store.tasks().await.unwrap().is_empty());
 

@@ -38,6 +38,7 @@ import {
   useDefaults,
   type SettingsForm,
 } from "./project-ui";
+import { ManagerPanel } from "./manager-panel";
 import { RequirementsPanel } from "./requirements";
 import { Card, Main, PageHeader, SectionTitle } from "./shell/page";
 import { SessionBadge } from "./ui";
@@ -242,6 +243,10 @@ function Overview({ info }: { info: ProjectInfo }) {
     <div className="grid gap-4 lg:grid-cols-2">
       <Box title="Requirements" note="requirement → plan → tasks · you approve" className="lg:col-span-2">
         <RequirementsPanel project={p.slug} />
+      </Box>
+
+      <Box title="Manager" note="always-on agent for this project · lanes" className="lg:col-span-2">
+        <ManagerPanel slug={p.slug} />
       </Box>
 
       <Box title="Folder" note={src.kind === "empty" ? "created new" : src.kind === "local" ? "existing · in place" : `legacy · ${src.kind}`}>

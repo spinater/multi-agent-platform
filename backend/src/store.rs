@@ -31,6 +31,24 @@ fn parse_enum<T: DeserializeOwned>(s: &str) -> Result<T> {
     serde_json::from_value(serde_json::Value::String(s.to_string())).with_context(|| format!("unknown value `{s}`"))
 }
 
+/// [`Store::task_page`]'s filter: ?1 status, ?2 project (`''` the default workspace), ?3 a LIKE pattern, ?4 an id.
+macro_rules! task_where {
+    () => {
+        "WHERE (?1 IS NULL OR status = ?1) AND (?2 IS NULL OR (?2 = '' AND project IS NULL) OR project = ?2) \
+         AND (?3 IS NULL OR LOWER(title) LIKE ?3 ESCAPE '\\' OR id = ?4)"
+    };
+}
+
+/// What [`Store::task_page`] filters on.
+#[derive(Debug, Clone, Default)]
+pub struct TaskQuery {
+    pub status: Option<TaskStatus>,
+    pub project: Option<String>,
+    pub q: Option<String>,
+    pub limit: i64,
+    pub offset: i64,
+}
+
 #[derive(Debug, Clone)]
 pub struct NewTask {
     pub title: String,
@@ -91,12 +109,13 @@ impl Store {
 
     pub async fn save_session(&self, s: &Session) -> Result<()> {
         sqlx::query(
-            "INSERT INTO sessions (name, provider, model, role, task_id, state, detail, rate_limit_reset_at, wakeups, last_line, attached, created_at, last_activity_at, project)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            "INSERT INTO sessions (name, provider, model, role, task_id, state, detail, rate_limit_reset_at, wakeups, last_line, attached, created_at, last_activity_at, project, spawned_by)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
              ON CONFLICT(name) DO UPDATE SET provider = excluded.provider, model = excluded.model, role = excluded.role,
                task_id = excluded.task_id, project = excluded.project, state = excluded.state, detail = excluded.detail,
                rate_limit_reset_at = excluded.rate_limit_reset_at, wakeups = excluded.wakeups, last_line = excluded.last_line,
-               attached = excluded.attached, last_activity_at = excluded.last_activity_at",
+               attached = excluded.attached, last_activity_at = excluded.last_activity_at,
+               spawned_by = CASE WHEN excluded.spawned_by = '' THEN sessions.spawned_by ELSE excluded.spawned_by END",
         )
         .bind(&s.name)
         .bind(&s.provider)
@@ -112,6 +131,7 @@ impl Store {
         .bind(s.created_at)
         .bind(s.last_activity_at)
         .bind(&s.project)
+        .bind(&s.spawned_by)
         .execute(&self.pool)
         .await?;
         Ok(())
@@ -133,6 +153,7 @@ impl Store {
             attached: row.get("attached"),
             created_at: row.get("created_at"),
             last_activity_at: row.get("last_activity_at"),
+            spawned_by: row.get("spawned_by"),
         })
     }
 
@@ -213,6 +234,7 @@ impl Store {
             git: row.get::<Option<String>, _>("git").map(|g| serde_json::from_str(&g)).transpose()?,
             scope: row.get::<Option<String>, _>("scope").map(|g| serde_json::from_str(&g)).transpose()?,
             intake: row.get::<Option<String>, _>("intake").map(|g| serde_json::from_str(&g)).transpose()?,
+            created_by: row.get("created_by"),
             created_at: row.get("created_at"),
             updated_at: row.get("updated_at"),
         })
@@ -226,6 +248,79 @@ impl Store {
     pub async fn tasks(&self) -> Result<Vec<Task>> {
         let rows = sqlx::query("SELECT * FROM tasks ORDER BY id").fetch_all(&self.pool).await?;
         rows.iter().map(Self::task_row).collect()
+    }
+
+    /// One page of tasks, newest change first (for done tasks: newest finished first), with the total that match.
+    /// `status`: one status; `project`: `None` every project, `Some("")` the default workspace, else that slug; `q`: a
+    /// title substring (case-insensitive) or `#12`/`12`, which also matches the task's id.
+    pub async fn task_page(&self, q: &TaskQuery) -> Result<crate::model::TaskPage> {
+        let text = q.q.as_deref().map(str::trim).filter(|s| !s.is_empty());
+        let id: Option<i64> = text.and_then(|s| s.strip_prefix('#').unwrap_or(s).parse().ok());
+        let like = text.map(|s| format!("%{}%", s.to_lowercase().replace('\\', "\\\\").replace('%', "\\%").replace('_', "\\_")));
+        let project = q.project.as_deref();
+
+        let status = q.status.map(|s| s.as_str());
+        let total: i64 = sqlx::query_scalar(concat!("SELECT COUNT(*) FROM tasks ", task_where!()))
+            .bind(status)
+            .bind(project)
+            .bind(&like)
+            .bind(id)
+            .fetch_one(&self.pool)
+            .await?;
+        let rows = sqlx::query(concat!(
+            "SELECT t.*, (SELECT MIN(e.at) FROM events e WHERE e.task_id = t.id AND e.kind = 'session.started') AS started_at FROM tasks t ",
+            task_where!(),
+            " ORDER BY t.updated_at DESC, t.id DESC LIMIT ?5 OFFSET ?6"
+        ))
+        .bind(status)
+        .bind(project)
+        .bind(&like)
+        .bind(id)
+        .bind(q.limit.clamp(1, 500))
+        .bind(q.offset.max(0))
+        .fetch_all(&self.pool)
+        .await?;
+        let mut items = Vec::with_capacity(rows.len());
+        for row in &rows {
+            items.push(crate::model::TaskPageItem { task: Self::task_row(row)?, started_at: row.get("started_at") });
+        }
+        Ok(crate::model::TaskPage { items, total })
+    }
+
+    /// Records who created the task (`owner` until set).
+    pub async fn set_task_created_by(&self, id: i64, by: &str) -> Result<()> {
+        sqlx::query("UPDATE tasks SET created_by = ? WHERE id = ?").bind(by).bind(id).execute(&self.pool).await?;
+        Ok(())
+    }
+
+    /// Every event of these tasks (decisions, sessions, task changes), oldest first.
+    pub async fn events_of_tasks(&self, ids: &[i64]) -> Result<Vec<Event>> {
+        let rows = sqlx::query("SELECT * FROM events WHERE task_id IN (SELECT value FROM json_each(?)) ORDER BY id")
+            .bind(serde_json::to_string(ids)?)
+            .fetch_all(&self.pool)
+            .await?;
+        rows.iter().map(Self::decision_event_row).collect()
+    }
+
+    /// What MAP read of a session's transcript: (file, offset, items JSON).
+    pub async fn session_trace(&self, session: &str) -> Result<Option<(String, i64, String)>> {
+        let row = sqlx::query("SELECT file, offset, data FROM session_traces WHERE session = ?").bind(session).fetch_optional(&self.pool).await?;
+        Ok(row.map(|r| (r.get("file"), r.get("offset"), r.get("data"))))
+    }
+
+    pub async fn set_session_trace(&self, session: &str, file: &str, offset: i64, data: &str) -> Result<()> {
+        sqlx::query(
+            "INSERT INTO session_traces (session, file, offset, data, at) VALUES (?, ?, ?, ?, ?)
+             ON CONFLICT(session) DO UPDATE SET file = excluded.file, offset = excluded.offset, data = excluded.data, at = excluded.at",
+        )
+        .bind(session)
+        .bind(file)
+        .bind(offset)
+        .bind(data)
+        .bind(Utc::now())
+        .execute(&self.pool)
+        .await?;
+        Ok(())
     }
 
     pub async fn delete_task(&self, id: i64) -> Result<()> {
@@ -517,6 +612,29 @@ impl Store {
             }
         }
         Ok(stats)
+    }
+
+    // ---- persistent lanes MAP opened (manager.rs)
+
+    /// Every stored lane, or one project's.
+    pub async fn owned_lanes(&self, project: Option<&str>) -> Result<Vec<crate::model::OwnedLaneRecord>> {
+        let rows = sqlx::query("SELECT data FROM owned_lanes WHERE (?1 IS NULL OR project = ?1) ORDER BY lane").bind(project).fetch_all(&self.pool).await?;
+        Ok(rows.iter().filter_map(|r| serde_json::from_str(r.get::<&str, _>("data")).ok()).collect())
+    }
+
+    pub async fn put_owned_lane(&self, l: &crate::model::OwnedLaneRecord) -> Result<()> {
+        sqlx::query("INSERT INTO owned_lanes (lane, project, data) VALUES (?, ?, ?) ON CONFLICT(lane) DO UPDATE SET project = excluded.project, data = excluded.data")
+            .bind(&l.lane)
+            .bind(&l.project)
+            .bind(serde_json::to_string(l)?)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    pub async fn delete_owned_lane(&self, lane: &str) -> Result<()> {
+        sqlx::query("DELETE FROM owned_lanes WHERE lane = ?").bind(lane).execute(&self.pool).await?;
+        Ok(())
     }
 
     // ---- lanes (lanes.rs)
@@ -945,6 +1063,7 @@ mod tests {
             attached: false,
             created_at: now,
             last_activity_at: now,
+            spawned_by: String::new(),
         };
         store.save_session(&s).await.unwrap();
         s.state = SessionState::RateLimited;
@@ -1144,5 +1263,59 @@ mod tests {
         assert_eq!((old.fallback.clone(), old.lane), (None, Lane::Reflex));
         assert!(store.savings_samples(Some("other"), now - day * 30).await.unwrap().is_empty());
         assert_eq!(store.savings_samples(None, now - day * 50).await.unwrap().len(), 7);
+    }
+
+    #[tokio::test]
+    async fn task_page_filters_searches_and_pages_newest_first() {
+        let store = Store::memory().await.unwrap();
+        let base = Utc::now() - chrono::Duration::hours(10);
+        let mut ids = vec![];
+        for i in 0..7i64 {
+            let project = match i % 3 {
+                0 => None,
+                1 => Some("app".to_string()),
+                _ => Some("web".to_string()),
+            };
+            let title = if i == 4 { "Fix 100% CSV_export".to_string() } else { format!("Task number {i}") };
+            let mut t = store.create_task(NewTask { title, prompt: "P".into(), depends_on: vec![], provider: None, model: None, project }).await.unwrap();
+            t.status = if i == 6 { TaskStatus::Failed } else { TaskStatus::Done };
+            // Finished out of id order: task 2 last.
+            t.updated_at = base + chrono::Duration::minutes(if i == 2 { 100 } else { i * 10 });
+            store.save_task(&t).await.unwrap();
+            ids.push(t.id);
+        }
+        store.insert_event(Level::Info, "session.started", Some("map-x"), Some(ids[1]), "Started").await.unwrap();
+        let q = |status: Option<TaskStatus>, project: Option<&str>, text: Option<&str>, limit: i64, offset: i64| TaskQuery {
+            status,
+            project: project.map(String::from),
+            q: text.map(String::from),
+            limit,
+            offset,
+        };
+        let done = store.task_page(&q(Some(TaskStatus::Done), None, None, 3, 0)).await.unwrap();
+        assert_eq!(done.total, 6, "the failed one is not done");
+        let order: Vec<i64> = done.items.iter().map(|i| i.task.id).collect();
+        assert_eq!(order, vec![ids[2], ids[5], ids[4]], "newest finished first");
+        let next = store.task_page(&q(Some(TaskStatus::Done), None, None, 3, 3)).await.unwrap();
+        assert_eq!(next.items.iter().map(|i| i.task.id).collect::<Vec<_>>(), vec![ids[3], ids[1], ids[0]]);
+        assert!(next.items[1].started_at.is_some() && next.items[0].started_at.is_none());
+        let past = store.task_page(&q(Some(TaskStatus::Done), None, None, 3, 9)).await.unwrap();
+        assert!(past.items.is_empty() && past.total == 6);
+
+        let app = store.task_page(&q(Some(TaskStatus::Done), Some("app"), None, 50, 0)).await.unwrap();
+        assert_eq!(app.items.iter().map(|i| i.task.id).collect::<Vec<_>>(), vec![ids[4], ids[1]]);
+        let ws = store.task_page(&q(Some(TaskStatus::Done), Some(""), None, 50, 0)).await.unwrap();
+        assert_eq!(ws.items.iter().map(|i| i.task.id).collect::<Vec<_>>(), vec![ids[3], ids[0]], "empty project: the default workspace");
+
+        let by_title = store.task_page(&q(None, None, Some("  number 5 "), 50, 0)).await.unwrap();
+        assert_eq!(by_title.items.iter().map(|i| i.task.id).collect::<Vec<_>>(), vec![ids[5]]);
+        let upper = store.task_page(&q(None, None, Some("TASK NUMBER"), 50, 0)).await.unwrap();
+        assert_eq!(upper.total, 6);
+        let by_id = store.task_page(&q(None, None, Some(&format!("#{}", ids[3])), 50, 0)).await.unwrap();
+        assert_eq!(by_id.items.iter().map(|i| i.task.id).collect::<Vec<_>>(), vec![ids[3]]);
+        // `%` and `_` are literal, not wildcards.
+        assert_eq!(store.task_page(&q(None, None, Some("100%"), 50, 0)).await.unwrap().total, 1);
+        assert_eq!(store.task_page(&q(None, None, Some("v%e"), 50, 0)).await.unwrap().total, 0);
+        assert_eq!(store.task_page(&q(Some(TaskStatus::Failed), None, None, 0, -5)).await.unwrap().items.len(), 1, "limit and offset are clamped");
     }
 }

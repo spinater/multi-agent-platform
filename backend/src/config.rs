@@ -524,11 +524,13 @@ pub struct TemplatesConfig {
     pub init_agent: Option<PathBuf>,
     /// The planner agent's instructions; unset: the ones built into the binary (`backend/templates/planner-agent.md`).
     pub planner_agent: Option<PathBuf>,
+    /// A project manager's instructions; unset: the built-in ones (`backend/templates/manager-agent.md`).
+    pub manager_agent: Option<PathBuf>,
 }
 
 impl Default for TemplatesConfig {
     fn default() -> Self {
-        Self { dirs: vec!["~/.config/map/templates".into()], init_agent: None, planner_agent: None }
+        Self { dirs: vec!["~/.config/map/templates".into()], init_agent: None, planner_agent: None, manager_agent: None }
     }
 }
 
@@ -709,6 +711,28 @@ pub struct LaneConfig {
     pub ask_when: crate::model::LaneAskWhen,
     #[serde(default)]
     pub stall_when: crate::model::LaneStallWhen,
+    /// The Claude Code state folder whose `projects/<path>/*.jsonl` transcripts give the context used when the pane
+    /// does not print it (read only). Default: `~/.claude` (lanes are the owner's own sessions).
+    #[serde(default)]
+    pub claude_dir: Option<PathBuf>,
+    /// The model's context window in tokens, for the percentage read from the transcript.
+    #[serde(default = "default_context_window")]
+    pub context_window: u64,
+    /// MAP-owned lanes (a project's manager, persistent lanes): which project, and what kind. Never from map.toml.
+    #[serde(skip)]
+    pub owned: Option<OwnedLane>,
+}
+
+/// A lane MAP started itself (`manager.rs`): its session runs on MAP's own tmux server.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OwnedLane {
+    pub project: String,
+    /// `manager` or `lane`.
+    pub kind: String,
+}
+
+fn default_context_window() -> u64 {
+    200_000
 }
 
 fn default_status_file() -> String {
@@ -874,6 +898,11 @@ pub struct ProviderSpec {
     pub interactive: Vec<String>,
     pub headless: Vec<String>,
     pub extra_args: Vec<String>,
+    /// Arguments that name a new conversation `{session_id}` (a UUID MAP picks) on a session MAP keeps alive (a
+    /// project's manager, a persistent lane); empty: the CLI cannot be told.
+    pub session_id_args: Vec<String>,
+    /// Arguments that resume conversation `{session_id}` when MAP restarts such a session; empty: it starts afresh.
+    pub resume_args: Vec<String>,
     pub prompt_mode: PromptMode,
     pub startup_secs: u64,
     /// Pane text meaning the agent is waiting at its prompt.
@@ -895,6 +924,11 @@ pub struct ProviderSpec {
     pub login_send: Option<String>,
     /// Shown before a sign-in starts, e.g. when the CLI signs out the current account first.
     pub login_warning: Option<String>,
+    /// Pane text meaning the CLI's input prompt is up, so `login_send` can be typed; empty: `idle_markers`.
+    pub login_ready: Vec<String>,
+    /// Pane text of harmless first-run pickers (a colour scheme, a welcome page) MAP answers with Enter (the
+    /// default) before typing `login_send`. Never a folder-trust or permission question: those wait for a person.
+    pub login_onboarding: Vec<String>,
     /// Files the CLI keeps its credentials in (`~/` is the home directory). Only their existence and whether
     /// they parse are checked; empty: the sign-in state is unknown.
     pub credentials: Vec<String>,
@@ -1032,6 +1066,8 @@ struct ProviderOverride {
     interactive: Option<Vec<String>>,
     headless: Option<Vec<String>>,
     extra_args: Option<Vec<String>>,
+    session_id_args: Option<Vec<String>>,
+    resume_args: Option<Vec<String>>,
     prompt_mode: Option<PromptMode>,
     startup_secs: Option<u64>,
     idle_markers: Option<Vec<String>>,
@@ -1043,6 +1079,8 @@ struct ProviderOverride {
     login: Option<Vec<String>>,
     login_send: Option<String>,
     login_warning: Option<String>,
+    login_ready: Option<Vec<String>>,
+    login_onboarding: Option<Vec<String>>,
     credentials: Option<Vec<String>>,
     api_key_env: Option<String>,
     version: Option<Vec<String>>,
@@ -1081,6 +1119,8 @@ pub fn builtin_providers() -> BTreeMap<String, ProviderSpec> {
             interactive: strings(&["{binary}", "--name", "{session}", "--model", "{model}"]),
             headless: strings(&["{binary}", "-p", "{prompt}", "--model", "{model}"]),
             extra_args: vec![],
+            session_id_args: strings(&["--session-id", "{session_id}"]),
+            resume_args: strings(&["--resume", "{session_id}"]),
             prompt_mode: PromptMode::Arg,
             startup_secs: 4,
             idle_markers: strings(&["? for shortcuts"]),
@@ -1099,6 +1139,8 @@ pub fn builtin_providers() -> BTreeMap<String, ProviderSpec> {
             login: strings(&["{binary}", "auth", "login"]),
             login_send: None,
             login_warning: None,
+            login_ready: vec![],
+            login_onboarding: vec![],
             credentials: strings(&["~/.claude/.credentials.json"]),
             api_key_env: Some("ANTHROPIC_API_KEY".into()),
             version: strings(&["{binary}", "--version"]),
@@ -1127,6 +1169,8 @@ pub fn builtin_providers() -> BTreeMap<String, ProviderSpec> {
             interactive: strings(&["{binary}", "-m", "{model}"]),
             headless: strings(&["{binary}", "exec", "-m", "{model}", "{prompt}"]),
             extra_args: vec![],
+            session_id_args: vec![],
+            resume_args: vec![],
             prompt_mode: PromptMode::Arg,
             startup_secs: 4,
             idle_markers: strings(&["? for shortcuts"]),
@@ -1146,6 +1190,8 @@ pub fn builtin_providers() -> BTreeMap<String, ProviderSpec> {
             login_send: None,
             // Seen with codex-cli 0.159: the device flow deletes ~/.codex/auth.json as soon as it starts.
             login_warning: Some("codex login signs out the current account as soon as it starts, before you approve the new one.".into()),
+            login_ready: vec![],
+            login_onboarding: vec![],
             credentials: strings(&["~/.codex/auth.json"]),
             api_key_env: Some("OPENAI_API_KEY".into()),
             version: strings(&["{binary}", "--version"]),
@@ -1169,6 +1215,8 @@ pub fn builtin_providers() -> BTreeMap<String, ProviderSpec> {
             interactive: strings(&["{binary}", "--model", "{model}"]),
             headless: strings(&["{binary}", "-p", "{prompt}", "--model", "{model}"]),
             extra_args: vec![],
+            session_id_args: vec![],
+            resume_args: vec![],
             prompt_mode: PromptMode::Send,
             startup_secs: 6,
             idle_markers: strings(&["Type your message"]),
@@ -1184,6 +1232,10 @@ pub fn builtin_providers() -> BTreeMap<String, ProviderSpec> {
             login: strings(&["{binary}"]),
             login_send: Some("/login".into()),
             login_warning: None,
+            login_ready: strings(&["Type your message"]),
+            // agy's first run on a fresh home: "Welcome to Antigravity CLI! Choose your color scheme: … [Next]
+            // ↑/↓ Navigate · enter Confirm". Enter keeps the default and moves on.
+            login_onboarding: strings(&["Choose your color scheme", "[Next]", "enter Confirm", "Select login method"]),
             credentials: strings(&["~/.gemini/jetski-standalone-oauth-token"]),
             api_key_env: Some("GEMINI_API_KEY".into()),
             version: strings(&["{binary}", "--version"]),
@@ -1219,6 +1271,8 @@ pub fn builtin_providers() -> BTreeMap<String, ProviderSpec> {
             // Print mode proposes edits only (no --force); --trust: print mode never asks about the folder.
             headless: strings(&["{binary}", "-p", "--output-format", "text", "--trust", "--model", "{model}", "{prompt}"]),
             extra_args: vec![],
+            session_id_args: vec![],
+            resume_args: vec![],
             prompt_mode: PromptMode::Arg,
             startup_secs: 5,
             idle_markers: strings(&["Plan, search, build anything"]),
@@ -1234,6 +1288,8 @@ pub fn builtin_providers() -> BTreeMap<String, ProviderSpec> {
             login: strings(&["env", "NO_OPEN_BROWSER=1", "{binary}", "login"]),
             login_send: None,
             login_warning: None,
+            login_ready: vec![],
+            login_onboarding: vec![],
             // Where the sign-in is kept is not documented (a keyring where there is one): the state is unknown.
             credentials: vec![],
             api_key_env: Some("CURSOR_API_KEY".into()),
@@ -1262,6 +1318,8 @@ pub fn builtin_providers() -> BTreeMap<String, ProviderSpec> {
             // -s: the answer only. Without --allow-all-tools a headless run uses no tool that needs approval.
             headless: strings(&["{binary}", "-p", "{prompt}", "--model", "{model}", "-s", "--no-ask-user"]),
             extra_args: vec![],
+            session_id_args: vec![],
+            resume_args: vec![],
             // The first prompt is `-i <prompt>`, which a session without one cannot leave dangling: typed in instead.
             prompt_mode: PromptMode::Send,
             startup_secs: 6,
@@ -1281,6 +1339,8 @@ pub fn builtin_providers() -> BTreeMap<String, ProviderSpec> {
             login: strings(&["{binary}", "login", "--device-code"]),
             login_send: None,
             login_warning: None,
+            login_ready: vec![],
+            login_onboarding: vec![],
             // The token is in the system keychain (or, without one, in config.json next to other state), so a file
             // cannot tell: the state is unknown unless the variable below is set.
             credentials: vec![],
@@ -1372,6 +1432,8 @@ impl ProviderOverride {
             interactive: self.interactive.unwrap_or(base.interactive),
             headless: self.headless.unwrap_or(base.headless),
             extra_args: self.extra_args.unwrap_or(base.extra_args),
+            session_id_args: self.session_id_args.unwrap_or(base.session_id_args),
+            resume_args: self.resume_args.unwrap_or(base.resume_args),
             prompt_mode: self.prompt_mode.unwrap_or(base.prompt_mode),
             startup_secs: self.startup_secs.unwrap_or(base.startup_secs),
             idle_markers: self.idle_markers.unwrap_or(base.idle_markers),
@@ -1386,6 +1448,8 @@ impl ProviderOverride {
             login: self.login.unwrap_or(base.login),
             login_send: optional(self.login_send, base.login_send),
             login_warning: optional(self.login_warning, base.login_warning),
+            login_ready: self.login_ready.unwrap_or(base.login_ready),
+            login_onboarding: self.login_onboarding.unwrap_or(base.login_onboarding),
             credentials: self.credentials.unwrap_or(base.credentials),
             api_key_env: optional(self.api_key_env, base.api_key_env),
             version: self.version.unwrap_or(base.version),

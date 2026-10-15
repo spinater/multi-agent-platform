@@ -257,6 +257,14 @@ timeout_secs = 600
 # prompt_mode = "send"          # "arg": prompt as last argument; "send": typed in after startup_secs
 # idle_markers = ["> "]
 # auth_markers = ["API key"]
+# Sessions MAP keeps alive (a project's manager, persistent lanes): name a new conversation, and resume it after a
+# restart ({session_id} is a UUID MAP picks). Claude's: ["--session-id", "{session_id}"] and ["--resume", "{session_id}"].
+# session_id_args = []
+# resume_args = []
+# A CLI that signs in from its TUI (login_send): the pane text of its prompt (default: idle_markers), and of harmless
+# first-run pickers MAP answers with Enter first (never a trust or permission question). agy's defaults:
+# login_ready = ["Type your message"]
+# login_onboarding = ["Choose your color scheme", "[Next]", "enter Confirm", "Select login method"]
 
 # Projects: each one is a folder on this machine (used in place), a corpus repo and its own Reflex decision engine
 # (https://reflex.gist.rs).
@@ -315,6 +323,9 @@ timeout_secs = 600
 # "Talk to the planner" starts it in <session_prefix>plan-<slug> with these as its first prompt; it turns what you
 # ask for into a draft plan of tasks that waits for your approval. Unset: backend/templates/planner-agent.md.
 # planner_agent = "~/.config/map/planner-agent.md"
+# A project manager's instructions (Markdown): the always-on agent a project can have (<session_prefix>mgr-<slug>,
+# turned on in the project page's Manager panel). Unset: backend/templates/manager-agent.md.
+# manager_agent = "~/.config/map/manager-agent.md"
 
 # Projects are folders on this machine, and only sub-folders of the project folder `path` (checked on the server for
 # an existing folder, a new one and a clone target; no `..`, no symlink out of it; the folder itself is not allowed).
@@ -410,6 +421,10 @@ skip_pct = 90
 # actions = true
 # Typed as one line; or status_prompt_file = "~/prompts/groove-status.txt".
 # status_prompt = "Read .scratch/agent-status.json; finish the card if unfinished, else take the next from tasks/todo/."
+# Context used when the pane does not print `N% context used` (current Claude Code): the newest transcript in
+# <claude_dir>/projects/<path, non-alphanumerics as ->/*.jsonl, read only, over context_window tokens.
+# claude_dir = "~/.claude"
+# context_window = 200000
 # [lanes.clear_when]
 # enabled = true
 # idle_mins = 30

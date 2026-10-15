@@ -212,3 +212,69 @@ async fn notices_follow_the_lane_mute_and_task_events() {
     assert!(!report_if_due(&hub, Local::now()).await);
     assert!(hub.telegram.info().last_report_at.is_some());
 }
+
+#[tokio::test]
+async fn ask_types_into_the_idle_manager_and_sends_its_answer_back() {
+    let tg = FakeTelegram::start().await;
+    let files = tempfile::tempdir().unwrap();
+    let env = files.path().join("bot.env");
+    std::fs::write(&env, format!("MAP_TG_ASK_TOKEN={TOKEN}\n")).unwrap();
+    let extra = format!(
+        "[lane_watch]\nconfirm_secs = 0\nclear_settle_secs = 0\nkey_delay_ms = 0\n[telegram]\nenabled = true\ntoken_env = \"MAP_TG_ASK_TOKEN\"\nenv_file = \"{}\"\nchat_id = -100\nallowed_user_ids = [7]\napi_base = \"{}\"\n",
+        env.display(),
+        tg.base
+    );
+    let (hub, term, dir) = crate::plans::tests::hub(&extra).await;
+    *crate::telegram::ASK_TIMING.lock().unwrap() = AskTiming { poll_ms: 30, settle_ms: 10, type_wait_mins: 1, answer_wait_mins: 1 };
+    let slug = crate::plans::tests::project(&hub, &dir.path().join("app"), "App").await;
+    let mut p = hub.store.project(&slug).await.unwrap().unwrap();
+    p.settings.manager = crate::model::ManagerSettings { enabled: true, provider: Some("claude".into()), model: None };
+    hub.store.save_project(&p).await.unwrap();
+    crate::manager::sync_lanes(&hub).await;
+    crate::manager::start(&hub, &slug).await.unwrap();
+    let b = "─".repeat(20);
+    let idle = format!("● Hello, I manage App.\n\n{b}\n❯ \n{b}\n  ? for shortcuts\n");
+    let answered = format!("● Hello, I manage App.\n\n> how is it going?\n\n● 2 tasks running, 1 plan waiting.\n\n{b}\n❯ \n{b}\n  ? for shortcuts\n");
+    term.set_pane("map-mgr-app", &idle);
+    term.on_keys("map-mgr-app", &[&answered]);
+
+    // Someone not allowed: ignored.
+    tg.reply("getUpdates", 200, json!({ "ok": true, "result": [update(1, 8, "/ask app hi")] }));
+    poll_once(&hub, TOKEN).await.unwrap();
+    assert!(term.sent("map-mgr-app").is_empty());
+
+    tg.reply("getUpdates", 200, json!({ "ok": true, "result": [update(2, 7, "/ask app how is it going?")] }));
+    poll_once(&hub, TOKEN).await.unwrap();
+    let mut reply = None;
+    for _ in 0..100 {
+        tokio::time::sleep(Duration::from_millis(30)).await;
+        reply = tg.texts().into_iter().find(|t| t.starts_with("🤵 app · "));
+        if reply.is_some() {
+            break;
+        }
+    }
+    assert_eq!(term.sent("map-mgr-app"), ["how is it going?", "<Enter>"]);
+    let reply = reply.expect("the answer came back");
+    assert!(reply.contains("2 tasks running, 1 plan waiting."), "{reply}");
+    assert!(!reply.contains("Hello, I manage"), "only the last message: {reply}");
+    assert_eq!(manager_of_reply(&reply).as_deref(), Some("app"));
+
+    // A reply to the manager's message goes to that manager; while it is attached, it waits queued.
+    term.sessions.lock().unwrap().get_mut("map-mgr-app").unwrap().attached = 1;
+    let replying = json!({ "update_id": 3, "message": { "message_id": 6, "from": { "id": 7 }, "chat": { "id": -100 }, "text": "and the plan?",
+        "reply_to_message": { "text": reply } } });
+    tg.reply("getUpdates", 200, json!({ "ok": true, "result": [replying] }));
+    poll_once(&hub, TOKEN).await.unwrap();
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    assert_eq!(term.sent("map-mgr-app").len(), 2, "attached: not typed");
+    let tells = hub.store.lane_tells(Some("map-mgr-app"), chrono::Utc::now() - chrono::Duration::hours(1), chrono::Duration::hours(3)).await.unwrap();
+    assert_eq!(tells[0].note, "and the plan?");
+
+    // Unknown project, and /managers.
+    tg.reply("getUpdates", 200, json!({ "ok": true, "result": [update(4, 7, "/ask nope hi"), update(5, 7, "/managers")] }));
+    poll_once(&hub, TOKEN).await.unwrap();
+    let texts = tg.texts();
+    assert!(texts.iter().any(|t| t.contains("nope · no manager is on")), "{texts:?}");
+    assert!(texts.iter().any(|t| t.starts_with("🤵 managers") && t.contains("• app (App)")), "{texts:?}");
+    assert!(tg.tokens().iter().all(|t| t == TOKEN));
+}

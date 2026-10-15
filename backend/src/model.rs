@@ -69,6 +69,10 @@ pub struct Session {
     pub attached: bool,
     pub created_at: DateTime<Utc>,
     pub last_activity_at: DateTime<Utc>,
+    /// Who started it: `orchestrator` (a task's worker), `owner`, `map` (a manager MAP keeps alive), or
+    /// `manager:<slug>` (a lane a project's manager opened). Empty for sessions from before this was recorded.
+    #[serde(default)]
+    pub spawned_by: String,
 }
 
 /// `POST /api/sessions/{name}/trust`: what MAP did about the folder-trust question on the session's screen.
@@ -182,6 +186,10 @@ pub struct Task {
     pub scope: Option<TaskScope>,
     /// The intake gate's verdict, asked before any LLM runs the task; `None` until it has looked (or the gate is off).
     pub intake: Option<TaskIntake>,
+    /// Who created it: `owner`, `manager` (a project's manager, also for Telegram `/ask`), `planner` (an approved
+    /// plan).
+    #[serde(default)]
+    pub created_by: String,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -370,6 +378,9 @@ pub enum ServerMessage {
     Updates { report: UpdatesReport },
     /// A plan was submitted, edited, approved, rejected or superseded.
     Plan { plan: Box<Plan> },
+    /// A provider's availability, sign-in, API key or cooldown changed (checked every watcher tick and when a
+    /// sign-in session ends or reports success): the whole list, as `/api/providers` returns it.
+    Providers { providers: Vec<ProviderInfo> },
 }
 
 // ---- projects and decisions
@@ -1158,6 +1169,19 @@ pub struct ProjectSettings {
     pub parallel: ProjectParallel,
     /// The project's own Thai words for Reflex (Thai → English, `-` for a word to skip), over the built-in glossary.
     pub thai_glossary: BTreeMap<String, String>,
+    /// The always-on manager session the owner talks to about this project (`manager.rs`).
+    pub manager: ManagerSettings,
+}
+
+/// A project's manager: an interactive agent session (`<prefix>mgr-<slug>`) MAP keeps running while `enabled`.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
+#[serde(default)]
+#[ts(export)]
+pub struct ManagerSettings {
+    pub enabled: bool,
+    /// `None`: the project's first installed, signed-in provider (as the planner picks).
+    pub provider: Option<String>,
+    pub model: Option<String>,
 }
 
 /// A project's parallel tasks. Changes apply at the next orchestrator tick, without a restart.
@@ -1334,6 +1358,10 @@ pub struct LoginState {
     pub signed_in: Option<bool>,
     /// The newest change to a credential file.
     pub credentials_updated_at: Option<DateTime<Utc>>,
+    /// `starting`, `onboarding` (a first-run picker MAP answers), `ready`, `browser` (a URL or code to approve),
+    /// `waiting_for_code`, `success`, `console` (the CLI waits for a person in its console) or `ended`.
+    pub phase: String,
+    pub hint: Option<String>,
 }
 
 // ---- usage
@@ -2844,6 +2872,14 @@ pub struct LaneSession {
     /// A terminal is attached: MAP does not type.
     pub attached: bool,
     pub context_pct: Option<u32>,
+    /// Context tokens in use, read from the Claude transcript (`None` when the pane gave the percentage).
+    #[ts(type = "number | null")]
+    pub context_tokens: Option<u64>,
+    /// The lane's `context_window` the percentage is of (with `context_tokens`).
+    #[ts(type = "number | null")]
+    pub context_window: Option<u64>,
+    /// `pane` (the CLI printed `N% context used`) or `transcript`.
+    pub context_source: Option<String>,
     /// The CLI suggests `/clear` (`new task? … /clear`).
     pub clear_hint: bool,
     pub rate_limit_line: Option<String>,
@@ -2929,6 +2965,11 @@ pub struct LaneInfo {
     pub checked_at: Option<DateTime<Utc>>,
     /// The last tick failed for this lane (e.g. tmux not reachable).
     pub error: Option<String>,
+    /// MAP-owned lanes: the project, and `manager` or `lane`. `None`: a `[[lanes]]` block (someone else's session).
+    pub project: Option<String>,
+    pub owned: Option<String>,
+    /// A MAP-owned lane whose tmux session is gone (it is not relaunched by itself: `POST …/lanes/{name}/start`).
+    pub stopped: bool,
 }
 
 /// `GET /api/lanes/{name}/screen`: the tail of the last capture, ANSI stripped.
@@ -2955,6 +2996,79 @@ pub struct LaneImport {
     pub allowed_user_ids: Vec<i64>,
 }
 
+/// `GET /api/projects/{slug}/manager`.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct ManagerInfo {
+    pub project: String,
+    pub session_name: String,
+    pub settings: ManagerSettings,
+    /// What `provider: null` starts on now.
+    pub default_provider: Option<String>,
+    /// `off`, `starting`, `running`, `restarting`, `stopped` (gave up after repeated failures) or `failed`.
+    pub state: String,
+    /// Why it is stopped or failed.
+    pub warning: Option<String>,
+    pub session: Option<Session>,
+    /// `built-in` or `templates.manager_agent`'s path.
+    pub instructions_source: String,
+    /// The provider resumes the conversation after a restart (`resume_args`).
+    pub resumes: bool,
+}
+
+/// A persistent lane MAP opened in a project (`POST /api/projects/{slug}/lanes`), kept in the database.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct OwnedLaneRecord {
+    /// The lane's and the tmux session's name: `<prefix>lane-<slug>-<name>`.
+    pub lane: String,
+    pub project: String,
+    /// The short name given when opening it.
+    pub name: String,
+    pub provider: String,
+    pub model: Option<String>,
+    pub prompt: Option<String>,
+    pub status_prompt: String,
+    pub clear_when: Option<LaneClearWhen>,
+    /// Who opened it: `owner` or `manager`.
+    pub opened_by: String,
+    pub created_at: DateTime<Utc>,
+}
+
+/// `POST /api/projects/{slug}/lanes`.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, TS)]
+#[serde(deny_unknown_fields)]
+#[ts(export)]
+pub struct OpenLane {
+    /// 1–24 letters, digits or `-`.
+    pub name: String,
+    pub provider: Option<String>,
+    pub model: Option<String>,
+    /// The first prompt typed into the new session.
+    pub prompt: Option<String>,
+    pub clear_when: Option<LaneClearWhen>,
+    pub status_prompt: Option<String>,
+}
+
+/// `GET /api/projects/{slug}/overview`: what a project's manager (or the owner) needs to answer "how is it going".
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct ProjectOverview {
+    pub project: ProjectInfo,
+    pub orchestrator: OrchestratorStatus,
+    /// Task counts by status.
+    pub counts: BTreeMap<String, u32>,
+    /// Open tasks (not done or cancelled), newest first, at most 50.
+    pub open_tasks: Vec<Task>,
+    /// The latest 10 done tasks.
+    pub recent_done: Vec<Task>,
+    /// Draft plans waiting for approval.
+    pub draft_plans: Vec<Plan>,
+    pub sessions: Vec<Session>,
+    pub lanes: Vec<LaneInfo>,
+    pub manager: ManagerInfo,
+}
+
 /// `GET /api/telegram`. The token is never returned: only whether it is set.
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[ts(export)]
@@ -2978,4 +3092,111 @@ pub struct TelegramInfo {
     pub last_sent_at: Option<DateTime<Utc>>,
     pub last_report_at: Option<DateTime<Utc>>,
     pub report_minute: u32,
+}
+
+// ---- done tasks page
+
+/// `GET /api/tasks/page`: one page of tasks (the Done tasks screen), newest change first.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct TaskPage {
+    pub items: Vec<TaskPageItem>,
+    /// Tasks matching the filter, across all pages.
+    #[ts(type = "number")]
+    pub total: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct TaskPageItem {
+    pub task: Task,
+    /// When its first worker session started (`None`: no session was ever started for it). With the task's
+    /// `updated_at` (when it finished, for a done task) it gives the run's duration.
+    pub started_at: Option<DateTime<Utc>>,
+}
+
+// ---- activity graph (trace.rs): who made what, and what each agent used
+
+/// One thing an agent did, read from its CLI's transcript (aggregated: the same command head `×count`).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct TraceItem {
+    /// `command`, `skill`, `knowledge`, `subagent` or `tool`.
+    pub kind: String,
+    /// The command's head (`cargo test`, `git commit`), the skill's or sub-agent's name, the knowledge card's path,
+    /// the tool's name.
+    pub name: String,
+    /// The latest invocation in full, secrets masked, at most 300 characters.
+    pub detail: String,
+    pub count: u32,
+    pub first_at: Option<DateTime<Utc>>,
+    pub last_at: Option<DateTime<Utc>>,
+    /// The latest few exact invocations (masked), newest last.
+    pub samples: Vec<String>,
+}
+
+/// `GET /api/sessions/{name}/trace`.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct SessionTrace {
+    pub session: String,
+    pub provider: String,
+    /// The transcript read (`None`: none found, or the provider has no trace reader).
+    pub file: Option<String>,
+    pub items: Vec<TraceItem>,
+}
+
+/// A node of `GET /api/projects/{slug}/activity`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct ActivityNode {
+    pub id: String,
+    /// `manager`, `planner`, `owner`, `orchestrator` (a task's pick, with the gate verdicts), `task`, `agent`,
+    /// `step` (verify, audit, land, review, done, failed), `subagent`, `command`, `skill`, `knowledge`, `tool`.
+    pub kind: String,
+    pub label: String,
+    pub detail: Option<String>,
+    pub count: u32,
+    /// `running`, `ok`, `fail`, `waiting`, or the task's / session's state.
+    pub state: Option<String>,
+    pub provider: Option<String>,
+    pub model: Option<String>,
+    #[ts(type = "number | null")]
+    pub task_id: Option<i64>,
+    pub session: Option<String>,
+    /// The agent node a usage node (command, skill, knowledge, sub-agent, tool) hangs off.
+    pub parent: Option<String>,
+    /// Column, left to right (creators 0, tasks 1, then each hand-off).
+    pub layer: u32,
+    /// Row: one per task in order; shared nodes (creators, sessions without a task) use their own rows.
+    pub row: u32,
+    pub started_at: Option<DateTime<Utc>>,
+    pub last_at: Option<DateTime<Utc>>,
+    /// Exact invocations of a command node (masked).
+    pub samples: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct ActivityEdge {
+    pub from: String,
+    pub to: String,
+    /// `created`, `picked`, `assigned`, `handed`, `retry`, `unblocks`, `spawned`, `called`, `used`, `read`.
+    pub kind: String,
+    pub label: Option<String>,
+    pub count: u32,
+    pub last_at: Option<DateTime<Utc>>,
+    /// The hand-off in progress now (the task is still on it).
+    pub live: bool,
+}
+
+/// `GET /api/projects/{slug}/activity`: the project's task flow and what each agent used, ready to draw.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct ActivityGraph {
+    pub project: String,
+    pub since: Option<DateTime<Utc>>,
+    pub generated_at: DateTime<Utc>,
+    pub nodes: Vec<ActivityNode>,
+    pub edges: Vec<ActivityEdge>,
 }

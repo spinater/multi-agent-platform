@@ -15,7 +15,9 @@
 //!   `repeat_mins`, not every tick;
 //! - one prompted session per lane per tick, so two agents in one folder never grab the same card.
 //!
-//! MAP never creates, kills, renames or resizes a lane session: [`LaneTerm`] only lists, captures and types.
+//! MAP never creates, kills, renames or resizes a lane session: [`LaneTerm`] only lists, captures and types. The one
+//! exception is MAP's own lanes (a project's manager and the persistent lanes it opens, `manager.rs`): their sessions
+//! are MAP's, started and closed there through the hub like any MAP session; here they are only watched.
 
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
@@ -366,6 +368,123 @@ pub async fn git_facts(path: &Path) -> Option<LaneGit> {
     Some(LaneGit { branch, sha, subject, when, dirty, ahead, behind })
 }
 
+// ---- context used, from the Claude Code transcript
+
+/// The tail of a transcript read for its last usage line.
+const TRANSCRIPT_TAIL: u64 = 256 * 1024;
+
+/// Claude Code's folder for the transcripts of sessions started in `path`: every character that is not a letter or a
+/// digit becomes `-` (`/home/a/my.app` → `-home-a-my-app`).
+pub fn claude_project_dir(claude_dir: &Path, path: &Path) -> PathBuf {
+    let mangled: String = path.to_string_lossy().chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '-' }).collect();
+    claude_dir.join("projects").join(mangled)
+}
+
+/// The most recently written `*.jsonl` in `dir` (a `/clear` starts a new file).
+pub fn latest_transcript(dir: &Path) -> Option<(PathBuf, std::time::SystemTime)> {
+    std::fs::read_dir(dir)
+        .ok()?
+        .flatten()
+        .filter(|e| e.path().extension().is_some_and(|x| x == "jsonl"))
+        .filter_map(|e| Some((e.path(), e.metadata().ok()?.modified().ok()?)))
+        .max_by_key(|(_, m)| *m)
+}
+
+/// Context tokens of the last main-thread assistant message in the transcript's tail: `input_tokens +
+/// cache_read_input_tokens + cache_creation_input_tokens` of its `message.usage`. `None` without one.
+pub fn transcript_tokens(file: &Path) -> Option<u64> {
+    use std::io::{Read, Seek, SeekFrom};
+    let mut f = std::fs::File::open(file).ok()?;
+    let len = f.metadata().ok()?.len();
+    let start = len.saturating_sub(TRANSCRIPT_TAIL);
+    f.seek(SeekFrom::Start(start)).ok()?;
+    let mut buf = Vec::with_capacity((len - start) as usize);
+    f.read_to_end(&mut buf).ok()?;
+    let text = String::from_utf8_lossy(&buf);
+    // The first line of a cut tail is partial; it fails to parse and is skipped.
+    for line in text.lines().rev() {
+        if !line.contains("\"usage\"") {
+            continue;
+        }
+        let Ok(v) = serde_json::from_str::<Value>(line) else { continue };
+        if v.get("type").and_then(Value::as_str) != Some("assistant") || v.get("isSidechain").and_then(Value::as_bool) == Some(true) {
+            continue;
+        }
+        let Some(u) = v.pointer("/message/usage") else { continue };
+        let n = |k: &str| u.get(k).and_then(Value::as_u64).unwrap_or(0);
+        let total = n("input_tokens") + n("cache_read_input_tokens") + n("cache_creation_input_tokens");
+        if total > 0 {
+            return Some(total);
+        }
+    }
+    None
+}
+
+/// What the newest transcript of `path` says.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TranscriptUsage {
+    pub file: PathBuf,
+    /// `None`: the file has no assistant message yet (just cleared).
+    pub tokens: Option<u64>,
+}
+
+pub fn transcript_usage(claude_dir: &Path, path: &Path) -> Option<TranscriptUsage> {
+    let mut dir = claude_project_dir(claude_dir, path);
+    if !dir.is_dir()
+        && let Ok(real) = std::fs::canonicalize(path)
+    {
+        dir = claude_project_dir(claude_dir, &real);
+    }
+    let (file, _) = latest_transcript(&dir)?;
+    let tokens = transcript_tokens(&file);
+    Some(TranscriptUsage { file, tokens })
+}
+
+/// `tokens / window` as a whole percentage.
+pub fn pct_of(tokens: u64, window: u64) -> u32 {
+    if window == 0 { 0 } else { ((tokens as f64 / window as f64) * 100.0).round().min(999.0) as u32 }
+}
+
+/// The lane's transcript folder base: `claude_dir`, else `~/.claude`.
+pub fn claude_dir_of(cfg: &LaneConfig) -> PathBuf {
+    crate::config::expand_home(cfg.claude_dir.as_deref().unwrap_or(Path::new("~/.claude")))
+}
+
+/// The pane looks like Claude Code's TUI (its input box between two rules), so its folder's transcript is its own.
+fn looks_like_claude(p: &Pane) -> bool {
+    p.box_top.is_some()
+}
+
+/// Where the context figure came from.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ContextReading {
+    pub pct: Option<u32>,
+    pub tokens: Option<u64>,
+    pub source: Option<&'static str>,
+    pub transcript: Option<TranscriptUsage>,
+}
+
+/// The pane's `N% context used` first; else, for a Claude pane with a folder, the newest transcript.
+pub fn read_context(cfg: &LaneConfig, pane: &Pane) -> ContextReading {
+    if let Some(pct) = pane.context_pct {
+        return ContextReading { pct: Some(pct), tokens: None, source: Some("pane"), transcript: None };
+    }
+    let Some(path) = cfg.path.as_deref().filter(|_| looks_like_claude(pane)) else { return ContextReading::default() };
+    let Some(t) = transcript_usage(&claude_dir_of(cfg), path) else { return ContextReading::default() };
+    match t.tokens {
+        Some(tokens) => ContextReading { pct: Some(pct_of(tokens, cfg.context_window)), tokens: Some(tokens), source: Some("transcript"), transcript: Some(t) },
+        None => ContextReading { pct: None, tokens: None, source: None, transcript: Some(t) },
+    }
+}
+
+/// After `/clear`: did the transcript show it? A new file, or fewer tokens than before (or none yet).
+pub fn transcript_cleared(before: Option<&TranscriptUsage>, after: Option<&TranscriptUsage>) -> bool {
+    match (before, after) {
+        (Some(b), Some(a)) => a.file != b.file || a.tokens.unwrap_or(0) < b.tokens.unwrap_or(0),
+        _ => false,
+    }
+}
+
 // ---- the rules
 
 fn mins_since(t: Option<DateTime<Utc>>, now: DateTime<Utc>) -> f64 {
@@ -619,6 +738,8 @@ type Capture = (String, DateTime<Utc>);
 /// Lanes live in the hub: their settings, the last tick's view, the last captures.
 pub struct Lanes {
     base: Vec<LaneConfig>,
+    /// MAP-owned lanes (`manager.rs`), rebuilt from the database.
+    owned: Mutex<Vec<LaneConfig>>,
     overrides: Mutex<BTreeMap<String, LaneOverride>>,
     snapshots: Mutex<BTreeMap<String, Snapshot>>,
     screens: Mutex<HashMap<(String, String), Capture>>,
@@ -632,6 +753,7 @@ impl Lanes {
     pub fn new(config: &Config) -> Self {
         Self {
             base: config.lanes.clone(),
+            owned: Mutex::default(),
             overrides: Mutex::default(),
             snapshots: Mutex::default(),
             screens: Mutex::default(),
@@ -653,7 +775,25 @@ impl Lanes {
     }
 
     pub fn is_empty(&self) -> bool {
-        self.base.is_empty()
+        self.base.is_empty() && self.owned.lock().unwrap().is_empty()
+    }
+
+    /// The `[[lanes]]` blocks of map.toml with the dashboard's changes (no MAP-owned lane).
+    pub fn base_configs(&self) -> Vec<LaneConfig> {
+        let o = self.overrides.lock().unwrap();
+        self.base.iter().map(|b| o.get(&b.name).map_or_else(|| b.clone(), |o| o.apply(b))).collect()
+    }
+
+    /// Replaces the MAP-owned lanes (`manager::sync_lanes`).
+    pub fn set_owned(&self, lanes: Vec<LaneConfig>) {
+        let names: std::collections::HashSet<String> = lanes.iter().map(|l| l.name.clone()).collect();
+        *self.owned.lock().unwrap() = lanes;
+        // A lane that is gone leaves no stale snapshot behind.
+        self.snapshots.lock().unwrap().retain(|k, _| names.contains(k) || self.base.iter().any(|b| &b.name == k));
+    }
+
+    fn base_of(&self, name: &str) -> Option<LaneConfig> {
+        self.base.iter().find(|b| b.name == name).cloned().or_else(|| self.owned.lock().unwrap().iter().find(|b| b.name == name).cloned())
     }
 
     /// The first tick has finished.
@@ -661,10 +801,11 @@ impl Lanes {
         self.ticked.load(Ordering::Relaxed)
     }
 
-    /// Every lane with the dashboard's changes applied, in map.toml order.
+    /// Every lane with the dashboard's changes applied, in map.toml order, then MAP's own lanes.
     pub fn configs(&self) -> Vec<LaneConfig> {
+        let owned = self.owned.lock().unwrap().clone();
         let o = self.overrides.lock().unwrap();
-        self.base.iter().map(|b| o.get(&b.name).map_or_else(|| b.clone(), |o| o.apply(b))).collect()
+        self.base.iter().chain(owned.iter()).map(|b| o.get(&b.name).map_or_else(|| b.clone(), |o| o.apply(b))).collect()
     }
 
     pub fn config(&self, name: &str) -> Option<LaneConfig> {
@@ -693,7 +834,7 @@ impl Lanes {
     }
 
     async fn save_override(&self, hub: &Hub, name: &str, change: impl FnOnce(&mut LaneOverride)) -> Result<LaneConfig> {
-        let base = self.base.iter().find(|b| b.name == name).ok_or_else(|| anyhow!("no lane `{name}`"))?.clone();
+        let base = self.base_of(name).ok_or_else(|| anyhow!("no lane `{name}`"))?;
         let data = {
             let mut map = self.overrides.lock().unwrap();
             let o = map.entry(name.to_string()).or_default();
@@ -769,7 +910,11 @@ impl Lanes {
         let tells = hub.store.lane_tells(Some(&cfg.name), now - ttl, ttl).await?;
         let history = hub.store.lane_history(&cfg.name, 30).await?;
         let status_age_mins = snap.status.as_ref().and_then(status_at).map(|at| (now - at).num_minutes());
+        let stopped = cfg.owned.is_some() && !hub.term.exists(&cfg.name).await.unwrap_or(false);
         Ok(LaneInfo {
+            project: cfg.owned.as_ref().map(|o| o.project.clone()),
+            owned: cfg.owned.as_ref().map(|o| o.kind.clone()),
+            stopped,
             name: cfg.name.clone(),
             socket: cfg.socket.clone(),
             session_match: cfg.session_match.clone(),
@@ -888,12 +1033,12 @@ async fn save_memory(hub: &Hub, lane: &str, own: &LaneMem, sessions: &HashMap<St
 }
 
 pub async fn run(hub: Arc<Hub>) {
-    if hub.lanes.is_empty() {
-        return;
-    }
     let interval = StdDuration::from_secs(hub.config.lane_watch.interval_secs.max(5));
     loop {
-        tick(&hub, Utc::now()).await;
+        // MAP-owned lanes come and go, so the loop runs even with no `[[lanes]]` block.
+        if !hub.lanes.is_empty() {
+            tick(&hub, Utc::now()).await;
+        }
         tokio::time::sleep(interval).await;
     }
 }
@@ -906,6 +1051,15 @@ pub async fn tick(hub: &Arc<Hub>, now: DateTime<Utc>) {
         hub.lanes.snapshots.lock().unwrap().insert(cfg.name.clone(), snap);
     }
     hub.lanes.ticked.store(true, Ordering::Relaxed);
+}
+
+/// One lane now, out of turn (a Telegram `/ask` should not wait for the next round).
+pub async fn tick_one(hub: &Arc<Hub>, name: &str, now: DateTime<Utc>) {
+    let _one = hub.lanes.busy.lock().await;
+    if let Some(cfg) = hub.lanes.config(name) {
+        let snap = tick_lane(hub, &cfg, now).await;
+        hub.lanes.snapshots.lock().unwrap().insert(cfg.name.clone(), snap);
+    }
 }
 
 /// A tell for `session` (or for any session of the lane) with `verb`, not yet used.
@@ -940,7 +1094,8 @@ async fn tick_lane(hub: &Arc<Hub>, cfg: &LaneConfig, now: DateTime<Utc>) -> Snap
     let status = snap.status.clone();
     let no_todo = snap.tasks.as_ref().is_some_and(|t| t.todo == 0);
 
-    let term = lanes.term(&cfg.socket, lw.key_delay_ms);
+    // MAP's own lanes run on MAP's tmux server (the hub's terminal); the others on the socket their block names.
+    let term = if cfg.owned.is_some() { LaneTerm(hub.term.clone(), StdDuration::from_millis(lw.key_delay_ms)) } else { lanes.term(&cfg.socket, lw.key_delay_ms) };
     let live = match term.list().await {
         Ok(l) => l,
         Err(err) => {
@@ -979,6 +1134,9 @@ async fn tick_lane(hub: &Arc<Hub>, cfg: &LaneConfig, now: DateTime<Utc>) -> Snap
                 why: "tmux session not found".into(),
                 attached: false,
                 context_pct: None,
+                context_tokens: None,
+                context_window: None,
+                context_source: None,
                 clear_hint: false,
                 rate_limit_line: None,
                 rate_limit_resets: None,
@@ -993,6 +1151,9 @@ async fn tick_lane(hub: &Arc<Hub>, cfg: &LaneConfig, now: DateTime<Utc>) -> Snap
         };
         let (raw, why, mut pane) = classify(&first, &second, now, local);
         lanes.save_screen(lane, name, &second, now);
+        // The current CLI no longer prints `N% context used`: the transcript stands in (and feeds clear_when).
+        let ctx = read_context(cfg, &pane);
+        pane.context_pct = ctx.pct;
         let attached = ts.attached_clients > 0;
         let shown = if raw == Raw::Idle && !pane.rate_limit_line.is_empty() {
             LaneState::RateLimited
@@ -1006,8 +1167,10 @@ async fn tick_lane(hub: &Arc<Hub>, cfg: &LaneConfig, now: DateTime<Utc>) -> Snap
         };
 
         let mut head = format!("   ▸ {name} · {}", state_label(shown));
-        if let Some(pct) = pane.context_pct {
-            head.push_str(&format!(" · ctx {pct}%"));
+        match (pane.context_pct, ctx.tokens) {
+            (Some(pct), Some(tokens)) => head.push_str(&format!(" · ctx {} ({pct}%)", fmt_tokens(tokens, cfg.context_window))),
+            (Some(pct), None) => head.push_str(&format!(" · ctx {pct}%")),
+            _ => {}
         }
         out.push(head);
         if let Some(s) = &status {
@@ -1109,7 +1272,7 @@ async fn tick_lane(hub: &Arc<Hub>, cfg: &LaneConfig, now: DateTime<Utc>) -> Snap
                 _ => decide_clear(&cfg.clear_when, raw, smem, &pane, stale, status.as_ref(), now),
             };
             if !why.is_empty() {
-                match do_clear(&term, name, lw.clear_settle_secs, now, local).await {
+                match do_clear(&term, cfg, name, lw.clear_settle_secs, ctx.transcript.as_ref(), now, local).await {
                     Ok((ok, after)) => {
                         smem.last_clear = Some(now);
                         if let Some(c) = &cmd_clear {
@@ -1178,6 +1341,9 @@ async fn tick_lane(hub: &Arc<Hub>, cfg: &LaneConfig, now: DateTime<Utc>) -> Snap
             why,
             attached,
             context_pct: pane.context_pct,
+            context_tokens: if just_cleared { None } else { ctx.tokens },
+            context_window: ctx.tokens.map(|_| cfg.context_window),
+            context_source: if just_cleared { pane.context_pct.map(|_| "pane".to_string()) } else { ctx.source.map(String::from) },
             clear_hint: pane.clear_hint,
             rate_limit_line: (!pane.rate_limit_line.is_empty()).then(|| pane.rate_limit_line.clone()),
             rate_limit_resets: pane.rate_limit_resets,
@@ -1234,12 +1400,30 @@ async fn tick_lane(hub: &Arc<Hub>, cfg: &LaneConfig, now: DateTime<Utc>) -> Snap
     snap
 }
 
-/// Types `/clear`, waits, and checks it took: the CLI's hint is gone and the context meter is low again.
-async fn do_clear(term: &LaneTerm, name: &str, settle_secs: u64, now: DateTime<Utc>, local: FixedOffset) -> Result<(bool, Pane)> {
+/// `81.6k / 200k`.
+pub fn fmt_tokens(tokens: u64, window: u64) -> String {
+    let k = |n: u64| {
+        let v = n as f64 / 1000.0;
+        if v >= 100.0 || (v - v.round()).abs() < 0.05 { format!("{:.0}k", v) } else { format!("{v:.1}k") }
+    };
+    format!("{} / {}", k(tokens), k(window))
+}
+
+/// Types `/clear`, waits, and checks it took: the CLI's hint is gone, and the context is low again: the pane's
+/// meter, or (when the context came from the transcript) a new transcript file or fewer tokens in it.
+async fn do_clear(term: &LaneTerm, cfg: &LaneConfig, name: &str, settle_secs: u64, before: Option<&TranscriptUsage>, now: DateTime<Utc>, local: FixedOffset) -> Result<(bool, Pane)> {
     term.type_line(name, "/clear").await?;
     tokio::time::sleep(StdDuration::from_secs(settle_secs)).await;
     let after = parse_pane(&term.capture(name).await?, now, local);
-    let ok = !after.clear_hint && after.context_pct.is_none_or(|p| p < 50);
+    let pane_low = after.context_pct.is_none_or(|p| p < 50);
+    let ok = !after.clear_hint
+        && match (after.context_pct, before) {
+            (Some(_), _) | (None, None) => pane_low,
+            (None, Some(b)) => {
+                let now_t = cfg.path.as_deref().and_then(|p| transcript_usage(&claude_dir_of(cfg), p));
+                transcript_cleared(Some(b), now_t.as_ref())
+            }
+        };
     Ok((ok, after))
 }
 

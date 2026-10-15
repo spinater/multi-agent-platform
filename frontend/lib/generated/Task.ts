@@ -29,4 +29,9 @@ scope: TaskScope | null,
 /**
  * The intake gate's verdict, asked before any LLM runs the task; `None` until it has looked (or the gate is off).
  */
-intake: TaskIntake | null, created_at: string, updated_at: string, };
+intake: TaskIntake | null, 
+/**
+ * Who created it: `owner`, `manager` (a project's manager, also for Telegram `/ask`), `planner` (an approved
+ * plan).
+ */
+created_by: string, created_at: string, updated_at: string, };

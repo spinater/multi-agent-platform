@@ -270,6 +270,7 @@ mod tests {
             git: None,
             scope: scope.map(|(paths, independent)| TaskScope { paths: paths.iter().map(|p| p.to_string()).collect(), independent, reason: "r".into(), by: "analyst:claude".into(), at: Utc::now() }),
             intake: None,
+            created_by: String::new(),
             created_at: Utc::now(),
             updated_at: Utc::now(),
         }

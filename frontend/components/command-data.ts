@@ -48,8 +48,10 @@ export type ProjectSummary = {
   counts: Record<string, number>;
 };
 
-/** Everything the command centre shows, scoped to the current project or merged across all of them. */
-export function useCommand() {
+/** Everything the command centre shows, scoped to the current project or merged across all of them. Done tasks are
+ * left out of the live views (they are on the Done tasks page, `#command/done`), except `pinned`: a done task opened
+ * from there keeps its card. */
+export function useCommand(pinned: number | null = null) {
   const app = useApp();
   const { sessions: allSessions, tasks: allTasks, events: allEvents, providers, projects, server, scope, project, orchestrator } = app;
   const all = scope === "all";
@@ -75,7 +77,9 @@ export function useCommand() {
     const colorOfProject = (slug: string | null | undefined) => projectColor(slug ?? null, projectOrder);
 
     const sessions = all ? allSessions : allSessions.filter((s) => inProject(s.project));
-    const tasks = all ? allTasks : allTasks.filter((t) => inProject(t.project));
+    const scoped = all ? allTasks : allTasks.filter((t) => inProject(t.project));
+    const tasks = scoped.filter((t) => t.status !== "done" || t.id === pinned);
+    const doneTasks = scoped.filter((t) => t.status === "done");
     const byName = new Map(allSessions.map((s) => [s.name, s]));
     const byId = new Map(allTasks.map((t) => [t.id, t]));
     /** `undefined`: an event of the whole platform (orchestrator, a removed session). */
@@ -102,7 +106,8 @@ export function useCommand() {
       const mine = sessions.filter((s) => s.provider === p.name && s.state !== "exited");
       const signed = signedIn(p);
       if (!p.available) return { word: "missing", tone: "idle", signIn: false, signedIn: signed };
-      if (signed === false || mine.some((s) => s.state === "needs_auth")) return { word: "signed out", tone: "bad", signIn: true, signedIn: signed };
+      // A `needs_auth` session from before a sign-in does not count once the credentials say signed in.
+      if (signed === false || (signed !== true && mine.some((s) => s.state === "needs_auth"))) return { word: "signed out", tone: "bad", signIn: true, signedIn: signed };
       if (mine.some((s) => s.state === "rate_limited")) return { word: "rate limited", tone: "warn", signIn: false, signedIn: signed };
       if (p.cooldown_until && new Date(p.cooldown_until).getTime() > now) return { word: "cooldown", tone: "warn", signIn: false, signedIn: signed };
       return { word: "ready", tone: "ok", signIn: false, signedIn: signed };
@@ -115,7 +120,8 @@ export function useCommand() {
     if (all) {
       groups = projectOrder.map((slug) => ({ key: projectKey(slug), label: projectName(slug), color: colorOfProject(slug), kind: "project" as const }));
     } else {
-      groups = provs.map((p) => ({ key: p.name, label: p.name, color: providerColor(p.name), kind: "provider" as const, available: p.available }));
+      // Only providers that can take work: installed and not signed out (one with a live session stays, below).
+      groups = provs.filter((p) => p.available && signedIn(p) !== false).map((p) => ({ key: p.name, label: p.name, color: providerColor(p.name), kind: "provider" as const, available: p.available }));
       for (const s of sessions) if (!groups.some((g) => g.key === s.provider)) groups.push({ key: s.provider, label: s.provider, color: providerColor(s.provider), kind: "provider", available: false });
       groups.push({ key: QUEUE, label: "queue", color: "var(--idle)", kind: "queue" });
     }
@@ -173,8 +179,11 @@ export function useCommand() {
       eventProject,
       summary,
       active: tasks.filter((t) => LIVE_BUSY.includes(t.status)).length,
+      /** Done tasks in scope (left out of `tasks`): counts and the pipeline card's "recently done". */
+      doneTasks,
+      doneCount: doneTasks.length,
     };
-  }, [all, allSessions, allTasks, allEvents, providers, projects, server, project, orchestrator, pipeline]);
+  }, [all, allSessions, allTasks, allEvents, providers, projects, server, project, orchestrator, pipeline, pinned]);
 }
 
 export type Command = ReturnType<typeof useCommand>;

@@ -271,6 +271,8 @@ export function settingsFromForm(f: SettingsForm, defaults: ProjectDefaults | nu
     knowledge: { ...f.knowledge, index: f.knowledge.index.trim() || DEFAULT_KNOWLEDGE.index },
     parallel: f.parallel,
     thai_glossary: f.thai,
+    // Kept by the server (the Manager panel sets it through its own endpoint).
+    manager: { enabled: false, provider: null, model: null },
   };
 }
 

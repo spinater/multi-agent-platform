@@ -24,4 +24,9 @@ success: boolean, signed_in: boolean | null,
 /**
  * The newest change to a credential file.
  */
-credentials_updated_at: string | null, };
+credentials_updated_at: string | null, 
+/**
+ * `starting`, `onboarding` (a first-run picker MAP answers), `ready`, `browser` (a URL or code to approve),
+ * `waiting_for_code`, `success`, `console` (the CLI waits for a person in its console) or `ended`.
+ */
+phase: string, hint: string | null, };

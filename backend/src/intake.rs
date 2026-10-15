@@ -136,6 +136,7 @@ mod tests {
             git: None,
             scope: None,
             intake: None,
+            created_by: String::new(),
             created_at: Utc::now(),
             updated_at: Utc::now(),
         }

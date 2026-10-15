@@ -48,6 +48,10 @@ pub struct Hub {
     /// Tmux sessions someone else owns that MAP watches (`lanes.rs`).
     pub lanes: crate::lanes::Lanes,
     pub telegram: crate::telegram::Telegram,
+    /// The provider facts the dashboard last heard ([`Hub::announce_providers_if_changed`]).
+    providers_sig: Mutex<Option<String>>,
+    /// Each project's manager supervisor state (`manager.rs`).
+    pub managers: crate::manager::Managers,
 }
 
 pub struct LaunchRequest {
@@ -97,6 +101,8 @@ impl Hub {
             analyses: Default::default(),
             lanes,
             telegram,
+            providers_sig: Mutex::new(None),
+            managers: Default::default(),
         })
     }
 
@@ -278,6 +284,13 @@ impl Hub {
     /// `/api/workspace/plans` (see `api::workspace_scope`). `None` without an `api_token`.
     pub fn workspace_token(&self) -> Option<String> {
         self.derived_token(b"map-workspace:", "plans")
+    }
+
+    /// The token a project's manager gets as `$MAP_MANAGER_TOKEN`: HMAC-SHA256 of the slug under `api_token`, with
+    /// its own label, so it never equals the project token. It opens the owner-level routes of that project only
+    /// (see `api::manager_scope`). `None` without an `api_token`.
+    pub fn manager_token(&self, slug: &str) -> Option<String> {
+        self.derived_token(b"map-manager:", slug)
     }
 
     fn derived_token(&self, label: &[u8], value: &str) -> Option<String> {
@@ -509,6 +522,28 @@ impl Hub {
         }
     }
 
+    /// Broadcasts the provider list when what the dashboard shows of it changed since the last check (availability,
+    /// sign-in, API key, cooldown). The first call only records it. Returns whether it sent.
+    pub fn announce_providers_if_changed(&self) -> bool {
+        let providers = self.providers();
+        let sig: String = providers
+            .iter()
+            .map(|p| format!("{}|{}|{:?}|{:?}|{};", p.name, p.available, p.signed_in, p.cooldown_until, p.login.api_key_set))
+            .collect();
+        let mut last = self.providers_sig.lock().unwrap();
+        let first = last.is_none();
+        if last.as_deref() == Some(sig.as_str()) {
+            return false;
+        }
+        *last = Some(sig);
+        if first {
+            return false;
+        }
+        drop(last);
+        self.send(ServerMessage::Providers { providers });
+        true
+    }
+
     pub fn providers(&self) -> Vec<ProviderInfo> {
         self.config
             .providers
@@ -551,15 +586,21 @@ impl Hub {
     /// [`Hub::launch`] with `command` (a template like `interactive`) in place of the provider's interactive
     /// command, without its `extra_args` or prompt argument; used for the provider's sign-in.
     pub async fn launch_command(self: &Arc<Self>, req: LaunchRequest, command: Option<&[String]>) -> Result<Session> {
-        self.launch_with(req, command, &[]).await
+        self.launch_with(req, command, &[], &[]).await
     }
 
     /// [`Hub::launch`] with `env` exported after MAP's own variables (the planner's plans URL and token).
     pub async fn launch_env(self: &Arc<Self>, req: LaunchRequest, env: &[(String, String)]) -> Result<Session> {
-        self.launch_with(req, None, env).await
+        self.launch_with(req, None, env, &[]).await
     }
 
-    async fn launch_with(self: &Arc<Self>, req: LaunchRequest, command: Option<&[String]>, env: &[(String, String)]) -> Result<Session> {
+    /// [`Hub::launch_env`] with `args` after the provider's `extra_args` (a kept session's `--session-id` or
+    /// `--resume`, already substituted).
+    pub async fn launch_args(self: &Arc<Self>, req: LaunchRequest, env: &[(String, String)], args: &[String]) -> Result<Session> {
+        self.launch_with(req, None, env, args).await
+    }
+
+    async fn launch_with(self: &Arc<Self>, req: LaunchRequest, command: Option<&[String]>, env: &[(String, String)], args: &[String]) -> Result<Session> {
         let spec = self.spec(&req.provider)?.clone();
         let model = Self::resolve_model(&spec, req.model.as_deref())?;
         let suffix = match req.name.as_deref().map(str::trim).filter(|n| !n.is_empty()) {
@@ -587,6 +628,9 @@ impl Hub {
         let substitute = |arg: &str| arg.replace("{binary}", &spec.binary).replace("{model}", &model).replace("{session}", &name);
         let mut argv: Vec<String> = command.unwrap_or(&spec.interactive).iter().map(|a| quote(&substitute(a))).collect::<Result<_>>()?;
         for a in spec.extra_args.iter().filter(|_| command.is_none()) {
+            argv.push(quote(a)?);
+        }
+        for a in args.iter().filter(|_| command.is_none()) {
             argv.push(quote(a)?);
         }
         if req.prompt.is_some() && spec.prompt_mode == PromptMode::Arg && command.is_none() {
@@ -668,6 +712,13 @@ impl Hub {
             attached: false,
             created_at: now,
             last_activity_at: now,
+            spawned_by: if req.task_id.is_some() {
+                "orchestrator".into()
+            } else if name.starts_with(&format!("{prefix}mgr-")) {
+                "map".into()
+            } else {
+                "owner".into()
+            },
         };
         self.put_session(&session).await?;
         self.event(Level::Info, "session.started", Some(&name), req.task_id, format!("Started {} ({model})", req.provider)).await;

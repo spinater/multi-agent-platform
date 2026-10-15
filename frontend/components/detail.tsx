@@ -282,8 +282,7 @@ export function DetailCard({
       if (!g) return null;
       const act = cmd.graph.activeStages.has(id);
       const users = cmd.tasks.filter((t) => (g.phase === "verify" && t.status === "verifying") || (g.phase === "audit" && t.status === "auditing") || (g.phase === "land" && t.status === "landing"));
-      const done = cmd.tasks
-        .filter((t) => t.status === "done")
+      const done = cmd.doneTasks
         .slice(-4)
         .map((t) => ({ text: `✓ ${cmd.taskLabel(t)} ${t.title}`, tone: "ok" as const }));
       const ofPipeline = g.phase === "verify" || g.phase === "audit" || g.phase === "land" || g.phase === "post_done";

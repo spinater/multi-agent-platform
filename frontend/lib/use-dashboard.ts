@@ -32,6 +32,19 @@ export type DashboardState = {
 
 const MAX_EVENTS = 300;
 
+/** The mounted dashboard's provider setter, so a sign-in dialog can refresh the list without a reload. */
+let providersSink: ((p: ProviderInfo[]) => void) | null = null;
+
+/** Reloads `/api/providers` into the dashboard (after a sign-in finishes). */
+export async function refreshProviders(): Promise<void> {
+  try {
+    const list = await api.providers();
+    providersSink?.(list);
+  } catch {
+    // The next `providers` message or reload brings it.
+  }
+}
+
 function upsert<T>(list: T[], item: T, same: (a: T) => boolean): T[] {
   const i = list.findIndex(same);
   if (i < 0) return [item, ...list];
@@ -51,6 +64,13 @@ export function useDashboard(): DashboardState {
   const [server, setServer] = useState<ServerInfo | null>(null);
   const [connection, setConnection] = useState<Connection>("connecting");
   const retry = useRef(0);
+
+  useEffect(() => {
+    providersSink = setProviders;
+    return () => {
+      if (providersSink === setProviders) providersSink = null;
+    };
+  }, []);
 
   const reload = useCallback(async () => {
     try {
@@ -119,6 +139,9 @@ export function useDashboard(): DashboardState {
           break;
         case "plan":
           setPlan(msg.plan);
+          break;
+        case "providers":
+          setProviders(msg.providers);
           break;
         case "resync":
           void reload().catch(() => {});

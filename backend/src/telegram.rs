@@ -416,7 +416,7 @@ fn menu(hub: &Hub) -> (String, Value) {
 }
 
 /// One update: a command message or a button press. Errors are for this update only.
-pub async fn handle_update(hub: &Hub, token: &str, upd: &Value) -> Result<(), TgError> {
+pub async fn handle_update(hub: &Arc<Hub>, token: &str, upd: &Value) -> Result<(), TgError> {
     let tg = &hub.telegram;
     let msg = upd.get("message");
     let cb = upd.get("callback_query");
@@ -431,7 +431,30 @@ pub async fn handle_update(hub: &Hub, token: &str, upd: &Value) -> Result<(), Tg
         let text = m.get("text").and_then(Value::as_str).unwrap_or("").trim();
         let cmd = text.split_whitespace().next().unwrap_or("").split('@').next().unwrap_or("");
         let Some(chat) = chat else { return Ok(()) };
+        // A reply to a manager's message goes back to that manager.
+        let replied = m.pointer("/reply_to_message/text").and_then(Value::as_str).and_then(manager_of_reply);
+        if !text.starts_with('/')
+            && let Some(slug) = replied
+        {
+            ask(hub, chat, &slug, text).await;
+            return Ok(());
+        }
         match cmd {
+            "/ask" => {
+                let mut parts = text.splitn(3, char::is_whitespace).skip(1);
+                let (slug, question) = (parts.next().unwrap_or("").trim(), parts.next().unwrap_or("").trim());
+                if slug.is_empty() || question.is_empty() {
+                    let _ = tg.send_to(chat, "usage: /ask <project> <text>").await;
+                } else {
+                    ask(hub, chat, slug, question).await;
+                }
+            }
+            "/managers" => {
+                let text = managers_text(hub).await;
+                if let Err(e) = tg.send_to(chat, &text).await {
+                    return Err(TgError { code: None, message: e });
+                }
+            }
             "/watch" | "/start" | "/menu" => {
                 let (text, keyboard) = menu(hub);
                 tg.call(token, "sendMessage", &json!({ "chat_id": chat, "text": text, "reply_markup": keyboard }), short).await?;
@@ -467,9 +490,128 @@ pub async fn handle_update(hub: &Hub, token: &str, upd: &Value) -> Result<(), Tg
     Ok(())
 }
 
+/// The first line of a manager's message: `🤵 <slug> · …`.
+pub const MANAGER_MARK: &str = "🤵";
+
+/// The project a manager's message (which a person replied to) came from.
+pub fn manager_of_reply(text: &str) -> Option<String> {
+    let rest = text.strip_prefix(MANAGER_MARK)?.trim_start();
+    let slug = rest.split_once(" ·").map(|(s, _)| s)?.trim();
+    (!slug.is_empty() && !slug.contains(char::is_whitespace)).then(|| slug.to_string())
+}
+
+/// `/managers`: every project with a manager on, and its state.
+pub async fn managers_text(hub: &Hub) -> String {
+    let mut lines = vec!["🤵 managers".to_string()];
+    for p in hub.store.projects().await.unwrap_or_default().into_iter().filter(|p| p.settings.manager.enabled) {
+        let state = match crate::manager::info(hub, &p.slug).await {
+            Ok(i) => format!("{}{}", i.state, i.warning.map(|w| format!(" — {w}")).unwrap_or_default()),
+            Err(e) => format!("? ({e:#})"),
+        };
+        lines.push(format!("• {} ({}) · {state}", p.slug, p.name));
+    }
+    if lines.len() == 1 {
+        lines.push("(no project has a manager; turn one on in the project page)".into());
+    }
+    lines.push("ask one: /ask <project> <text>, or reply to its message".into());
+    lines.join("\n")
+}
+
+/// How long `/ask` waits: for the manager to be idle enough to type into, then for its answer.
+#[derive(Debug, Clone)]
+pub struct AskTiming {
+    pub poll_ms: u64,
+    pub settle_ms: u64,
+    pub type_wait_mins: i64,
+    pub answer_wait_mins: i64,
+}
+
+impl Default for AskTiming {
+    fn default() -> Self {
+        Self { poll_ms: 5000, settle_ms: 2500, type_wait_mins: crate::lanes::TELL_TTL_MINS, answer_wait_mins: 30 }
+    }
+}
+
+pub static ASK_TIMING: LazyLock<Mutex<AskTiming>> = LazyLock::new(Default::default);
+
+/// `/ask <slug> <text>`: queued as a tell for the project's manager (typed only when it is idle, nobody is attached
+/// and nothing is typed), then its next answer is sent back to `chat`.
+pub async fn ask(hub: &Arc<Hub>, chat: i64, slug: &str, text: &str) {
+    let tg = &hub.telegram;
+    let enabled = hub.store.project(slug).await.ok().flatten().is_some_and(|p| p.settings.manager.enabled);
+    let lane = crate::manager::session_name(hub, slug);
+    if !enabled || hub.lanes.config(&lane).is_none() {
+        let _ = tg.send_to(chat, &format!("{MANAGER_MARK} {slug} · no manager is on for this project (see /managers)")).await;
+        return;
+    }
+    // What it last said before this question: its answer is a different last message.
+    let before = crate::lanes::strip(&hub.term.capture(&lane, 200, false).await.unwrap_or_default());
+    if let Err(err) = crate::lanes::tell(hub, &lane, crate::model::TellVerb::Ask, Some(text), None, Some(&lane), Utc::now()).await {
+        let _ = tg.send_to(chat, &format!("{MANAGER_MARK} {slug} · could not queue it: {err:#}")).await;
+        return;
+    }
+    let hub = Arc::clone(hub);
+    let slug = slug.to_string();
+    tokio::spawn(async move {
+        let reply = follow(&hub, &lane, &before).await;
+        let body = match reply {
+            Ok(text) => text,
+            Err(why) => why,
+        };
+        let msg = format!("{MANAGER_MARK} {slug} · {}", trim_reply(&body, 3500));
+        if let Err(e) = hub.telegram.send_to(chat, &msg).await {
+            tracing::warn!("telegram /ask reply not sent: {e}");
+        }
+    });
+}
+
+fn trim_reply(text: &str, max: usize) -> String {
+    let t = text.trim();
+    if t.chars().count() <= max { t.to_string() } else { format!("{}…", t.chars().take(max).collect::<String>()) }
+}
+
+/// Waits until the queued tell was typed (ticking the lane out of turn), then until the pane is idle again, and
+/// returns the manager's last message.
+async fn follow(hub: &Arc<Hub>, lane: &str, before: &str) -> Result<String, String> {
+    let t = ASK_TIMING.lock().unwrap().clone();
+    let poll = Duration::from_millis(t.poll_ms);
+    let deadline = Utc::now() + chrono::Duration::minutes(t.type_wait_mins);
+    let ttl = chrono::Duration::minutes(crate::lanes::TELL_TTL_MINS);
+    loop {
+        crate::lanes::tick_one(hub, lane, Utc::now()).await;
+        let pending = hub.store.lane_tells(Some(lane), Utc::now() - ttl, ttl).await.unwrap_or_default().iter().any(|t| t.verb == crate::model::TellVerb::Ask);
+        if !pending {
+            break;
+        }
+        if Utc::now() > deadline {
+            return Err("the manager stayed busy; your message expired unsent".into());
+        }
+        tokio::time::sleep(poll).await;
+    }
+    let old = crate::detect::last_assistant_message(before);
+    let deadline = Utc::now() + chrono::Duration::minutes(t.answer_wait_mins);
+    loop {
+        tokio::time::sleep(poll).await;
+        let first = hub.term.capture(lane, 200, true).await.unwrap_or_default();
+        tokio::time::sleep(Duration::from_millis(t.settle_ms)).await;
+        let second = hub.term.capture(lane, 200, true).await.unwrap_or_default();
+        let (raw, _, _) = crate::lanes::classify(&first, &second, Utc::now(), crate::lanes::local_offset());
+        let plain = crate::lanes::strip(&second);
+        if raw == crate::lanes::Raw::Idle {
+            let answer = crate::detect::last_assistant_message(&plain);
+            if !answer.trim().is_empty() && answer != old {
+                return Ok(answer);
+            }
+        }
+        if Utc::now() > deadline {
+            return Err(format!("no answer within {} min; it may still be working (see the dashboard)", t.answer_wait_mins));
+        }
+    }
+}
+
 /// One getUpdates round from the persisted offset; each update moves the offset on before it is handled, so a
 /// failing update is never handled twice.
-pub async fn poll_once(hub: &Hub, token: &str) -> Result<usize, TgError> {
+pub async fn poll_once(hub: &Arc<Hub>, token: &str) -> Result<usize, TgError> {
     let tg = &hub.telegram;
     let offset: i64 = hub.store.runtime_setting(OFFSET_KEY).await.ok().flatten().and_then(|v| v.parse().ok()).unwrap_or(0);
     let poll = tg.timing.lock().unwrap().poll_secs;
@@ -505,6 +647,8 @@ pub async fn listen(hub: Arc<Hub>) {
             let commands = json!({ "commands": [
                 { "command": "watch", "description": "toggle watching per lane" },
                 { "command": "status", "description": "full lane report now" },
+                { "command": "ask", "description": "/ask <project> <text>: talk to a project's manager" },
+                { "command": "managers", "description": "projects with a manager, and their state" },
             ]});
             let set = tg.call(&token, "setMyCommands", &commands, Duration::from_secs(20)).await;
             let reset = json!({

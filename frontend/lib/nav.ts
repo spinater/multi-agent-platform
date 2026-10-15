@@ -1,5 +1,5 @@
 /** Screens of the dashboard and their hash routes: `#<screen>` or `#<screen>/<arg>`, e.g. `#reflex`,
- * `#command/sessions/map-task-4-1`, `#projects/new`,
+ * `#command/sessions/map-task-4-1`, `#command/done` (the Done tasks page), `#projects/new`,
  * `#projects/init/<slug>`, `#knowledge/<slug>/doc/<path>`, `#lanes/<name>`, `#settings/git` (or `agents`, `gates`, `server`, `telegram`). The static export is one page, so routing lives
  * in the hash. */
 export const SCREENS = ["projects", "command", "lanes", "skills", "agents", "knowledge", "decisions", "reflex", "usage", "settings"] as const;

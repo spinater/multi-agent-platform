@@ -14,4 +14,9 @@ project: string | null, state: SessionState,
 /**
  * Human-readable reason for the state (error line, rate-limit text, stall duration).
  */
-detail: string | null, rate_limit_reset_at: string | null, wakeups: number, last_line: string | null, attached: boolean, created_at: string, last_activity_at: string, };
+detail: string | null, rate_limit_reset_at: string | null, wakeups: number, last_line: string | null, attached: boolean, created_at: string, last_activity_at: string, 
+/**
+ * Who started it: `orchestrator` (a task's worker), `owner`, `map` (a manager MAP keeps alive), or
+ * `manager:<slug>` (a lane a project's manager opened). Empty for sessions from before this was recorded.
+ */
+spawned_by: string, };

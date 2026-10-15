@@ -65,6 +65,8 @@ impl Watcher {
             }
         }
         self.memory.retain(|name, _| live.contains_key(name));
+        // Sign-ins finished in a terminal, a key set, a cooldown over: the dashboard hears it without a reload.
+        self.hub.announce_providers_if_changed();
         Ok(())
     }
 
@@ -223,6 +225,39 @@ mod tests {
     async fn launch(hub: &Arc<Hub>) -> String {
         let req = LaunchRequest { name: Some("a".into()), provider: "claude".into(), model: None, role: Role::Manual, task_id: None, project: None, prompt: None };
         hub.launch(req).await.unwrap().name
+    }
+
+    #[tokio::test]
+    async fn provider_sign_in_is_broadcast_once_when_it_changes() {
+        let dir = tempfile::tempdir().unwrap();
+        let cred = dir.path().join("cred.json");
+        let text = format!(
+            "[workspace]\ndir = \"{0}\"\n[server]\ndata_dir = \"{0}/data\"\n[providers.claude]\nbinary = \"/bin/sh\"\ncredentials = [\"{1}\"]\n",
+            dir.path().display(),
+            cred.display()
+        );
+        let hub = Hub::new(Config::parse(&text, Path::new("/")).unwrap(), Store::memory().await.unwrap(), Arc::new(FakeTerminal::default()));
+        let mut rx = hub.subscribe();
+        let mut w = Watcher::new(hub.clone());
+        let count = |rx: &mut tokio::sync::broadcast::Receiver<crate::model::ServerMessage>| {
+            let mut found = vec![];
+            while let Ok(m) = rx.try_recv() {
+                if let crate::model::ServerMessage::Providers { providers } = m {
+                    found.push(providers);
+                }
+            }
+            found
+        };
+        w.tick(Utc::now()).await.unwrap();
+        w.tick(Utc::now()).await.unwrap();
+        assert!(count(&mut rx).is_empty(), "nothing changed");
+        std::fs::write(&cred, "{\"token\": \"x\"}").unwrap();
+        w.tick(Utc::now()).await.unwrap();
+        let sent = count(&mut rx);
+        assert_eq!(sent.len(), 1, "one message when the credential file appears");
+        assert_eq!(sent[0].iter().find(|p| p.name == "claude").unwrap().signed_in, Some(true));
+        w.tick(Utc::now()).await.unwrap();
+        assert!(count(&mut rx).is_empty(), "unchanged: none");
     }
 
     #[tokio::test]

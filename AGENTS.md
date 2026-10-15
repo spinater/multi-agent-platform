@@ -14,7 +14,7 @@ Read `README.md` for the architecture.
 - `backend/src/model.rs` is the API contract. Change it there, run `cargo test`, then use the regenerated types in the frontend; never hand-edit `lib/generated`.
 - All state changes go through `Hub` (`put_session`, `put_task`, `event`) so the database and the WebSocket stay in sync.
 - Never act on tmux sessions outside `workspace.session_prefix`, and never end a session someone is attached to or typing in (`detect::end_decision`), unless the user forces it.
-- Lanes (`lanes.rs`) are the one exception: sessions declared in `[[lanes]]` are read, and typed into only through `LaneTerm` (list, capture, type a line) when idle with nobody attached; never create, kill, rename or resize one.
+- Lanes (`lanes.rs`) are the one exception: sessions declared in `[[lanes]]` are read, and typed into only through `LaneTerm` (list, capture, type a line) when idle with nobody attached; never create, kill, rename or resize one. MAP's own lanes (a project's manager, persistent lanes; `manager.rs`) are MAP sessions on its socket, started and closed through `Hub` like any other.
 - Never log or return the Telegram token; pass Bot API errors through `telegram::redact`.
 - Paths, commands, session names and providers come from `map.toml`, not code.
 - The frontend's Next.js is newer than most training data: read `frontend/node_modules/next/dist/docs/` before using an unfamiliar API.

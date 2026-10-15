@@ -58,7 +58,7 @@ export function LeftColumn({
   const running = !!orchestrator?.running;
   const counts: Record<string, number> = {};
   for (const t of cmd.tasks) counts[t.status] = (counts[t.status] ?? 0) + 1;
-  const taskSummary = ["running", "verifying", "auditing", "landing", "review", "pending", "done", "failed"]
+  const taskSummary = ["running", "verifying", "auditing", "landing", "review", "pending", "failed"]
     .filter((s) => counts[s])
     .map((s) => `${counts[s]} ${s}`)
     .join(" · ");
@@ -184,7 +184,19 @@ export function LeftColumn({
         >
           {cmd.all ? "All tasks" : "Task queue"}
         </SideTitle>
-        {taskSummary && <span className="font-mono text-[10.5px] leading-none text-muted">{taskSummary}</span>}
+        {(taskSummary || cmd.doneCount > 0) && (
+          <span className="font-mono text-[10.5px] leading-none text-muted">
+            {taskSummary}
+            {cmd.doneCount > 0 && (
+              <>
+                {taskSummary && " · "}
+                <a href="#command/done" className="text-accent-soft hover:underline" title="Finished tasks are on the Done tasks page">
+                  {cmd.doneCount} done →
+                </a>
+              </>
+            )}
+          </span>
+        )}
         <TaskRows tasks={cmd.tasks} label={(t) => `#${t.id}`} selected={selected} onSelect={select} projectOf={cmd.all ? (t) => cmd.projectName(t.project) : undefined} />
       </section>
     </Column>
