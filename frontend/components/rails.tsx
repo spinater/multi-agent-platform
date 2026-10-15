@@ -12,6 +12,7 @@ import { ActivityFeed } from "./activity";
 import type { Command } from "./command-data";
 import { Btn, Pill, SideTitle, TONE_TEXT } from "./command-ui";
 import { EventLog } from "./events";
+import { LanesCard } from "./lanes/lanes-card";
 import { ParallelStepper } from "./parallel";
 import { SessionRows } from "./sessions";
 import { TaskRows } from "./tasks";
@@ -170,6 +171,8 @@ export function LeftColumn({
           </div>
         </section>
       )}
+
+      <LanesCard />
 
       <section id="cc-tasks" className="flex flex-col gap-3">
         <SideTitle

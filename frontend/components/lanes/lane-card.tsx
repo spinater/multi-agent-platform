@@ -331,6 +331,75 @@ function Thresholds({ lane }: { lane: LaneInfo }) {
   );
 }
 
+/** A lane added on the dashboard: rename it (its history and settings move along) or remove it. Neither touches the
+ * tmux session. */
+function AddedActions({ lane, project, onReload }: { lane: LaneInfo; project: string; onReload: () => void }) {
+  const { toast, go } = useApp();
+  const [renaming, setRenaming] = useState(false);
+  const [name, setName] = useState(lane.name);
+  const [confirm, setConfirm] = useState(false);
+  const [busy, setBusy] = useState(false);
+
+  const run = async (what: () => Promise<unknown>, ok: string, after?: () => void) => {
+    setBusy(true);
+    try {
+      await what();
+      toast(ok);
+      after?.();
+      onReload();
+    } catch (e) {
+      toast(errText(e), "bad");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const valid = /^[a-z0-9._-]{1,48}$/.test(name.trim()) && name.trim() !== lane.name;
+  return (
+    <div className="flex min-w-0 flex-col gap-2">
+      <div className="flex flex-wrap items-center gap-2">
+        <Btn size="sm" disabled={busy} onClick={() => setRenaming(!renaming)} aria-expanded={renaming}>
+          Rename
+        </Btn>
+        {confirm ? (
+          <>
+            <span className="font-mono text-[11.5px] text-text-2">Stop watching? The tmux session itself is left untouched.</span>
+            <Btn size="sm" tone="danger" disabled={busy} onClick={() => void run(() => lanesApi.unwatch(project, lane.name), `${lane.name} removed · its tmux session is untouched`)}>
+              Remove
+            </Btn>
+            <Btn size="sm" tone="quiet" disabled={busy} onClick={() => setConfirm(false)}>
+              Keep
+            </Btn>
+          </>
+        ) : (
+          <Btn size="sm" tone="danger" disabled={busy} onClick={() => setConfirm(true)}>
+            Remove
+          </Btn>
+        )}
+      </div>
+      {renaming && (
+        <form
+          className="flex flex-wrap items-center gap-2"
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (!valid) return;
+            const next = name.trim();
+            void run(() => lanesApi.update(lane.name, { name: next }), `${lane.name} renamed to ${next}`, () => {
+              setRenaming(false);
+              go("lanes", next);
+            });
+          }}
+        >
+          <TextInput value={name} onChange={(e) => setName(e.target.value)} aria-label={`New name for ${lane.name}`} className={clsx("h-8 max-w-[260px]", name && !valid && name.trim() !== lane.name && "border-bad")} />
+          <Btn size="sm" tone="primary" type="submit" disabled={busy || !valid}>
+            Save name
+          </Btn>
+        </form>
+      )}
+    </div>
+  );
+}
+
 export function LaneCard({ lane, onChange, onReload, focused }: { lane: LaneInfo; onChange: (l: LaneInfo) => void; onReload: () => void; focused: boolean }) {
   const { now, toast } = useApp();
   const [busy, setBusy] = useState("");
@@ -402,11 +471,14 @@ export function LaneCard({ lane, onChange, onReload, focused }: { lane: LaneInfo
       <div id={`lane-${lane.name}`} className="flex min-w-0 scroll-mt-20 flex-wrap items-start justify-between gap-2">
         <div className="flex min-w-0 flex-col gap-0.5">
           <h2 className="flex flex-wrap items-center gap-2 font-mono text-[15px] font-semibold text-text">
-            {lane.name}
-            {owned && <Badge tone="accent">{lane.owned === "manager" ? "manager" : "MAP lane"}</Badge>}
+            {lane.role && <span className="font-mono text-[10px] font-medium tracking-[0.12em] text-accent-soft uppercase">{lane.role}</span>}
+            <span title={lane.label !== lane.name ? lane.name : undefined}>{lane.label}</span>
+            {owned && <Badge tone="accent">{lane.owned === "manager" ? "MAP manager" : "MAP lane"}</Badge>}
+            {lane.added && <Badge tone="info">watched</Badge>}
             {lane.stopped && <Badge tone="bad">stopped</Badge>}
           </h2>
           <span className="font-mono text-[11px] break-all text-muted">
+            {lane.label !== lane.name && `${lane.name} · `}
             {owned ? "MAP's tmux server" : lane.socket ? `tmux -L ${lane.socket}` : "default server"}
             {lane.path && ` · ${lane.path}`}
             {lane.session_match.length > 0 && ` · sessions ${lane.session_match.join(", ")}`}
@@ -436,6 +508,8 @@ export function LaneCard({ lane, onChange, onReload, focused }: { lane: LaneInfo
           )}
         </div>
       )}
+
+      {lane.added && lane.project && <AddedActions lane={lane} project={lane.project} onReload={onReload} />}
 
       {lane.error && <p className="rounded-lg border border-bad/40 bg-bad/[.07] px-3 py-2 font-mono text-[11.5px] break-words text-bad">{lane.error}</p>}
 
