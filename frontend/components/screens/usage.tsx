@@ -145,7 +145,7 @@ function ProviderCard({ p, skip, now, order }: { p: ProviderUsage; skip: number;
 
       {p.status === "no_reader" && (
         <p className="text-[12.5px] leading-[1.5] text-text-2">
-          MAP has no local source for this CLI&apos;s plan limits yet, so it shows none rather than a guess. Its tasks are only paused by rate-limit messages
+          MAP has no local source for this CLI&apos;s plan limits (agy, Cursor, Copilot and custom CLIs), so it shows none rather than a guess. Its tasks are only paused by rate-limit messages
           the watcher sees in its pane.
         </p>
       )}
