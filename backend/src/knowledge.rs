@@ -557,6 +557,7 @@ pub async fn accept(hub: &Hub, project: &Project) -> Result<crate::model::Task> 
             provider: None,
             model: None,
             project: Some(project.slug.clone()),
+            workflow: None,
         })
         .await?;
     hub.store.set_runtime_setting(&key, Some(&task.id.to_string())).await?;
@@ -993,7 +994,7 @@ mod tests {
         assert_eq!((q.len(), q.last().unwrap().by.as_str()), (3, "agent"));
 
         // MAP remembers finished tasks.
-        let mut t = hub.store.create_task(crate::store::NewTask { title: "Add slots".into(), prompt: "add appointment slots".into(), depends_on: vec![], provider: None, model: None, project: Some(project.slug.clone()) }).await.unwrap();
+        let mut t = hub.store.create_task(crate::store::NewTask { title: "Add slots".into(), prompt: "add appointment slots".into(), depends_on: vec![], provider: None, model: None, project: Some(project.slug.clone()), workflow: None }).await.unwrap();
         t.status = TaskStatus::Done;
         t.result = Some("slots added with a uniqueness check".into());
         hub.store.save_task(&t).await.unwrap();

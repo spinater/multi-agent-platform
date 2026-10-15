@@ -110,6 +110,31 @@ impl Kind {
     pub const RETRY_AGAIN: Kind = k("decision.retry.again", N::Retry, N::Ready, W, "attempt left → back to ready, failure added to the prompt");
     pub const RETRY_FAILED: Kind = k("decision.retry.failed", N::Retry, N::Failed, E, "no attempts left → failed");
     pub const RETRY_KEPT: Kind = k("decision.retry.kept", N::Retry, N::Watch, W, "person attached or typing → keep watching");
+
+    // orchestrator/workflow.rs: a task that runs a workflow (Configure › Workflows) instead of the fixed pipeline. The
+    // message starts with the node id (`ver · …`); all are progress kinds of the node nearest in the fixed graph.
+    pub const WF_CHOSEN: Kind = k("decision.workflow.chosen", N::Ready, N::Ready, I, "runs a workflow instead of the fixed pipeline");
+    pub const WF_ERROR: Kind = k("decision.workflow.error", N::Failed, N::Failed, E, "the workflow is gone or broken → failed");
+    pub const WF_TRIGGER_NEXT: Kind = k("decision.workflow.trigger.next", N::Ready, N::Ready, I, "trigger → first step");
+    pub const WF_AGENT_START: Kind = k("decision.workflow.agent.start", N::Watch, N::Watch, I, "agent step launched");
+    pub const WF_AGENT_DONE: Kind = k("decision.workflow.agent.done", N::Watch, N::Watch, S, "agent reported done → next");
+    pub const WF_AGENT_FAIL: Kind = k("decision.workflow.agent.fail", N::Watch, N::Watch, W, "agent failed → its fail edge");
+    pub const WF_AGENT_RETRY: Kind = k("decision.workflow.agent.retry", N::Watch, N::Watch, W, "agent failed → launched again with the failure");
+    pub const WF_VERIFY_START: Kind = k("decision.workflow.verify.start", N::Verify, N::Verify, I, "verify step running");
+    pub const WF_VERIFY_PASS: Kind = k("decision.workflow.verify.pass", N::Verify, N::Verify, S, "exit 0 → pass");
+    pub const WF_VERIFY_FAIL: Kind = k("decision.workflow.verify.fail", N::Verify, N::Verify, W, "failed → fail edge, attempts left");
+    pub const WF_VERIFY_EXHAUSTED: Kind = k("decision.workflow.verify.exhausted", N::Verify, N::Verify, E, "failed, no attempts left → failed end");
+    pub const WF_AUDIT_START: Kind = k("decision.workflow.audit.start", N::Audit, N::Audit, I, "audit step asking its auditor");
+    pub const WF_AUDIT_PASS: Kind = k("decision.workflow.audit.pass", N::Audit, N::Audit, S, "verdict text found → pass");
+    pub const WF_AUDIT_FAIL: Kind = k("decision.workflow.audit.fail", N::Audit, N::Audit, W, "VERDICT: FAIL → fail edge, attempts left");
+    pub const WF_AUDIT_EXHAUSTED: Kind = k("decision.workflow.audit.exhausted", N::Audit, N::Audit, E, "failed, no attempts left → failed end");
+    pub const WF_AUDIT_SKIPPED: Kind = k("decision.workflow.audit.skipped", N::Audit, N::Audit, W, "no auditor answered, audit not required → pass");
+    pub const WF_HOOK_START: Kind = k("decision.workflow.hook.start", N::Post, N::Post, I, "hook step running");
+    pub const WF_HOOK_PASS: Kind = k("decision.workflow.hook.pass", N::Post, N::Post, S, "exit 0 → next");
+    pub const WF_HOOK_FAIL: Kind = k("decision.workflow.hook.fail", N::Post, N::Post, W, "blocking hook failed → fail edge or failed");
+    pub const WF_HOOK_IGNORED: Kind = k("decision.workflow.hook.ignored", N::Post, N::Post, W, "non-blocking hook failed · logged → next");
+    pub const WF_END_DONE: Kind = k("decision.workflow.end.done", N::End, N::End, S, "done end → land, post_done");
+    pub const WF_END_FAILED: Kind = k("decision.workflow.end.failed", N::End, N::End, E, "failed end → failed (a person decides)");
 }
 
 impl Kind {
@@ -190,6 +215,28 @@ pub const ALL: &[Kind] = &[
     Kind::RETRY_AGAIN,
     Kind::RETRY_FAILED,
     Kind::RETRY_KEPT,
+    Kind::WF_CHOSEN,
+    Kind::WF_ERROR,
+    Kind::WF_TRIGGER_NEXT,
+    Kind::WF_AGENT_START,
+    Kind::WF_AGENT_DONE,
+    Kind::WF_AGENT_FAIL,
+    Kind::WF_AGENT_RETRY,
+    Kind::WF_VERIFY_START,
+    Kind::WF_VERIFY_PASS,
+    Kind::WF_VERIFY_FAIL,
+    Kind::WF_VERIFY_EXHAUSTED,
+    Kind::WF_AUDIT_START,
+    Kind::WF_AUDIT_PASS,
+    Kind::WF_AUDIT_FAIL,
+    Kind::WF_AUDIT_EXHAUSTED,
+    Kind::WF_AUDIT_SKIPPED,
+    Kind::WF_HOOK_START,
+    Kind::WF_HOOK_PASS,
+    Kind::WF_HOOK_FAIL,
+    Kind::WF_HOOK_IGNORED,
+    Kind::WF_END_DONE,
+    Kind::WF_END_FAILED,
 ];
 
 /// Records a decision for `task` through `hub.event`. A decision identical (kind and message) to one of the task's

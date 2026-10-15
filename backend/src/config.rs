@@ -898,6 +898,10 @@ pub struct ProviderSpec {
     pub interactive: Vec<String>,
     pub headless: Vec<String>,
     pub extra_args: Vec<String>,
+    /// Arguments that set the reasoning effort of a headless run, put before the `{prompt}` argument with `{effort}`
+    /// substituted (`low`, `medium`, `high`, `xhigh`; `max` is sent as `xhigh`). Used by Configure's "Ask an agent";
+    /// empty: the effort is only asked for in the prompt. Codex: `-c model_reasoning_effort={effort}`.
+    pub effort_args: Vec<String>,
     /// Arguments that name a new conversation `{session_id}` (a UUID MAP picks) on a session MAP keeps alive (a
     /// project's manager, a persistent lane); empty: the CLI cannot be told.
     pub session_id_args: Vec<String>,
@@ -1066,6 +1070,7 @@ struct ProviderOverride {
     interactive: Option<Vec<String>>,
     headless: Option<Vec<String>>,
     extra_args: Option<Vec<String>>,
+    effort_args: Option<Vec<String>>,
     session_id_args: Option<Vec<String>>,
     resume_args: Option<Vec<String>>,
     prompt_mode: Option<PromptMode>,
@@ -1119,6 +1124,7 @@ pub fn builtin_providers() -> BTreeMap<String, ProviderSpec> {
             interactive: strings(&["{binary}", "--name", "{session}", "--model", "{model}"]),
             headless: strings(&["{binary}", "-p", "{prompt}", "--model", "{model}"]),
             extra_args: vec![],
+            effort_args: vec![],
             session_id_args: strings(&["--session-id", "{session_id}"]),
             resume_args: strings(&["--resume", "{session_id}"]),
             prompt_mode: PromptMode::Arg,
@@ -1169,6 +1175,7 @@ pub fn builtin_providers() -> BTreeMap<String, ProviderSpec> {
             interactive: strings(&["{binary}", "-m", "{model}"]),
             headless: strings(&["{binary}", "exec", "-m", "{model}", "{prompt}"]),
             extra_args: vec![],
+            effort_args: strings(&["-c", "model_reasoning_effort={effort}"]),
             session_id_args: vec![],
             resume_args: vec![],
             prompt_mode: PromptMode::Arg,
@@ -1215,6 +1222,7 @@ pub fn builtin_providers() -> BTreeMap<String, ProviderSpec> {
             interactive: strings(&["{binary}", "--model", "{model}"]),
             headless: strings(&["{binary}", "-p", "{prompt}", "--model", "{model}"]),
             extra_args: vec![],
+            effort_args: vec![],
             session_id_args: vec![],
             resume_args: vec![],
             prompt_mode: PromptMode::Send,
@@ -1271,6 +1279,7 @@ pub fn builtin_providers() -> BTreeMap<String, ProviderSpec> {
             // Print mode proposes edits only (no --force); --trust: print mode never asks about the folder.
             headless: strings(&["{binary}", "-p", "--output-format", "text", "--trust", "--model", "{model}", "{prompt}"]),
             extra_args: vec![],
+            effort_args: vec![],
             session_id_args: vec![],
             resume_args: vec![],
             prompt_mode: PromptMode::Arg,
@@ -1318,6 +1327,7 @@ pub fn builtin_providers() -> BTreeMap<String, ProviderSpec> {
             // -s: the answer only. Without --allow-all-tools a headless run uses no tool that needs approval.
             headless: strings(&["{binary}", "-p", "{prompt}", "--model", "{model}", "-s", "--no-ask-user"]),
             extra_args: vec![],
+            effort_args: vec![],
             session_id_args: vec![],
             resume_args: vec![],
             // The first prompt is `-i <prompt>`, which a session without one cannot leave dangling: typed in instead.
@@ -1432,6 +1442,7 @@ impl ProviderOverride {
             interactive: self.interactive.unwrap_or(base.interactive),
             headless: self.headless.unwrap_or(base.headless),
             extra_args: self.extra_args.unwrap_or(base.extra_args),
+            effort_args: self.effort_args.unwrap_or(base.effort_args),
             session_id_args: self.session_id_args.unwrap_or(base.session_id_args),
             resume_args: self.resume_args.unwrap_or(base.resume_args),
             prompt_mode: self.prompt_mode.unwrap_or(base.prompt_mode),

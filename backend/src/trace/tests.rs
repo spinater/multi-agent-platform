@@ -196,7 +196,7 @@ async fn full_chain_from_the_manager_to_a_dependent_codex_agent() {
     p.settings.manager = ManagerSettings { enabled: true, provider: Some("claude".into()), model: None };
     hub.store.save_project(&p).await.unwrap();
 
-    let new = |title: &str, deps: Vec<i64>| NewTask { title: title.into(), prompt: "Goal".into(), depends_on: deps, provider: None, model: None, project: Some(slug.clone()) };
+    let new = |title: &str, deps: Vec<i64>| NewTask { title: title.into(), prompt: "Goal".into(), depends_on: deps, provider: None, model: None, project: Some(slug.clone()), workflow: None };
     let mut a = hub.store.create_task(new("Add the endpoint", vec![])).await.unwrap();
     hub.store.set_task_created_by(a.id, "manager").await.unwrap();
     let mut b = hub.store.create_task(new("Add the screen", vec![a.id])).await.unwrap();
@@ -328,6 +328,8 @@ fn a_retry_goes_round_again() {
         git: None,
         scope: None,
         intake: None,
+        workflow: None,
+        workflow_state: None,
         created_by: "owner".into(),
         created_at: now,
         updated_at: now,
@@ -358,7 +360,7 @@ async fn api_shape_and_manager_token() {
     // Isolated: a trace lookup never reads the real home's transcripts.
     let (hub, _term, dir) = hub("[agents_home]\nmode = \"isolated\"").await;
     let slug = project(&hub, &dir.path().join("app"), "App").await;
-    let t = hub.store.create_task(NewTask { title: "T".into(), prompt: "p".into(), depends_on: vec![], provider: None, model: None, project: Some(slug.clone()) }).await.unwrap();
+    let t = hub.store.create_task(NewTask { title: "T".into(), prompt: "p".into(), depends_on: vec![], provider: None, model: None, project: Some(slug.clone()), workflow: None }).await.unwrap();
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let base = format!("http://{}/api", listener.local_addr().unwrap());
     let app = crate::api::router(hub.clone());

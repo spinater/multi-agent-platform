@@ -49,7 +49,7 @@ pub struct TaskQuery {
     pub offset: i64,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct NewTask {
     pub title: String,
     pub prompt: String,
@@ -57,6 +57,8 @@ pub struct NewTask {
     pub provider: Option<String>,
     pub model: Option<String>,
     pub project: Option<String>,
+    /// The workflow it runs; `None`: a workflow's trigger may choose one when it becomes ready.
+    pub workflow: Option<String>,
 }
 
 /// A validated draft plan (plans.rs).
@@ -178,7 +180,7 @@ impl Store {
     pub async fn create_task(&self, t: NewTask) -> Result<Task> {
         let now = Utc::now();
         let id: i64 = sqlx::query(
-            "INSERT INTO tasks (title, prompt, depends_on, provider, model, project, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id",
+            "INSERT INTO tasks (title, prompt, depends_on, provider, model, project, workflow, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id",
         )
         .bind(&t.title)
         .bind(&t.prompt)
@@ -186,6 +188,7 @@ impl Store {
         .bind(&t.provider)
         .bind(&t.model)
         .bind(&t.project)
+        .bind(&t.workflow)
         .bind(TaskStatus::Pending.as_str())
         .bind(now)
         .bind(now)
@@ -197,7 +200,7 @@ impl Store {
 
     pub async fn save_task(&self, t: &Task) -> Result<()> {
         sqlx::query(
-            "UPDATE tasks SET title = ?, prompt = ?, depends_on = ?, provider = ?, model = ?, status = ?, session = ?, attempts = ?, result = ?, git = ?, scope = ?, intake = ?, updated_at = ? WHERE id = ?",
+            "UPDATE tasks SET title = ?, prompt = ?, depends_on = ?, provider = ?, model = ?, status = ?, session = ?, attempts = ?, result = ?, git = ?, scope = ?, intake = ?, workflow = ?, workflow_state = ?, updated_at = ? WHERE id = ?",
         )
         .bind(&t.title)
         .bind(&t.prompt)
@@ -211,6 +214,8 @@ impl Store {
         .bind(t.git.as_ref().map(serde_json::to_string).transpose()?)
         .bind(t.scope.as_ref().map(serde_json::to_string).transpose()?)
         .bind(t.intake.as_ref().map(serde_json::to_string).transpose()?)
+        .bind(&t.workflow)
+        .bind(t.workflow_state.as_ref().map(serde_json::to_string).transpose()?)
         .bind(t.updated_at)
         .bind(t.id)
         .execute(&self.pool)
@@ -235,6 +240,8 @@ impl Store {
             scope: row.get::<Option<String>, _>("scope").map(|g| serde_json::from_str(&g)).transpose()?,
             intake: row.get::<Option<String>, _>("intake").map(|g| serde_json::from_str(&g)).transpose()?,
             created_by: row.get("created_by"),
+            workflow: row.get("workflow"),
+            workflow_state: row.get::<Option<String>, _>("workflow_state").map(|g| serde_json::from_str(&g)).transpose()?,
             created_at: row.get("created_at"),
             updated_at: row.get("updated_at"),
         })
@@ -1074,7 +1081,7 @@ mod tests {
         assert!(got.rate_limit_reset_at.is_some());
 
         let t = store
-            .create_task(NewTask { title: "T".into(), prompt: "P".into(), depends_on: vec![3, 4], provider: None, model: None, project: None })
+            .create_task(NewTask { title: "T".into(), prompt: "P".into(), depends_on: vec![3, 4], provider: None, model: None, project: None, workflow: None })
             .await
             .unwrap();
         assert_eq!(t.depends_on, vec![3, 4]);
@@ -1277,7 +1284,7 @@ mod tests {
                 _ => Some("web".to_string()),
             };
             let title = if i == 4 { "Fix 100% CSV_export".to_string() } else { format!("Task number {i}") };
-            let mut t = store.create_task(NewTask { title, prompt: "P".into(), depends_on: vec![], provider: None, model: None, project }).await.unwrap();
+            let mut t = store.create_task(NewTask { title, prompt: "P".into(), depends_on: vec![], provider: None, model: None, project, workflow: None }).await.unwrap();
             t.status = if i == 6 { TaskStatus::Failed } else { TaskStatus::Done };
             // Finished out of id order: task 2 last.
             t.updated_at = base + chrono::Duration::minutes(if i == 2 { 100 } else { i * 10 });

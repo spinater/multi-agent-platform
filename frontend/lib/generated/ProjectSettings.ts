@@ -7,6 +7,7 @@ import type { ProjectParallel } from "./ProjectParallel";
 import type { ProjectProvider } from "./ProjectProvider";
 import type { ProjectSource } from "./ProjectSource";
 import type { ReflexGates } from "./ReflexGates";
+import type { Workflow } from "./Workflow";
 
 /**
  * A project's own settings, stored in the platform database (not in `map.toml`).
@@ -51,4 +52,9 @@ thai_glossary: { [key in string]: string },
 /**
  * The always-on manager session the owner talks to about this project (`manager.rs`).
  */
-manager: ManagerSettings, };
+manager: ManagerSettings, 
+/**
+ * The project's own workflows (`workflows.rs`); one with a machine workflow's id overrides it. Changed only
+ * through `/api/workflows`, never by a settings PATCH (which may leave it out).
+ */
+workflows?: Array<Workflow>, };

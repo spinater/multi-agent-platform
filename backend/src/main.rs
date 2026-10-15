@@ -36,6 +36,8 @@ mod trust;
 mod updates;
 mod usage;
 mod watcher;
+mod workflows;
+mod configure_ask;
 mod worktree_estimate;
 mod worktrees;
 

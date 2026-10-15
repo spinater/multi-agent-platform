@@ -138,6 +138,9 @@ pub struct CreateBody {
     depends_on: Vec<i64>,
     provider: Option<String>,
     model: Option<String>,
+    /// A workflow of the project (or the machine); missing: a workflow trigger may choose one.
+    #[serde(default)]
+    workflow: Option<String>,
 }
 
 pub async fn create_task(State(hub): State<Arc<Hub>>, caller: CallerExt, UrlPath(slug): UrlPath<String>, Json(b): Json<CreateBody>) -> ApiResult<Task> {
@@ -156,7 +159,8 @@ pub async fn create_task(State(hub): State<Arc<Hub>>, caller: CallerExt, UrlPath
     for dep in &b.depends_on {
         task_of(&hub, &slug, *dep).await.map_err(|_| ApiError(StatusCode::BAD_REQUEST, format!("dependency #{dep} is not a task of {slug}")))?;
     }
-    let mut task = hub.store.create_task(NewTask { title: b.title.trim().into(), prompt: b.prompt, depends_on: b.depends_on, provider, model, project: Some(slug.clone()) }).await?;
+    let workflow = super::known_workflow(&hub, Some(&slug), b.workflow).await?;
+    let mut task = hub.store.create_task(NewTask { title: b.title.trim().into(), prompt: b.prompt, depends_on: b.depends_on, provider, model, project: Some(slug.clone()), workflow }).await?;
     // Who made it, for the activity graph: the manager (from its terminal, the dashboard or Telegram), or the owner.
     hub.store.set_task_created_by(task.id, by(&caller)).await?;
     task.created_by = by(&caller).into();

@@ -653,7 +653,7 @@ pub async fn init(hub: &Hub, slug: &str, req: InitRequest) -> Result<InitStarted
     let prompt = init_prompt(&instructions, &ctx);
     let task = hub
         .store
-        .create_task(NewTask { title: INIT_TITLE.into(), prompt, depends_on: vec![], provider: Some(req.provider.clone()), model: model.clone(), project: Some(slug.to_string()) })
+        .create_task(NewTask { title: INIT_TITLE.into(), prompt, depends_on: vec![], provider: Some(req.provider.clone()), model: model.clone(), project: Some(slug.to_string()), workflow: None })
         .await?;
     hub.announce_task(&task);
     hub.event(Level::Info, "task.created", None, Some(task.id), format!("Task #{} created: {}", task.id, task.title)).await;

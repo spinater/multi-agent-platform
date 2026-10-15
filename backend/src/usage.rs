@@ -1244,7 +1244,7 @@ mod tests {
         assert_eq!(reader_for(&hub.config, "gemini"), Some(Reader::None));
         hub.usage.set_report(report_with(&hub, "claude", 93.0));
         assert!(hub.cooldown_until("claude").is_some());
-        let task = hub.store.create_task(NewTask { title: "a".into(), prompt: "do a".into(), depends_on: vec![], provider: None, model: None, project: None }).await.unwrap();
+        let task = hub.store.create_task(NewTask { title: "a".into(), prompt: "do a".into(), depends_on: vec![], provider: None, model: None, project: None, workflow: None }).await.unwrap();
         Orchestrator::new(hub.clone()).tick().await.unwrap();
         let session = hub.store.task(task.id).await.unwrap().unwrap().session.unwrap();
         assert_eq!(hub.store.session(&session).await.unwrap().unwrap().provider, "codex");
@@ -1254,7 +1254,7 @@ mod tests {
     async fn a_task_pinned_to_a_skipped_provider_waits() {
         let (hub, _dir) = hub_with("[usage]\nskip_pct = 80").await;
         hub.usage.set_report(report_with(&hub, "claude", 85.0));
-        let task = hub.store.create_task(NewTask { title: "a".into(), prompt: "do a".into(), depends_on: vec![], provider: Some("claude".into()), model: None, project: None }).await.unwrap();
+        let task = hub.store.create_task(NewTask { title: "a".into(), prompt: "do a".into(), depends_on: vec![], provider: Some("claude".into()), model: None, project: None, workflow: None }).await.unwrap();
         Orchestrator::new(hub.clone()).tick().await.unwrap();
         let task = hub.store.task(task.id).await.unwrap().unwrap();
         assert_eq!(task.status, TaskStatus::Pending);
