@@ -2,7 +2,7 @@
 
 import clsx from "clsx";
 import { Hexagon, Moon, Settings, Sun } from "lucide-react";
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 
 import { setLang, useLang, useT, type MsgKey } from "@/lib/i18n";
 import { NAV } from "@/lib/nav";
@@ -93,6 +93,10 @@ function ProjectSwitcher() {
 export function LangSwitch() {
   const lang = useLang();
   const t = useT();
+  // Thai text gets its own spacing rules (globals.css `html[lang="th"]`).
+  useEffect(() => {
+    document.documentElement.lang = lang;
+  }, [lang]);
   return (
     <button
       onClick={() => setLang(lang === "en" ? "th" : "en")}

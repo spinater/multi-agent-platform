@@ -163,7 +163,7 @@ export function buildGraph(input: BuildInput): Graph {
   }
   for (const { lane, session } of input.lanes ?? []) {
     const g = input.groupOfLane?.(lane) ?? "lanes";
-    nodes.push({ id: `l:${lane.name}`, type: "session", group: g, label: `${lane.role ? `${lane.role} · ` : ""}${lane.label ?? lane.name}`, color: gcolor(g), parent: `p:${g}`, ref: { kind: "session", session } });
+    nodes.push({ id: `l:${lane.name}`, type: "session", group: g, label: lane.label ?? lane.name, color: gcolor(g), parent: `p:${g}`, ref: { kind: "session", session } });
   }
   for (const st of stages) nodes.push({ id: `g:${st.id}`, type: "stage", group: null, label: st.label, color: "var(--text-2)", parent: "orch", ref: { kind: "stage", stage: st } });
   let runs = 0;

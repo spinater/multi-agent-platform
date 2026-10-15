@@ -465,3 +465,10 @@ body {
     opacity: 0.75;
   }
 }
+
+/* Thai has no capitals and its marks collide when spaced out: in Thai mode the spaced-capital labels keep only a
+   little tracking. */
+html[lang="th"] [class*="tracking-"],
+html[lang="th"] .label {
+  letter-spacing: 0.02em;
+}

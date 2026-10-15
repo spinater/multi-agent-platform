@@ -237,7 +237,7 @@ export function ActivityGraphView({
         return {
           id: `watch:${l.name}`,
           kind: "agent",
-          label: `${l.role ? `${l.role} · ` : ""}${l.label ?? l.name}`,
+          label: l.label ?? l.name,
           detail: "watched lane",
           count: 1,
           state: ss.state,
