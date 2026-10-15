@@ -176,6 +176,7 @@ pub fn validate(hub: &Hub, s: &ProjectSettings) -> Result<()> {
     {
         bail!("provider `{p}` has no headless command, so it cannot audit");
     }
+    crate::hooks::validate(&s.hooks)?;
     Ok(())
 }
 

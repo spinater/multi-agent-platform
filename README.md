@@ -970,8 +970,24 @@ one of the task's last two is not logged again, so a task parked at a branch doe
 | `decision.post.pass` / `.fail` | post → end / failed | `finish` |
 | `decision.end.closed` / `.kept` | end → done | `finish` (`detect::end_decision` via `close_session`) |
 | `decision.retry.again` / `.failed` / `.kept` | retry → ready / failed / watch | `retry_or_fail`, and `start` after a launch error |
+| `decision.hook.<event>.pass` / `.fail` / `.timeout` | stays (progress) | `hooks::run_event`: each Configure hook run (`pre_launch`, `post_verify`, `post_done`, `on_fail`, `on_stall`), `` `cmd` exit 0 · 1.2s `` |
+| `decision.hook.pre_launch.blocked` / `decision.hook.post_verify.blocked` | launch / audit → failed | `start` / `finish`: a blocking hook failed; the task fails without a retry |
 
 The older `task.*` events (`task.started`, `task.retry`, `task.done`…) are still sent.
+
+## Hooks
+
+Configure → Hooks are shell commands (`sh -c`, in the task's folder: its worktree when it has one) MAP runs around a
+task, with `MAP_EVENT`, `MAP_TASK_ID`, `MAP_TASK_TITLE`, `MAP_PROJECT`, `MAP_SESSION`, `MAP_BRANCH` (when known) and
+`[workspace.env]`. Each has a timeout (1–3600 s, the whole process group is killed) and may be blocking:
+
+| Event | Where (`backend/src/`) | A blocking failure |
+| --- | --- | --- |
+| `pre_launch` | `orchestrator.rs` `start`, after the worktree is ready, before `hub.launch` | fails the task (`pre_launch hook failed: <cmd>: exit N`), no session started |
+| `post_verify` | `finish`, after verify passes, before the audit | fails the task, no retry |
+| `post_done` | `finish`, after `[orchestrator] post_done` (toml, then machine, then project hooks) | fails the task, as the toml commands do |
+| `on_fail` | wherever a task becomes failed (in the background) | never changes the task |
+| `on_stall` | `watcher.rs`, when a task's session turns stalled (once per stall) | never changes the task |
 
 ## Branches and worktrees
 
@@ -1157,6 +1173,11 @@ All routes are under `/api`. When `server.api_token` is set, send `Authorization
 | PUT | `/git/settings` | `{"ssh": "map_key" \| "system"}`: the SSH method, saved in `<data_dir>/git/settings.json`; the gitconfig is regenerated |
 | DELETE | `/git/known-hosts/{host}` | Forget a host learned on first use (`git.example.com`, `[host]:2222`); 409 for a pinned host, 404 when unknown; returns the known hosts left |
 | GET | `/settings` | The Settings screen's read-only facts: server settings from `map.toml` (`api_token_set`, never the token), run mode and restart command, each agent CLI's binary path, `gh` / `glab` on PATH and whether `GH_TOKEN`, `GITHUB_TOKEN`, `GITLAB_TOKEN`, `GITLAB_HOST` are set (never their values) |
+| GET | `/rules?project=` | Configure → Rules (`RulesOverview`): with `project`, the folder's context files (`[skills] context_files`), the files they `@import` and rule files MAP made, then the machine files (each CLI's own `CLAUDE.md` / `AGENTS.md` / `GEMINI.md` in its home folder); each with `source`, `readers` (and `reader_options`: how, fixed or not), `imports`, `body` (≤ 256 KB, `truncated`) |
+| PUT/DELETE | `/rules` | `RuleWrite` `{project?, path, body}` / `RuleDelete` `{project?, path}`: write or delete a `.md` file inside the project folder (no `..`, no symlink out, not `.git`) or one of the machine files; deleting also removes its `@path` lines from CLAUDE.md / GEMINI.md |
+| PUT | `/rules/readers` | `RuleReaders` `{project?, path, readers}`: exactly these providers read it, by adding or removing an `@<path>` line in CLAUDE.md (claude) or GEMINI.md (gemini); a file's own provider and Codex (no imports) are fixed |
+| GET/PUT | `/hooks?project=` | Configure → Hooks (`HooksOverview`): `[orchestrator] post_done` (read-only, `toml:post_done:<n>`), machine hooks (`runtime_settings` key `hooks`), project hooks (`ProjectSettings.hooks`; the same id replaces a machine hook: `override`). `HooksWrite` `{project?, hooks}` replaces the scope's list |
+| POST | `/hooks/test` | `HookTest` `{project?, command, timeout_secs}`: run it now in the project folder (or `workspace.dir`); `HookRun` `{exit_code, duration_ms, output_tail, timed_out}` (last 20 lines, secrets masked) |
 | POST | `/git/key` | `{"replace"?: bool}`: create MAP's ed25519 key (409 when one exists without `replace`; the old one is moved aside) |
 | POST | `/git/test` | `{"host"}` (`github.com`, `git@host:2222`): `ssh -T` with MAP's key, or plain `ssh` with the `system` method; `ok`, output, the host's recorded keys |
 | PUT | `/git/identity` | `{"name", "email"}` (both empty: none) |
