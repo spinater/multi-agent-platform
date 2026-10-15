@@ -6,7 +6,9 @@
  * bar's Save, which saves every tab with unsaved changes. Tabs keep their state while you switch between them. */
 
 import clsx from "clsx";
-import { useCallback, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+
+import { api, envApi, gitApi, hooksApi, mcpApi, permsApi, rulesApi, workflowsApi } from "@/lib/api";
 
 import { useT, type MsgKey } from "@/lib/i18n";
 
@@ -62,6 +64,53 @@ function storedTab(): TabId {
   }
 }
 
+function storedLayout(): "A" | "B" {
+  try {
+    return localStorage.getItem("map.configure.agents.layout") === "B" ? "B" : "A";
+  } catch {
+    return "A";
+  }
+}
+
+type Counts = Partial<Record<TabId, { n: string; ov: boolean }>>;
+
+/** The left tabs' counts and "project overrides" dots, read once per scope (and after each save). */
+function useCounts(scope: Scope, slug: string | null, project: string | null, tick: number): Counts {
+  const { projects, providers } = useApp();
+  const [c, setC] = useState<Counts>({});
+  const settings = slug ? projects.find((p) => p.project.slug === slug)?.project.settings : undefined;
+  useEffect(() => {
+    let live = true;
+    const mine = <T extends { source: string }>(xs: T[]) => xs.filter((x) => scope === "project" || x.source === "machine");
+    const put = (k: TabId, n: number | string, ov = false) => live && setC((o) => ({ ...o, [k]: { n: String(n), ov: scope === "project" && ov } }));
+    const target = scope === "project" ? slug : project;
+    api.agents(target).then((o) => {
+      const rows = o.rows.filter((r) => scope === "project" || r.scope === "user");
+      const user = new Set(rows.filter((r) => r.scope === "user").map((r) => r.name));
+      put("agents", rows.length, rows.some((r) => r.scope === "project" && user.has(r.name)));
+    }, () => {});
+    workflowsApi.list(slug).then((l) => put("workflows", mine(l.workflows).length, l.workflows.some((w) => w.source === "override")), () => {});
+    rulesApi.list(slug).then((r) => put("rules", mine(r.files).filter((f) => f.exists).length), () => {});
+    api.skills(target).then((s) => put("skills", s.skills.length), () => {});
+    permsApi.get(slug).then((v) => put("perms", v.rows.length, v.rows.some((r) => r.cells.some((x) => x.source === "override"))), () => {});
+    hooksApi.list(slug).then((h) => put("hooks", mine(h.hooks).length, h.hooks.some((x) => x.source === "override")), () => {});
+    mcpApi.list(slug).then((m) => put("mcp", mine(m.servers).length, m.servers.some((x) => x.source === "override")), () => {});
+    envApi.list(slug).then((e) => put("env", mine(e.vars).length, e.vars.some((x) => x.source === "override")), () => {});
+    gitApi.access().then((a) => put("git", a.known_hosts.length), () => {});
+    return () => {
+      live = false;
+    };
+  }, [scope, slug, project, tick]);
+  const verify = settings?.verify;
+  return {
+    ...c,
+    verify: verify ? { n: String(verify.length), ov: scope === "project" } : c.verify,
+    branches: settings ? { n: settings.branches.mode === "worktree" ? "wt" : "1", ov: false } : undefined,
+    parallel: settings ? { n: settings.parallel.max === null ? "∞" : String(settings.parallel.max), ov: false } : undefined,
+    providers: { n: String(providers.length), ov: scope === "project" && !!settings?.providers.length },
+  };
+}
+
 function storedLang(): "en" | "th" {
   try {
     return localStorage.getItem("map.cfgLang") === "th" ? "th" : "en";
@@ -78,11 +127,22 @@ export function ConfigureScreen() {
   const [visited, setVisited] = useState<TabId[]>([tab]);
   const [pending, setPendingState] = useState<Record<string, Pending>>({});
   const [saving, setSaving] = useState(false);
+  const [layout, setLayoutState] = useState<"A" | "B">(storedLayout);
+  const [saves, setSaves] = useState(0);
   const t = useT();
 
   if (!visited.includes(tab)) setVisited([...visited, tab]);
 
   const slug = scope === "project" ? project : null;
+  const counts = useCounts(scope, slug, project, saves);
+  const setLayout = (l: "A" | "B") => {
+    setLayoutState(l);
+    try {
+      localStorage.setItem("map.configure.agents.layout", l);
+    } catch {
+      // Storage blocked: the layout lasts for this page.
+    }
+  };
   const projectName = current?.project.name ?? (project === null ? workspaceName(server?.workspace_dir) : project);
 
   const setPending = useCallback((t: string, p: Pending | null) => {
@@ -98,8 +158,8 @@ export function ConfigureScreen() {
   }, []);
 
   const ctx: ConfigureCtx = useMemo(
-    () => ({ scope, slug, setScope, setPending, flash: (m, tone = "ok") => toast(m, tone), cfgLang }),
-    [scope, slug, setPending, toast, cfgLang],
+    () => ({ scope, slug, setScope, setPending, flash: (m, tone = "ok") => toast(m, tone), cfgLang, layout }),
+    [scope, slug, setPending, toast, cfgLang, layout],
   );
 
   const setTab = (t: TabId) => {
@@ -126,6 +186,7 @@ export function ConfigureScreen() {
     setSaving(true);
     try {
       for (const p of Object.values(pending)) await p.save();
+      setSaves((n) => n + 1);
       toast(t("cfg.saved"));
     } catch (e) {
       toast((e as Error).message, "bad");
@@ -204,6 +265,24 @@ export function ConfigureScreen() {
                 );
               })}
             </div>
+            <div className="flex items-center gap-1.5 font-mono text-[10.5px] text-muted">
+              <span>layout</span>
+              {(
+                [
+                  ["A", "A · cards"],
+                  ["B", "B · table"],
+                ] as const
+              ).map(([l, label]) => (
+                <button
+                  key={l}
+                  onClick={() => setLayout(l)}
+                  className="h-[22px] cursor-pointer rounded-[5px] border px-2 font-mono text-[10.5px] font-medium whitespace-nowrap"
+                  style={{ borderColor: layout === l ? "var(--accent)" : "var(--line-2)", background: layout === l ? "var(--accent-tint)" : "transparent", color: layout === l ? "var(--accent-soft)" : "var(--text-2)" }}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
 
@@ -236,7 +315,9 @@ export function ConfigureScreen() {
                         {glyph}
                       </span>
                       <span className="flex-1 whitespace-nowrap">{label}</span>
+                      {counts[id]?.ov && <span title="has project overrides" className="size-1.5 rounded-full bg-warn" />}
                       {pending[id] && <span title="unsaved changes" className="size-1.5 rounded-full bg-accent" />}
+                      <span className="font-mono text-[10.5px] leading-none text-muted">{counts[id]?.n ?? ""}</span>
                     </button>
                   );
                 })}

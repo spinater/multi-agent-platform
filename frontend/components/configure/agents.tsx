@@ -32,16 +32,8 @@ type Item = { key: string; scope: AgentScope; def: AgentDef; base: AgentDef | nu
 const keyOf = (scope: AgentScope, name: string) => `${scope}/${name}`;
 let seq = 0;
 
-function storedLayout(): "A" | "B" {
-  try {
-    return localStorage.getItem("map.configure.agents.layout") === "B" ? "B" : "A";
-  } catch {
-    return "A";
-  }
-}
-
 export function AgentsTab() {
-  const { scope, slug, setPending } = useConfigure();
+  const { scope, slug, setPending, layout } = useConfigure();
   const { providers, project } = useApp();
   const target = scope === "project" ? slug : project;
   const [overview, setOverview] = useState<AgentsOverview | null>(null);
@@ -49,19 +41,9 @@ export function AgentsTab() {
   const [skills, setSkills] = useState<SkillsOverview | null>(null);
   const [items, setItems] = useState<Item[] | null>(null);
   const [sel, setSel] = useState<string | null>(null);
-  const [layout, setLayoutState] = useState<"A" | "B">(storedLayout);
   const [error, setError] = useState("");
   const [tick, setTick] = useState(0);
   const mcp = useMcpServers(scope === "project" ? slug : null);
-
-  const setLayout = (l: "A" | "B") => {
-    setLayoutState(l);
-    try {
-      localStorage.setItem("map.configure.agents.layout", l);
-    } catch {
-      // Storage blocked: the layout lasts for this page.
-    }
-  };
 
   useEffect(() => {
     let live = true;
@@ -183,17 +165,6 @@ export function AgentsTab() {
       {items && (
         <>
           <RelationMap agents={visible.map((i) => ({ id: i.key, name: i.def.name, color: providerColor(i.def.targets[0]) }))} items={rel} binds={binds} selected={current?.key ?? null} onSelect={setSel} />
-          <div className="flex items-center gap-1.5 self-end font-mono text-[10.5px] text-muted">
-            layout
-            <Seg
-              value={layout}
-              options={[
-                ["A", "A · cards"],
-                ["B", "B · table"],
-              ]}
-              onChange={setLayout}
-            />
-          </div>
           {visible.length === 0 && <Note>No agents yet. + New agent writes one file per CLI you pick; each CLI then finds it by name.</Note>}
           <div className="flex flex-wrap items-start gap-3.5">
             {layout === "A" ? (

@@ -77,8 +77,9 @@ export function RelationMap({
     const cx = W / 2;
     const cy = (H - 44) / 2 + 4;
     const m = Math.min(W, H - 90);
-    const R1 = m * 0.15;
-    const R2 = m * 0.28;
+    // The inner ring grows so agent names do not collide; the outer ring stays outside it.
+    const R1 = Math.max(m * 0.15, (agents.length * 46) / (2 * Math.PI));
+    const R2 = Math.max(m * 0.28, R1 + 90);
     const gap = 0.2;
     const n = Math.max(1, items.length);
     const span = Math.PI * 2 - gap * TYPES.length;

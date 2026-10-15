@@ -24,6 +24,8 @@ export type ConfigureCtx = {
   flash: (msg: string, tone?: "ok" | "warn" | "bad") => void;
   /** The config language (`[configure] language`): what agents write in the "Ask an agent" panels. */
   cfgLang: "en" | "th";
+  /** Agents tab layout: A cards, B table. */
+  layout: "A" | "B";
 };
 
 export const Ctx = createContext<ConfigureCtx | null>(null);

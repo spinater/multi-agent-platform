@@ -12,6 +12,7 @@ import { useEffect, useState } from "react";
 import { configureApi, workflowsApi, type AskReply, type ConfigOp, type Workflow, type WorkflowEdge, type WorkflowNode, type WorkflowStats } from "@/lib/api";
 import { providerColor } from "@/lib/colors";
 import type { AgentsOverview } from "@/lib/generated/AgentsOverview";
+import type { PipelineInfo } from "@/lib/generated/PipelineInfo";
 import type { Effort } from "@/lib/generated/Effort";
 import type { JsonValue } from "@/lib/generated/serde_json/JsonValue";
 
@@ -157,12 +158,36 @@ function graphOp(o: ConfigOp): GraphOp | null {
   return v && typeof v === "object" && "op" in v ? v : null;
 }
 
+/** The fixed pipeline every task runs when no workflow matches, drawn as a workflow (id `default`): the first
+ * provider's agent → the verify commands → the audit (when on) → done, failures going back to the agent. Shown so
+ * the current flow is visible; editing it saves a copy that the orchestrator then runs instead. */
+function builtin(provider: string, verify: string[], attempts: number, audit: { enabled: boolean; provider: string | null } | null, source: Workflow["source"]): Workflow {
+  const nodes: WorkflowNode[] = [blankNode("t", "trigger"), { ...blankNode("agent", "agent"), label: "Implement", agent: provider }];
+  const edges: WorkflowEdge[] = [{ from: "t", to: "agent", kind: "next" }];
+  let prev = "agent";
+  if (verify.length) {
+    nodes.push({ ...blankNode("verify", "verify"), label: "Verify", command: verify.join(" && "), max_attempts: attempts });
+    edges.push({ from: prev, to: "verify", kind: "next" }, { from: "verify", to: "agent", kind: "fail" });
+    prev = "verify";
+  }
+  if (audit?.enabled) {
+    nodes.push({ ...blankNode("audit", "audit"), label: "Audit", agent: audit.provider ?? provider, verdict: "VERDICT: PASS" });
+    edges.push({ from: prev, to: "audit", kind: prev === "agent" ? "next" : "pass" }, { from: "audit", to: "agent", kind: "fail" });
+    prev = "audit";
+  }
+  nodes.push(blankNode("done", "end"), { ...blankNode("failed", "end"), label: "Failed", outcome: "failed" });
+  edges.push({ from: prev, to: "done", kind: prev === "agent" ? "next" : "pass" });
+  const g = tidy({ nodes, edges });
+  return { id: "default", name: "default", description: "The built-in pipeline: what every task runs when no workflow matches.", trigger: { default: true, keywords: [], paths: [] }, nodes: g.nodes as WorkflowNode[], edges: g.edges, source };
+}
+
 export function WorkflowsTab() {
   const { scope, slug, setPending, flash } = useConfigure();
   const { providers, project } = useApp();
   const [loaded, setLoaded] = useState<Workflow[] | null>(null);
   const [wfs, setWfs] = useState<Workflow[] | null>(null);
   const [removed, setRemoved] = useState<Workflow[]>([]);
+  const [builtinShown, setBuiltinShown] = useState(false);
   const [cur, setCur] = useState<string | null>(null);
   const [sel, setSel] = useState<string | null>(null);
   const [error, setError] = useState("");
@@ -184,6 +209,22 @@ export function WorkflowsTab() {
   const [view, setView] = useState<"overlay" | "side">("overlay");
   const { cfgLang } = useConfigure();
 
+  const { projects: allProjects } = useApp();
+  const [pipe, setPipe] = useState<PipelineInfo | null>(null);
+  useEffect(() => {
+    api.pipeline().then(setPipe, () => {});
+  }, []);
+  const ps = slug ? allProjects.find((p) => p.project.slug === slug)?.project.settings : undefined;
+  const defaultWf = pipe
+    ? builtin(
+        ps?.providers[0]?.name ?? pipe.provider_order[0] ?? "claude",
+        ps?.verify ?? pipe.verify,
+        pipe.max_attempts,
+        ps?.audit ?? { enabled: pipe.audit_enabled, provider: pipe.audit_chain[0] ?? null },
+        "machine",
+      )
+    : null;
+
   useEffect(() => {
     let live = true;
     workflowsApi.list(slug).then(
@@ -192,6 +233,7 @@ export function WorkflowsTab() {
         const mine = list.workflows.filter((w) => scope === "project" || w.source === "machine");
         setLoaded(mine);
         setWfs(clone(mine));
+        setBuiltinShown(!mine.some((w) => w.trigger.default));
         setRemoved([]);
         setCur((c) => (c && mine.some((w) => w.id === c) ? c : (mine[0]?.id ?? null)));
         setError("");
@@ -203,6 +245,21 @@ export function WorkflowsTab() {
       live = false;
     };
   }, [slug, scope, project, tick]);
+
+  // The built-in pipeline joins the list (as if loaded) when no saved workflow is the default, and follows the
+  // settings it is drawn from (they may arrive after the list) while nobody has edited it.
+  const builtinKey = defaultWf ? JSON.stringify(defaultWf) : "";
+  useEffect(() => {
+    if (!builtinShown || !defaultWf || !wfs || !loaded || removed.some((r) => r.id === "default")) return;
+    const was = loaded.find((l) => l.id === "default");
+    const cur0 = wfs.find((x) => x.id === "default");
+    if (was && cur0 && !same(was, cur0)) return;
+    if (was && same(was, defaultWf)) return;
+    setLoaded((l) => [defaultWf, ...(l ?? []).filter((x) => x.id !== "default")]);
+    setWfs((x) => [clone(defaultWf), ...(x ?? []).filter((y) => y.id !== "default")]);
+    setCur((c) => c ?? "default");
+  }, [builtinShown, builtinKey, !!wfs, !!loaded]); // eslint-disable-line react-hooks/exhaustive-deps
+  const isBuiltin = (x: Workflow | null) => !!x && x.id === "default" && builtinShown && same(x, loaded?.find((l) => l.id === "default")) && x.source === "machine";
 
   const w = wfs?.find((x) => x.id === cur) ?? null;
   useEffect(() => {
@@ -222,7 +279,7 @@ export function WorkflowsTab() {
             count: dirty.length,
             files: [scope === "machine" ? "machine settings (workflows)" : "project settings (workflows)"],
             save: async () => {
-              for (const r of removed) await workflowsApi.remove(slug, r.id);
+              for (const r of removed) if (!(r.id === "default" && builtinShown)) await workflowsApi.remove(slug, r.id);
               for (const x of (wfs ?? []).filter((x) => !same(x, loaded?.find((l) => l.id === x.id)))) await workflowsApi.save(slug, x);
               setTick((t) => t + 1);
             },
@@ -367,7 +424,13 @@ export function WorkflowsTab() {
 
         {!w && <Note>No workflows yet: tasks run the fixed pipeline (agent → verify → audit → land). + New workflow makes one; a task uses it when its trigger matches.</Note>}
 
-        {w && (w.source === "override" || (w.source === "machine" && scope === "project")) && (
+        {w && isBuiltin(w) && (
+          <div className="rounded-lg border border-line-2 px-3 py-[9px] text-[12px] leading-[1.45] text-text-2">
+            default is the built-in pipeline every task runs today when no workflow matches: the agent, the verify commands, the audit when it is on, then done. It is drawn from this {scope === "project" ? "project's" : "machine's"} settings.
+            Edit it and Save to make it your own (the orchestrator then runs your copy).
+          </div>
+        )}
+        {w && !isBuiltin(w) && (w.source === "override" || (w.source === "machine" && scope === "project")) && (
           <div className="rounded-lg border px-3 py-[9px] text-[12px] leading-[1.45] text-text" style={{ borderColor: "color-mix(in srgb, var(--warn) 30%, transparent)", background: "color-mix(in srgb, var(--warn) 6%, transparent)" }}>
             {w.source === "override"
               ? `This project now has its own copy of ${w.name}. It overrides the machine workflow here; other projects keep the machine one.`
@@ -624,7 +687,7 @@ export function WorkflowsTab() {
               newTo={newTo}
               setNewKind={setNewKind}
               setNewTo={setNewTo}
-              canDeleteWf={!(w.source === "machine" && scope === "project")}
+              canDeleteWf={!isBuiltin(w) && !(w.source === "machine" && scope === "project")}
               onDeleteWf={() => {
                 const was = loaded?.find((l) => l.id === w.id);
                 if (was) setRemoved([...removed, was]);
