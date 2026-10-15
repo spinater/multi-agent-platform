@@ -2,6 +2,7 @@
 
 mod activity;
 mod agents;
+mod env;
 mod fs;
 mod git;
 mod git_access;
@@ -144,6 +145,8 @@ pub fn router(hub: Arc<Hub>) -> Router {
         .route("/git/known-hosts/{host}", axum::routing::delete(git_access::remove_known_host))
         // ---- the Settings screen: read-only server facts, agent binaries, gh/glab and whether their tokens are set
         .route("/settings", get(git_access::settings))
+        // ---- Configure: Env & secrets (env_vars.rs)
+        .route("/env", get(env::list).put(env::put).delete(env::delete))
         .route("/projects/{slug}/git", get(git_access::status))
         .route("/projects/{slug}/git/fetch", post(git_access::fetch))
         .route("/projects/{slug}/git/pull", post(git_access::pull))

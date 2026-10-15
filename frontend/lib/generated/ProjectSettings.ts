@@ -51,4 +51,10 @@ thai_glossary: { [key in string]: string },
 /**
  * The always-on manager session the owner talks to about this project (`manager.rs`).
  */
-manager: ManagerSettings, };
+manager: ManagerSettings, 
+/**
+ * The project's plain environment variables (secrets live in MAP's secret store, never here). Set through
+ * `PUT /api/env`; see `env_vars.rs`.
+ * Optional in TypeScript: forms that send the settings back may leave it out (the server keeps it).
+ */
+env?: { [key in string]: string }, };

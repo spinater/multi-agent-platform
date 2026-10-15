@@ -343,6 +343,7 @@ pub async fn delete(hub: &Hub, slug: &str) -> Result<()> {
     hub.reflex.forget(slug).await;
     hub.store.delete_project(slug).await?;
     crate::manager::forget_project(hub, slug).await;
+    crate::env_vars::forget_project(hub, slug);
     std::fs::remove_dir_all(hub.project_dir(slug)).or_else(|e| if e.kind() == std::io::ErrorKind::NotFound { Ok(()) } else { Err(e) })?;
     hub.announce_project_removed(slug);
     hub.event(Level::Warning, "project.deleted", None, None, format!("Project {slug} deleted")).await;

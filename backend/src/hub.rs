@@ -19,6 +19,9 @@ use crate::reflex;
 use crate::store::Store;
 use crate::terminal::Terminal;
 
+/// The run directory's file of secret `export` lines (0600), sourced and deleted by `launch.sh` (`env_vars.rs`).
+pub const SECRETS_ENV: &str = "secrets.env";
+
 static NAME: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^[A-Za-z0-9_-]{1,64}$").unwrap());
 
 pub struct Hub {
@@ -649,6 +652,14 @@ impl Hub {
         for (k, v) in &self.config.workspace.env {
             script.push_str(&format!("export {k}={}\n", quote(v)?));
         }
+        // The Configure screen's Env & secrets (`env_vars.rs`): the machine's, then the project's over them. Plain
+        // values are exported here; secrets go to a 0600 file the script sources and deletes at once, so their
+        // values are never in launch.sh (which stays with the run), on a command line or in tmux.
+        let vars = crate::env_vars::run_vars(self, req.project.as_deref()).await;
+        for line in crate::env_vars::launch_files(&vars, &dir.join(SECRETS_ENV))? {
+            script.push_str(&line);
+            script.push('\n');
+        }
         // The provider's own variables (openrouter's endpoint and key), after workspace.env so they win over it. A
         // secret is exported by reference (`"$OPENROUTER_API_KEY"`), never by value.
         for line in self.config.provider_script_env(&req.provider) {
@@ -689,13 +700,17 @@ impl Hub {
             None => self.work_dir(req.project.as_deref()).await,
         };
         if !cwd.is_dir() {
+            let _ = std::fs::remove_file(dir.join(SECRETS_ENV));
             bail!("workspace {} does not exist", cwd.display());
         }
         if command.is_none() {
             // So the CLI does not stop at its "trust this folder?" question (sign-in and update helpers need not).
             crate::trust::ensure(self, &req.provider, &cwd, req.task_id).await;
         }
-        self.term.spawn(&name, &cwd, &script_path).await?;
+        if let Err(err) = self.term.spawn(&name, &cwd, &script_path).await {
+            let _ = std::fs::remove_file(dir.join(SECRETS_ENV));
+            return Err(err);
+        }
         let now = Utc::now();
         let session = Session {
             name: name.clone(),
@@ -757,6 +772,8 @@ impl Hub {
             let _ = std::fs::write(dir.join("final-pane.txt"), crate::detect::strip_ansi(&pane));
             self.term.kill(name).await?;
         }
+        // The launch script deletes its secrets file when it starts; one left by a script that never ran goes now.
+        let _ = std::fs::remove_file(self.run_dir(name).join(SECRETS_ENV));
         session.state = SessionState::Exited;
         session.detail = Some(reason.to_string());
         session.attached = false;

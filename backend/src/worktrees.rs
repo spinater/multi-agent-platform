@@ -139,7 +139,7 @@ pub async fn prepare(hub: &Hub, task: &mut Task) -> Result<bool, PrepareError> {
     }
     task.git = Some(TaskGit { branch, base, worktree: Some(path.display().to_string()), ..Default::default() });
     for command in &b.setup {
-        let (ok, output) = crate::orchestrator::shell(hub, &path, command, Duration::from_secs(30 * 60)).await.map_err(|e| PrepareError::Retry(format!("{e:#}")))?;
+        let (ok, output) = crate::orchestrator::shell_for(hub, Some(&slug), &path, command, Duration::from_secs(30 * 60)).await.map_err(|e| PrepareError::Retry(format!("{e:#}")))?;
         if !ok {
             return Err(PrepareError::Retry(format!("worktree setup `{command}` failed:\n{output}")));
         }

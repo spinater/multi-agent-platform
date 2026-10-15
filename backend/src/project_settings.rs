@@ -176,6 +176,9 @@ pub fn validate(hub: &Hub, s: &ProjectSettings) -> Result<()> {
     {
         bail!("provider `{p}` has no headless command, so it cannot audit");
     }
+    for key in s.env.keys() {
+        crate::env_vars::validate_key(hub, key)?;
+    }
     Ok(())
 }
 

@@ -62,6 +62,16 @@ pub async fn shell(hub: &Hub, dir: &std::path::Path, command: &str, timeout: Dur
     run_captured(cmd, timeout).await
 }
 
+/// [`shell`] with the project's Env & secrets (`env_vars.rs`) after the workspace env, for a project's hooks and
+/// verify commands; any secret value in the output is replaced by `***` before it reaches events or a task.
+pub async fn shell_for(hub: &Hub, project: Option<&str>, dir: &std::path::Path, command: &str, timeout: Duration) -> Result<(bool, String)> {
+    let vars = crate::env_vars::run_vars(hub, project).await;
+    let mut cmd = Command::new("sh");
+    cmd.arg("-c").arg(command).current_dir(dir).envs(hub.command_env()).envs(vars.iter().map(|v| (v.key.as_str(), v.value.as_str())));
+    let (ok, output) = run_captured(cmd, timeout).await?;
+    Ok((ok, crate::env_vars::redact(&output, &crate::env_vars::secret_values(&vars))))
+}
+
 async fn run_captured(mut cmd: Command, timeout: Duration) -> Result<(bool, String)> {
     cmd.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped()).kill_on_drop(true);
     let out = match tokio::time::timeout(timeout, cmd.output()).await {
@@ -502,7 +512,7 @@ impl Orchestrator {
             let of = format!("{} of {}", i + 1, verify.len());
             record(hub, Kind::VERIFY_CMD_START, task, format!("`{command}` · {of}")).await;
             let started = std::time::Instant::now();
-            let (ok, output) = shell(hub, dir, command, Duration::from_secs(30 * 60)).await?;
+            let (ok, output) = shell_for(hub, task.project.as_deref(), dir, command, Duration::from_secs(30 * 60)).await?;
             if !ok {
                 record(hub, Kind::VERIFY_FAIL, task, format!("`{command}` failed · {of} · {}", dec::last_line(&output))).await;
                 return Ok(Some(format!("`{command}` failed:\n{output}")));
@@ -561,7 +571,7 @@ impl Orchestrator {
 
         for template in &cfg.post_done {
             let command = template.replace("{id}", &task.id.to_string()).replace("{title}", &quote(&task.title)?);
-            let (ok, output) = shell(hub, &dir, &command, Duration::from_secs(10 * 60)).await?;
+            let (ok, output) = shell_for(hub, task.project.as_deref(), &dir, &command, Duration::from_secs(10 * 60)).await?;
             if !ok {
                 record(hub, Kind::POST_FAIL, &task, format!("`{command}` failed · {}", dec::last_line(&output))).await;
                 // The agent's work passed; a failing hook needs a person, not another agent run.
@@ -736,11 +746,15 @@ impl Orchestrator {
                 .iter()
                 .map(|a| a.replace("{binary}", &spec.binary).replace("{model}", &spec.default_model).replace("{session}", "audit").replace("{prompt}", &prompt))
                 .collect();
+            let vars = crate::env_vars::run_vars(hub, task.project.as_deref()).await;
+            let mut extra = hub.command_env();
+            extra.extend(vars.iter().map(|v| (v.key.clone(), v.value.clone())));
             let mut cmd = Command::new(&argv[0]);
-            cmd.args(&argv[1..]).current_dir(hub.task_dir(task).await).envs(hub.run_env(provider, hub.command_env()));
+            cmd.args(&argv[1..]).current_dir(hub.task_dir(task).await).envs(hub.run_env(provider, extra));
             hub.event(Level::Info, "task.audit", None, Some(task.id), format!("Auditing with {provider}")).await;
             record(hub, Kind::AUDIT_ASK, task, format!("{provider} · reviewing git status, git diff, git log -5")).await;
             let (ok, output) = run_captured(cmd, Duration::from_secs(hub.config.orchestrator.audit.timeout_secs)).await?;
+            let output = crate::env_vars::redact(&output, &crate::env_vars::secret_values(&vars));
             if let Some(line) = output.lines().rev().find(|l| l.trim_start().starts_with("VERDICT:")) {
                 let verdict = line.trim_start().trim_start_matches("VERDICT:").trim();
                 if verdict == "PASS" {
@@ -943,6 +957,31 @@ mod tests {
         std::fs::write(hub.result_file(after.session.as_ref().unwrap()), r#"{"status":"done","summary":"x"}"#).unwrap();
         settle(&mut orch).await;
         assert_eq!(hub.store.task(t.id).await.unwrap().unwrap().status, TaskStatus::Failed);
+    }
+
+    #[tokio::test]
+    async fn verify_commands_get_the_env_vars_and_never_echo_a_secret() {
+        let (hub, _term, _dir) = setup("verify = [\"echo \\\"plain=$PLAIN_V secret=$SECRET_V\\\"; false\"]\nmax_attempts = 2").await;
+        let vars = vec![
+            crate::model::EnvVarInput { key: "PLAIN_V".into(), value: Some("plainvalue".into()), secret: false },
+            crate::model::EnvVarInput { key: "SECRET_V".into(), value: Some("hunter2-very-secret".into()), secret: true },
+        ];
+        crate::env_vars::replace(&hub, None, vars).await.unwrap();
+        let t = hub.store.create_task(new_task("a", vec![])).await.unwrap();
+        let mut orch = Orchestrator::new(hub.clone());
+        orch.tick().await.unwrap();
+        let s1 = hub.store.task(t.id).await.unwrap().unwrap().session.unwrap();
+        std::fs::write(hub.result_file(&s1), r#"{"status":"done","summary":"x"}"#).unwrap();
+        settle(&mut orch).await;
+        orch.tick().await.unwrap();
+        let after = hub.store.task(t.id).await.unwrap().unwrap();
+        let prompt = std::fs::read_to_string(hub.run_dir(after.session.as_ref().unwrap()).join("prompt.md")).unwrap();
+        assert!(prompt.contains("plain=plainvalue secret=***") && !prompt.contains("hunter2"), "{prompt}");
+        let events = serde_json::to_string(&hub.store.events(1000, None).await.unwrap()).unwrap();
+        let trace = serde_json::to_string(&hub.store.events_of_tasks(&[t.id]).await.unwrap()).unwrap();
+        assert!(!events.contains("hunter2") && !trace.contains("hunter2"));
+        let tasks = serde_json::to_string(&hub.store.tasks().await.unwrap()).unwrap();
+        assert!(!tasks.contains("hunter2"), "{tasks}");
     }
 
     #[tokio::test]

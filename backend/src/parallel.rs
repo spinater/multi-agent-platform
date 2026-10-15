@@ -227,7 +227,7 @@ async fn run(hub: &Hub, provider: &str, project: Option<&str>, tasks: &[Task]) -
     let argv: Vec<String> =
         spec.headless.iter().map(|a| a.replace("{binary}", &spec.binary).replace("{model}", &spec.default_model).replace("{session}", "parallel-analyst").replace("{prompt}", &text)).collect();
     let mut cmd = Command::new(&argv[0]);
-    cmd.args(&argv[1..]).current_dir(hub.work_dir(project).await).envs(hub.provider_env(provider)).envs(hub.command_env());
+    cmd.args(&argv[1..]).current_dir(hub.work_dir(project).await).envs(hub.provider_env(provider)).envs(hub.command_env()).envs(crate::env_vars::vars_for(hub, project).await);
     cmd.stdin(std::process::Stdio::null()).stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::piped()).kill_on_drop(true);
     let out = tokio::time::timeout(Duration::from_secs(hub.config.orchestrator.audit.timeout_secs.max(120)), cmd.output()).await??;
     let output = format!("{}\n{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));

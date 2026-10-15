@@ -4,6 +4,7 @@ mod config;
 mod decide;
 mod decisions;
 mod detect;
+mod env_vars;
 mod gates;
 mod git_access;
 mod hub;

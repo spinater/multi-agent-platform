@@ -124,8 +124,8 @@ pub async fn update(State(hub): State<Arc<Hub>>, UrlPath(slug): UrlPath<String>,
     }
     if let Some(s) = b.settings {
         // The source is fixed at creation, and the Thai words have their own endpoint (`thai/words`).
-        // The manager has its own endpoint (`PUT …/manager`), which also starts and stops it.
-        let s = ProjectSettings { source: p.settings.source.clone(), thai_glossary: p.settings.thai_glossary.clone(), manager: p.settings.manager.clone(), ..project_settings::normalize(s) };
+        // The manager has its own endpoint (`PUT …/manager`), which also starts and stops it; the env, `PUT /api/env`.
+        let s = ProjectSettings { source: p.settings.source.clone(), thai_glossary: p.settings.thai_glossary.clone(), manager: p.settings.manager.clone(), env: p.settings.env.clone(), ..project_settings::normalize(s) };
         project_settings::validate(&hub, &s)?;
         p.settings = s;
     }

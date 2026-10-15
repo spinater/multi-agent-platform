@@ -1171,6 +1171,11 @@ pub struct ProjectSettings {
     pub thai_glossary: BTreeMap<String, String>,
     /// The always-on manager session the owner talks to about this project (`manager.rs`).
     pub manager: ManagerSettings,
+    /// The project's plain environment variables (secrets live in MAP's secret store, never here). Set through
+    /// `PUT /api/env`; see `env_vars.rs`.
+    /// Optional in TypeScript: forms that send the settings back may leave it out (the server keeps it).
+    #[ts(as = "Option<BTreeMap<String, String>>", optional)]
+    pub env: BTreeMap<String, String>,
 }
 
 /// A project's manager: an interactive agent session (`<prefix>mgr-<slug>`) MAP keeps running while `enabled`.
@@ -3126,6 +3131,64 @@ pub enum ConfigSource {
     Machine,
     Project,
     Override,
+}
+
+/// One variable of the Configure screen's Env & secrets tab, as `GET /api/env` returns it. A secret's value is never
+/// returned: only that it is `set`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct EnvVar {
+    pub key: String,
+    /// The value of a plain variable; always `null` for a secret.
+    pub value: Option<String>,
+    pub secret: bool,
+    /// The variable has a value (a secret's is stored in MAP's secret store).
+    pub set: bool,
+    pub source: ConfigSource,
+}
+
+/// `GET /api/env[?project=<slug>]`: the machine's variables, merged with the project's when one is given (a project
+/// variable with a machine variable's key replaces it: `override`). Every agent session, hook and verify/audit
+/// command of the project gets these, the machine's first.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct EnvList {
+    pub project: Option<String>,
+    pub vars: Vec<EnvVar>,
+    /// Where plain values of this scope live (`database: runtime_settings` or `database: project settings`).
+    pub values_at: String,
+    /// Where this scope's secrets live (a file under the server's data folder, mode 0600).
+    pub secrets_at: String,
+}
+
+/// One variable in `PUT /api/env`. `value: null` keeps a secret's stored value (or turns a plain variable's value
+/// into a secret); a string replaces it. A secret made plain needs a new value.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct EnvVarInput {
+    pub key: String,
+    #[serde(default)]
+    pub value: Option<String>,
+    #[serde(default)]
+    pub secret: bool,
+}
+
+/// `PUT /api/env`: replaces one scope's list (the machine's without `project`). A variable left out is deleted.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct EnvUpdate {
+    #[serde(default)]
+    pub project: Option<String>,
+    pub vars: Vec<EnvVarInput>,
+}
+
+/// `DELETE /api/env`: removes one variable from a scope (the machine's without `project`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct EnvDelete {
+    #[serde(default)]
+    pub project: Option<String>,
+    pub key: String,
 }
 
 // ---- activity graph (trace.rs): who made what, and what each agent used

@@ -194,10 +194,12 @@ async fn ask_fallback(hub: &Hub, project: &Project, text: &str) -> Result<Reply>
             // An empty directory of its own: in the workspace the agent would read CLAUDE.md and call this endpoint again.
             let dir = hub.project_dir(&project.slug).join("fallback");
             tokio::fs::create_dir_all(&dir).await?;
+            let mut extra: Vec<(String, String)> = hub.config.workspace.env.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
+            extra.extend(crate::env_vars::vars_for(hub, Some(&project.slug)).await);
             let mut cmd = Command::new(program);
             cmd.args(args)
                 .current_dir(&dir)
-                .envs(hub.run_env(provider, hub.config.workspace.env.iter().map(|(k, v)| (k.clone(), v.clone())).collect()))
+                .envs(hub.run_env(provider, extra))
                 .stdin(Stdio::null())
                 .kill_on_drop(true);
             let out = tokio::time::timeout(Duration::from_secs(180), cmd.output()).await.context("the fallback timed out")??;

@@ -135,6 +135,7 @@ nothing is tied to one repository, session name or provider.
 | `backend/src/templates.rs` | Project templates (built-in and `[templates] dirs`), the create/skip/append plan, laying one down, the init agent's task |
 | `backend/src/plans.rs` | The planner session, plan validation, drafts, revisions, approval into tasks |
 | `backend/src/project_settings.rs` | Per-project providers, verify, audit and pause, as the orchestrator asks for them |
+| `backend/src/env_vars.rs` | Configure → Env & secrets: machine and project variables for sessions, hooks, verify and audit; secrets in `<data_dir>/secrets/` (0700/0600), never returned, logged or written into a launch script |
 | `backend/src/trust.rs` | Folder trust: marking folders trusted in Claude Code's and Codex's config, answering the trust question |
 | `backend/src/login.rs` | Provider sign-in state from credential files, the helper login session, URL and code parsing |
 | `backend/src/repo.rs` | The corpus repo written with git plumbing, corpus export, a read-only look at a project's folder |
