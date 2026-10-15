@@ -179,6 +179,7 @@ pub fn validate(hub: &Hub, s: &ProjectSettings) -> Result<()> {
     for key in s.env.keys() {
         crate::env_vars::validate_key(hub, key)?;
     }
+    crate::hooks::validate(&s.hooks)?;
     Ok(())
 }
 

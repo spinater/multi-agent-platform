@@ -224,7 +224,7 @@ fn clip(s: &str, max: usize) -> String {
 
 // ---- context files
 
-static IMPORT: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?:^|\s)@([A-Za-z0-9_~./-]*[A-Za-z0-9_])").unwrap());
+pub(crate) static IMPORT: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?:^|\s)@([A-Za-z0-9_~./-]*[A-Za-z0-9_])").unwrap());
 
 pub fn context_file(workspace: &Path, provider: &str, file: &str) -> ContextFile {
     let path = workspace.join(file);

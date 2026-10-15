@@ -1176,6 +1176,10 @@ pub struct ProjectSettings {
     /// Optional in TypeScript: forms that send the settings back may leave it out (the server keeps it).
     #[ts(as = "Option<BTreeMap<String, String>>", optional)]
     pub env: BTreeMap<String, String>,
+    /// The project's own hooks (`hooks.rs`), after the machine's; one with a machine hook's id replaces it. Changed
+    /// through `PUT /api/hooks` only (optional here: `PATCH /api/projects/{slug}` keeps them).
+    #[ts(as = "Option<Vec<Hook>>", optional)]
+    pub hooks: Vec<Hook>,
 }
 
 /// A project's manager: an interactive agent session (`<prefix>mgr-<slug>`) MAP keeps running while `enabled`.
@@ -3433,6 +3437,237 @@ pub struct McpTestResult {
     pub error: Option<String>,
     #[ts(type = "number")]
     pub duration_ms: u64,
+}
+
+// ---- Configure → Rules (rules.rs): the context files agents read at session start
+
+/// Whether one provider reads a rule file, and how.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct RuleReader {
+    pub provider: String,
+    pub reads: bool,
+    /// `own file` (its root file, read by name), `via CLAUDE.md` (an `@path` import line in that root file, or a file
+    /// it imports), or empty when it does not read it.
+    pub how: String,
+    /// `PUT /api/rules/readers` cannot change this provider: the file is its own root file, or the provider has no
+    /// import syntax (Codex reads only its AGENTS.md).
+    pub fixed: bool,
+    /// Why it is fixed, or what a change would edit.
+    pub note: String,
+}
+
+/// One rule file: a provider's root context file (`CLAUDE.md`, `AGENTS.md`, `GEMINI.md`…), a file one of them
+/// imports, a rule file MAP created in the project, or a provider's own machine-wide file in its home folder.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct RuleFile {
+    /// Relative to the project folder for project files; `~/…` (or the absolute path) for machine files. The key
+    /// for `PUT`/`DELETE /api/rules` and `PUT /api/rules/readers`.
+    pub path: String,
+    pub abs_path: String,
+    pub source: ConfigSource,
+    pub exists: bool,
+    pub lines: u32,
+    #[ts(type = "number")]
+    pub bytes: u64,
+    /// Providers that read it at session start (directly, or through an `@path` import in their root file).
+    pub readers: Vec<String>,
+    /// Every provider with a context file, reading it or not, with whether the readers call can change it.
+    pub reader_options: Vec<RuleReader>,
+    /// The `@path` imports it contains, as written (`./` dropped).
+    pub imports: Vec<String>,
+    /// The providers whose root file this is (read by name at session start).
+    pub root_of: Vec<String>,
+    /// The contents, at most `max_bytes` (see `truncated`).
+    pub body: String,
+    pub truncated: bool,
+}
+
+/// `GET /api/rules`: project files first (with `project`), then the machine files.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct RulesOverview {
+    pub project: Option<String>,
+    /// The project folder (empty in machine scope).
+    pub folder: String,
+    pub files: Vec<RuleFile>,
+    /// Largest body returned or accepted, in bytes.
+    #[ts(type = "number")]
+    pub max_bytes: u64,
+}
+
+/// `PUT /api/rules`: create or replace a rule file. Without `project` only a machine file (its `path` from the
+/// listing) can be written.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct RuleWrite {
+    #[serde(default)]
+    pub project: Option<String>,
+    pub path: String,
+    pub body: String,
+}
+
+/// `DELETE /api/rules`.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct RuleDelete {
+    #[serde(default)]
+    pub project: Option<String>,
+    pub path: String,
+}
+
+/// `PUT /api/rules/readers`: exactly these providers read the file afterwards, by adding or removing an `@<path>`
+/// import line in each provider's root file. Fixed readers (see [`RuleReader::fixed`]) must stay as they are.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct RuleReaders {
+    #[serde(default)]
+    pub project: Option<String>,
+    pub path: String,
+    pub readers: Vec<String>,
+}
+
+// ---- Configure → Hooks (hooks.rs): commands MAP runs around a task
+
+/// When a hook runs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum HookEvent {
+    /// Before a task's agent session starts, in the task's folder (its worktree when it has one).
+    PreLaunch,
+    /// After verify passes, before the audit.
+    PostVerify,
+    /// After the task is accepted, after `[orchestrator] post_done`.
+    PostDone,
+    /// When a task ends failed. Never changes the task.
+    OnFail,
+    /// When the watcher marks a task's session stalled (once per stall). Never changes the task.
+    OnStall,
+}
+
+impl HookEvent {
+    pub const ALL: [HookEvent; 5] = [HookEvent::PreLaunch, HookEvent::PostVerify, HookEvent::PostDone, HookEvent::OnFail, HookEvent::OnStall];
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            HookEvent::PreLaunch => "pre_launch",
+            HookEvent::PostVerify => "post_verify",
+            HookEvent::PostDone => "post_done",
+            HookEvent::OnFail => "on_fail",
+            HookEvent::OnStall => "on_stall",
+        }
+    }
+
+    /// Whether a blocking failure stops the task (`pre_launch`, `post_verify`, `post_done`).
+    pub fn can_block(self) -> bool {
+        matches!(self, HookEvent::PreLaunch | HookEvent::PostVerify | HookEvent::PostDone)
+    }
+}
+
+/// A shell command MAP runs at `event` (`sh -c`, in the task's folder, with `MAP_EVENT`, `MAP_TASK_ID`,
+/// `MAP_TASK_TITLE`, `MAP_PROJECT`, `MAP_SESSION`, `MAP_BRANCH` and `[workspace.env]`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct Hook {
+    /// Empty on `PUT` for a new hook: MAP makes one. A project hook with a machine hook's id replaces it there.
+    #[serde(default)]
+    pub id: String,
+    pub event: HookEvent,
+    pub command: String,
+    /// A failure (non-zero exit or timeout) stops the task (failed, a person decides); otherwise it is only logged.
+    /// Ignored for `on_fail` and `on_stall`.
+    #[serde(default)]
+    pub blocking: bool,
+    /// 1 to 3600.
+    #[serde(default = "default_hook_timeout")]
+    pub timeout_secs: u32,
+    #[serde(default = "default_hook_enabled")]
+    pub enabled: bool,
+}
+
+fn default_hook_timeout() -> u32 {
+    300
+}
+
+fn default_hook_enabled() -> bool {
+    true
+}
+
+/// A hook as the Configure screen lists it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct HookItem {
+    pub id: String,
+    pub event: HookEvent,
+    pub command: String,
+    pub blocking: bool,
+    pub timeout_secs: u32,
+    pub enabled: bool,
+    pub source: ConfigSource,
+    /// From `[orchestrator] post_done` in map.toml (id `toml:post_done:<n>`): shown, run as before, not editable here.
+    pub read_only: bool,
+}
+
+/// One hook event and what it means, for the screen's groups.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct HookEventInfo {
+    pub event: HookEvent,
+    pub description: String,
+    /// Whether `blocking` means anything for it.
+    pub can_block: bool,
+}
+
+/// `GET /api/hooks` (and the answer to `PUT`): machine hooks, plus the project's with `project` (an override in
+/// place of the machine hook it replaces), in run order.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct HooksOverview {
+    pub project: Option<String>,
+    pub hooks: Vec<HookItem>,
+    pub events: Vec<HookEventInfo>,
+}
+
+/// `PUT /api/hooks`: replaces the scope's list (the machine's without `project`). `toml:` hooks are read-only and
+/// skipped.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct HooksWrite {
+    #[serde(default)]
+    pub project: Option<String>,
+    pub hooks: Vec<Hook>,
+}
+
+/// `POST /api/hooks/test`: run a command now in the project folder (or `workspace.dir`).
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct HookTest {
+    #[serde(default)]
+    pub project: Option<String>,
+    pub command: String,
+    #[serde(default = "default_hook_timeout")]
+    pub timeout_secs: u32,
+}
+
+/// How one run of a command went.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct HookRun {
+    /// `None` when it timed out or was killed by a signal.
+    pub exit_code: Option<i32>,
+    #[ts(type = "number")]
+    pub duration_ms: u64,
+    /// The last 20 lines of stdout and stderr together, secrets masked.
+    pub output_tail: String,
+    pub timed_out: bool,
+}
+
+impl HookRun {
+    pub fn ok(&self) -> bool {
+        self.exit_code == Some(0) && !self.timed_out
+    }
 }
 
 // ---- activity graph (trace.rs): who made what, and what each agent used

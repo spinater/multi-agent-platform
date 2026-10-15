@@ -110,6 +110,25 @@ impl Kind {
     pub const RETRY_AGAIN: Kind = k("decision.retry.again", N::Retry, N::Ready, W, "attempt left → back to ready, failure added to the prompt");
     pub const RETRY_FAILED: Kind = k("decision.retry.failed", N::Retry, N::Failed, E, "no attempts left → failed");
     pub const RETRY_KEPT: Kind = k("decision.retry.kept", N::Retry, N::Watch, W, "person attached or typing → keep watching");
+    // hooks.rs: Configure → Hooks, each run of a hook (progress at its point of the flow).
+    pub const HOOK_PRE_LAUNCH_PASS: Kind = k("decision.hook.pre_launch.pass", N::Launch, N::Launch, I, "pre_launch hook passed");
+    pub const HOOK_PRE_LAUNCH_FAIL: Kind = k("decision.hook.pre_launch.fail", N::Launch, N::Launch, W, "pre_launch hook failed");
+    pub const HOOK_PRE_LAUNCH_TIMEOUT: Kind = k("decision.hook.pre_launch.timeout", N::Launch, N::Launch, W, "pre_launch hook timed out");
+    pub const HOOK_POST_VERIFY_PASS: Kind = k("decision.hook.post_verify.pass", N::Audit, N::Audit, I, "post_verify hook passed");
+    pub const HOOK_POST_VERIFY_FAIL: Kind = k("decision.hook.post_verify.fail", N::Audit, N::Audit, W, "post_verify hook failed");
+    pub const HOOK_POST_VERIFY_TIMEOUT: Kind = k("decision.hook.post_verify.timeout", N::Audit, N::Audit, W, "post_verify hook timed out");
+    pub const HOOK_POST_DONE_PASS: Kind = k("decision.hook.post_done.pass", N::Post, N::Post, I, "post_done hook passed");
+    pub const HOOK_POST_DONE_FAIL: Kind = k("decision.hook.post_done.fail", N::Post, N::Post, W, "post_done hook failed");
+    pub const HOOK_POST_DONE_TIMEOUT: Kind = k("decision.hook.post_done.timeout", N::Post, N::Post, W, "post_done hook timed out");
+    pub const HOOK_ON_FAIL_PASS: Kind = k("decision.hook.on_fail.pass", N::Failed, N::Failed, I, "on_fail hook passed");
+    pub const HOOK_ON_FAIL_FAIL: Kind = k("decision.hook.on_fail.fail", N::Failed, N::Failed, W, "on_fail hook failed");
+    pub const HOOK_ON_FAIL_TIMEOUT: Kind = k("decision.hook.on_fail.timeout", N::Failed, N::Failed, W, "on_fail hook timed out");
+    pub const HOOK_ON_STALL_PASS: Kind = k("decision.hook.on_stall.pass", N::Watch, N::Watch, I, "on_stall hook passed");
+    pub const HOOK_ON_STALL_FAIL: Kind = k("decision.hook.on_stall.fail", N::Watch, N::Watch, W, "on_stall hook failed");
+    pub const HOOK_ON_STALL_TIMEOUT: Kind = k("decision.hook.on_stall.timeout", N::Watch, N::Watch, W, "on_stall hook timed out");
+    // A blocking hook failed: the task fails and waits for a person (no retry).
+    pub const HOOK_PRE_LAUNCH_BLOCKED: Kind = k("decision.hook.pre_launch.blocked", N::Launch, N::Failed, E, "blocking pre_launch hook failed → failed (a person decides)");
+    pub const HOOK_POST_VERIFY_BLOCKED: Kind = k("decision.hook.post_verify.blocked", N::Audit, N::Failed, E, "blocking post_verify hook failed → failed (a person decides)");
 }
 
 impl Kind {
@@ -121,6 +140,19 @@ impl Kind {
             Some("heavy") => Kind::PICK_TIER_HEAVY,
             _ => Kind::PICK_TIER_ABSTAINED,
         }
+    }
+
+    /// One run of an `event` hook: `outcome` 0 passed, 1 failed, 2 timed out.
+    pub fn hook(event: crate::model::HookEvent, outcome: u8) -> Kind {
+        use crate::model::HookEvent as H;
+        let kinds = match event {
+            H::PreLaunch => [Kind::HOOK_PRE_LAUNCH_PASS, Kind::HOOK_PRE_LAUNCH_FAIL, Kind::HOOK_PRE_LAUNCH_TIMEOUT],
+            H::PostVerify => [Kind::HOOK_POST_VERIFY_PASS, Kind::HOOK_POST_VERIFY_FAIL, Kind::HOOK_POST_VERIFY_TIMEOUT],
+            H::PostDone => [Kind::HOOK_POST_DONE_PASS, Kind::HOOK_POST_DONE_FAIL, Kind::HOOK_POST_DONE_TIMEOUT],
+            H::OnFail => [Kind::HOOK_ON_FAIL_PASS, Kind::HOOK_ON_FAIL_FAIL, Kind::HOOK_ON_FAIL_TIMEOUT],
+            H::OnStall => [Kind::HOOK_ON_STALL_PASS, Kind::HOOK_ON_STALL_FAIL, Kind::HOOK_ON_STALL_TIMEOUT],
+        };
+        kinds[outcome.min(2) as usize]
     }
 }
 
@@ -190,6 +222,23 @@ pub const ALL: &[Kind] = &[
     Kind::RETRY_AGAIN,
     Kind::RETRY_FAILED,
     Kind::RETRY_KEPT,
+    Kind::HOOK_PRE_LAUNCH_PASS,
+    Kind::HOOK_PRE_LAUNCH_FAIL,
+    Kind::HOOK_PRE_LAUNCH_TIMEOUT,
+    Kind::HOOK_POST_VERIFY_PASS,
+    Kind::HOOK_POST_VERIFY_FAIL,
+    Kind::HOOK_POST_VERIFY_TIMEOUT,
+    Kind::HOOK_POST_DONE_PASS,
+    Kind::HOOK_POST_DONE_FAIL,
+    Kind::HOOK_POST_DONE_TIMEOUT,
+    Kind::HOOK_ON_FAIL_PASS,
+    Kind::HOOK_ON_FAIL_FAIL,
+    Kind::HOOK_ON_FAIL_TIMEOUT,
+    Kind::HOOK_ON_STALL_PASS,
+    Kind::HOOK_ON_STALL_FAIL,
+    Kind::HOOK_ON_STALL_TIMEOUT,
+    Kind::HOOK_PRE_LAUNCH_BLOCKED,
+    Kind::HOOK_POST_VERIFY_BLOCKED,
 ];
 
 /// Records a decision for `task` through `hub.event`. A decision identical (kind and message) to one of the task's
@@ -279,7 +328,7 @@ pub fn model(hub: &Hub, tick_secs: u64) -> DecisionModel {
         point(N::End, "End decision", "Can the worker session be closed?", "End unless a tmux client is attached or the input line has text", "detect::end_decision(clients, pane)", false),
         point(N::Retry, "Retry or fail", "Is there an attempt left?", "attempts < max_attempts → pending again with the failure in the prompt; a person in the session keeps it running", "retry_or_fail() · orchestrator.max_attempts", false),
         point(N::Blocked, "Blocked", "A dependency failed or was cancelled.", "a depends_on task is failed or cancelled; retry it to unblock", "tick · \"Blocked: dependency #n\"", true),
-        point(N::Failed, "Failed", "Task failed. A person decides what next.", "no attempts left, or a post_done hook failed", "TaskStatus::Failed", true),
+        point(N::Failed, "Failed", "Task failed. A person decides what next.", "no attempts left, or a blocking hook (pre_launch, post_verify, post_done) failed", "TaskStatus::Failed", true),
         point(N::Done, "Done", "Task is done.", "verified, audited (or accepted), hooks ran", "TaskStatus::Done", true),
     ];
     let edges = vec![
@@ -293,7 +342,8 @@ pub fn model(hub: &Hub, tick_secs: u64) -> DecisionModel {
         edge(N::Watch, N::Retry, "failed · exited · auth · timeout"),
         edge(N::Verify, N::Audit, "all pass"),
         edge(N::Verify, N::Retry, "command failed"),
-        edge(N::Launch, N::Failed, "no worktree possible"),
+        edge(N::Launch, N::Failed, "no worktree possible · pre_launch hook failed"),
+        edge(N::Audit, N::Failed, "post_verify hook failed"),
         edge(N::Audit, N::Land, "PASS · off · skipped · Reflex: no audit"),
         edge(N::Land, N::Post, "merged · pushed · nothing · shared"),
         edge(N::Land, N::Review, "keep · blocked"),

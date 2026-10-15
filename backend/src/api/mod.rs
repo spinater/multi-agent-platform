@@ -4,6 +4,7 @@ mod activity;
 mod agents;
 mod env;
 mod configure;
+mod rules_hooks;
 mod fs;
 mod git;
 mod git_access;
@@ -96,6 +97,11 @@ pub fn router(hub: Arc<Hub>) -> Router {
         .route("/orchestrator/step", post(orchestrator_step))
         // ----
         // ---- skills: context files, skills and their use per workspace; enabling writes .claude/settings.local.json
+        // ---- Configure: rules and hooks
+        .route("/rules", get(rules_hooks::list_rules).put(rules_hooks::put_rule).delete(rules_hooks::delete_rule))
+        .route("/rules/readers", put(rules_hooks::put_readers))
+        .route("/hooks", get(rules_hooks::list_hooks).put(rules_hooks::put_hooks))
+        .route("/hooks/test", post(rules_hooks::test_hook))
         .route("/skills", get(skills::overview))
         .route("/skills/enabled", axum::routing::patch(skills::set_enabled))
         .route("/skills/file", get(skills::file))

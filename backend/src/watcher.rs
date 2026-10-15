@@ -157,6 +157,12 @@ impl Watcher {
             }
             if state == SessionState::Stalled && s.state != SessionState::Stalled {
                 hub.event(Level::Warning, "session.stalled", Some(&s.name), s.task_id, format!("No pane change for {}", short(stalled_for))).await;
+                // Configure → Hooks: on_stall, once per stall, for a task's session; in the background.
+                if let Some(id) = s.task_id
+                    && let Ok(Some(task)) = hub.store.task(id).await
+                {
+                    crate::hooks::spawn_event(Arc::clone(&hub), crate::model::HookEvent::OnStall, task, Some(s.name.clone()));
+                }
             }
             s.state = state;
             s.detail = detail;

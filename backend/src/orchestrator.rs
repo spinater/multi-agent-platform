@@ -15,7 +15,7 @@ use tokio::process::Command;
 use crate::decisions::{self as dec, Kind, record};
 use crate::detect::EndDecision;
 use crate::hub::{Hub, LaunchRequest, quote};
-use crate::model::{LandMode, Level, Role, SessionState, Task, TaskStatus};
+use crate::model::{HookEvent, LandMode, Level, Role, SessionState, Task, TaskStatus};
 
 pub(crate) const TICK: Duration = Duration::from_secs(5);
 const OUTPUT_TAIL: usize = 4000;
@@ -347,10 +347,18 @@ impl Orchestrator {
                 task.result = Some(why.clone());
                 self.hub.put_task(&mut task).await?;
                 self.hub.event(Level::Error, "task.failed", None, Some(task.id), format!("Failed: {why}")).await;
+                self.on_fail(&task);
                 return Ok(false);
             }
         }
         let session = format!("{}task-{}-{}", self.hub.config.workspace.session_prefix, task.id, task.attempts);
+        // Configure → Hooks: pre_launch, in the task's folder (its worktree, made above). A blocking failure stops
+        // the task for a person; no session is started.
+        if let Some(reason) = self.blocking_hooks(HookEvent::PreLaunch, &task, Some(&session)).await {
+            record(&self.hub, Kind::HOOK_PRE_LAUNCH_BLOCKED, &task, dec::last_line(reason.lines().next().unwrap_or_default())).await;
+            self.fail_for_person(task, reason).await?;
+            return Ok(false);
+        }
         let previous_failure = if task.attempts > 1 { task.result.clone() } else { None };
         let prompt = self.build_prompt(&task, &session, previous_failure.as_deref(), &crate::project_settings::verify(&self.hub, &task).await);
         let req = LaunchRequest {
@@ -388,6 +396,9 @@ impl Orchestrator {
                     record(&self.hub, Kind::RETRY_AGAIN, &task, used).await;
                 }
                 self.hub.put_task(&mut task).await?;
+                if task.status == TaskStatus::Failed {
+                    self.on_fail(&task);
+                }
                 Ok(false)
             }
         }
@@ -485,7 +496,39 @@ impl Orchestrator {
             task.status = TaskStatus::Failed;
             self.hub.event(Level::Error, "task.failed", task.session.as_deref(), Some(task.id), format!("Failed: {headline}")).await;
         }
-        self.hub.put_task(&mut task).await
+        self.hub.put_task(&mut task).await?;
+        if task.status == TaskStatus::Failed {
+            self.on_fail(&task);
+        }
+        Ok(())
+    }
+
+    /// Configure → Hooks: `on_fail`, in the background; it never changes the task.
+    fn on_fail(&self, task: &Task) {
+        crate::hooks::spawn_event(Arc::clone(&self.hub), HookEvent::OnFail, task.clone(), None);
+    }
+
+    /// Runs `event`'s hooks; the failure reason when a blocking one failed. A hook runner error (the store) is
+    /// logged and lets the task go on.
+    async fn blocking_hooks(&self, event: HookEvent, task: &Task, session: Option<&str>) -> Option<String> {
+        match crate::hooks::run_event(&self.hub, event, task, session).await {
+            Ok(outcome) => outcome.blocked,
+            Err(err) => {
+                tracing::warn!(task = task.id, "{} hooks: {err:#}", event.as_str());
+                None
+            }
+        }
+    }
+
+    /// Fails the task without a retry (a blocking hook failed: a person decides), then runs `on_fail`.
+    async fn fail_for_person(&self, mut task: Task, reason: String) -> Result<()> {
+        let headline = reason.lines().next().unwrap_or_default().to_string();
+        task.status = TaskStatus::Failed;
+        task.result = Some(reason);
+        self.hub.put_task(&mut task).await?;
+        self.hub.event(Level::Error, "task.failed", task.session.as_deref(), Some(task.id), format!("Failed: {headline}")).await;
+        self.on_fail(&task);
+        Ok(())
     }
 
     fn spawn_finish(&self, task: Task) {
@@ -531,6 +574,11 @@ impl Orchestrator {
         if task.status == TaskStatus::Verifying {
             if let Some(failure) = self.verify(&task, &dir).await? {
                 return self.retry_or_fail(task, &failure).await;
+            }
+            // Configure → Hooks: post_verify, before the audit. A blocking failure waits for a person (no retry).
+            if let Some(reason) = self.blocking_hooks(HookEvent::PostVerify, &task, None).await {
+                record(hub, Kind::HOOK_POST_VERIFY_BLOCKED, &task, dec::last_line(reason.lines().next().unwrap_or_default())).await;
+                return self.fail_for_person(task, reason).await;
             }
             if crate::project_settings::audit_enabled(hub, &task).await {
                 task.status = TaskStatus::Auditing;
@@ -579,11 +627,36 @@ impl Orchestrator {
                 task.result = Some(format!("post_done `{command}` failed:\n{output}"));
                 hub.put_task(&mut task).await?;
                 hub.event(Level::Error, "task.post_done_failed", task.session.as_deref(), Some(task.id), format!("`{command}` failed")).await;
+                self.on_fail(&task);
                 return Ok(());
             }
             record(hub, Kind::POST_CMD_PASS, &task, format!("`{command}` exit 0")).await;
         }
-        record(hub, Kind::POST_PASS, &task, if cfg.post_done.is_empty() { "no post_done hooks".to_string() } else { format!("all {} hooks exit 0", cfg.post_done.len()) }).await;
+        // Configure → Hooks: post_done, after the map.toml list (machine hooks, then the project's).
+        let hooks = match crate::hooks::run_event(hub, HookEvent::PostDone, &task, None).await {
+            Ok(o) => o,
+            Err(err) => {
+                tracing::warn!(task = task.id, "post_done hooks: {err:#}");
+                Default::default()
+            }
+        };
+        if let Some(reason) = hooks.blocked {
+            let headline = reason.lines().next().unwrap_or_default().to_string();
+            record(hub, Kind::POST_FAIL, &task, dec::last_line(&headline)).await;
+            task.status = TaskStatus::Failed;
+            task.result = Some(reason);
+            hub.put_task(&mut task).await?;
+            hub.event(Level::Error, "task.post_done_failed", task.session.as_deref(), Some(task.id), headline).await;
+            self.on_fail(&task);
+            return Ok(());
+        }
+        let total = cfg.post_done.len() + hooks.ran;
+        let post = match (total, hooks.failures.len()) {
+            (0, _) => "no post_done hooks".to_string(),
+            (n, 0) => format!("all {n} hooks exit 0"),
+            (n, f) => format!("{} of {n} hooks exit 0 · {f} non-blocking failed", n - f),
+        };
+        record(hub, Kind::POST_PASS, &task, post).await;
 
         let closed = if let Some(name) = task.session.clone()
             && hub.store.session(&name).await?.is_some_and(|s| s.state.is_live())
