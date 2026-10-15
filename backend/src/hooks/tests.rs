@@ -36,7 +36,7 @@ fn hook(id: &str, event: HookEvent, command: &str, blocking: bool) -> Hook {
 }
 
 fn new_task(title: &str, project: Option<&str>) -> NewTask {
-    NewTask { title: title.into(), prompt: format!("do {title}"), depends_on: vec![], provider: None, model: None, project: project.map(String::from) }
+    NewTask { title: title.into(), prompt: format!("do {title}"), depends_on: vec![], provider: None, model: None, project: project.map(String::from), workflow: None }
 }
 
 async fn kinds(hub: &Hub, id: i64) -> Vec<String> {

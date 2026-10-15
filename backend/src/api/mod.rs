@@ -5,6 +5,7 @@ mod agents;
 mod env;
 mod configure;
 mod rules_hooks;
+mod workflows;
 mod fs;
 mod git;
 mod git_access;
@@ -112,6 +113,9 @@ pub fn router(hub: Arc<Hub>) -> Router {
         .route("/permissions", get(configure::permissions).put(configure::set_permissions))
         .route("/mcp", get(configure::mcp).put(configure::save_mcp).delete(configure::delete_mcp))
         .route("/mcp/test", post(configure::test_mcp))
+        .route("/workflows", get(workflows::list).put(workflows::save).delete(workflows::delete))
+        .route("/workflows/{id}/stats", get(workflows::stats))
+        .route("/configure/ask", post(workflows::ask))
         // ---- project settings and provider sign-in
         .route("/projects/defaults", get(projects::defaults))
         .route("/projects/inspect", post(projects::inspect))
@@ -536,6 +540,17 @@ struct CreateTask {
     provider: Option<String>,
     model: Option<String>,
     project: Option<String>,
+    /// A workflow id of the task's scope; empty or missing: a workflow trigger may choose one.
+    workflow: Option<String>,
+}
+
+/// A workflow the task may name: one the project (or the machine) has.
+pub(crate) async fn known_workflow(hub: &Hub, project: Option<&str>, workflow: Option<String>) -> Result<Option<String>, ApiError> {
+    let Some(id) = workflow.map(|w| w.trim().to_string()).filter(|w| !w.is_empty()) else { return Ok(None) };
+    if crate::workflows::find(hub, project, &id).await?.is_none() {
+        return Err(ApiError(StatusCode::BAD_REQUEST, format!("workflow `{id}` does not exist for {}", project.unwrap_or("the machine"))));
+    }
+    Ok(Some(id))
 }
 
 /// An empty project means `workspace.dir`; a named one must exist.
@@ -554,12 +569,21 @@ async fn create_task(State(hub): State<Arc<Hub>>, Json(body): Json<CreateTask>) 
         hub.spec(p)?;
     }
     let project = known_project(&hub, body.project).await?;
+    let workflow = known_workflow(&hub, project.as_deref(), body.workflow).await?;
     for dep in &body.depends_on {
         hub.store.task(*dep).await?.ok_or_else(|| ApiError(StatusCode::BAD_REQUEST, format!("dependency #{dep} does not exist")))?;
     }
     let task = hub
         .store
-        .create_task(NewTask { title: body.title.trim().into(), prompt: body.prompt, depends_on: body.depends_on, provider, model: body.model.filter(|m| !m.is_empty()), project })
+        .create_task(NewTask {
+            title: body.title.trim().into(),
+            prompt: body.prompt,
+            depends_on: body.depends_on,
+            provider,
+            model: body.model.filter(|m| !m.is_empty()),
+            project,
+            workflow,
+        })
         .await?;
     hub.announce_task(&task);
     hub.event(Level::Info, "task.created", None, Some(task.id), format!("Task #{} created: {}", task.id, task.title)).await;

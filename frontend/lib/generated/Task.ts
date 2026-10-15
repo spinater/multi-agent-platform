@@ -3,6 +3,7 @@ import type { TaskGit } from "./TaskGit";
 import type { TaskIntake } from "./TaskIntake";
 import type { TaskScope } from "./TaskScope";
 import type { TaskStatus } from "./TaskStatus";
+import type { TaskWorkflowState } from "./TaskWorkflowState";
 
 export type Task = { id: number, title: string, prompt: string, depends_on: number[], 
 /**
@@ -34,4 +35,13 @@ intake: TaskIntake | null,
  * Who created it: `owner`, `manager` (a project's manager, also for Telegram `/ask`), `planner` (an approved
  * plan).
  */
-created_by: string, created_at: string, updated_at: string, };
+created_by: string, 
+/**
+ * The workflow it runs (`Workflow::id`): pinned at creation, or chosen by a workflow's trigger when the task first
+ * becomes ready (`decision.workflow.chosen`). `None`: the fixed pipeline (verify, audit, land, post_done).
+ */
+workflow: string | null, 
+/**
+ * Where the task is in its workflow, saved at every step so a restart resumes there.
+ */
+workflow_state: TaskWorkflowState | null, created_at: string, updated_at: string, };

@@ -249,7 +249,7 @@ pub async fn approve(hub: &Hub, id: i64) -> PlanResult<PlanApproved> {
         let depends_on = t.depends_on.iter().map(|d| ids.get(d).copied().context("dependency created out of order")).collect::<Result<Vec<_>>>()?;
         let task = hub
             .store
-            .create_task(NewTask { title: t.title.clone(), prompt: t.prompt.clone(), depends_on, provider: t.provider.clone(), model: t.model.clone(), project: plan.project.clone() })
+            .create_task(NewTask { title: t.title.clone(), prompt: t.prompt.clone(), depends_on, provider: t.provider.clone(), model: t.model.clone(), project: plan.project.clone(), workflow: None })
             .await?;
         hub.store.set_plan_task_id(id, &t.key, task.id).await?;
         hub.store.set_task_created_by(task.id, "planner").await?;

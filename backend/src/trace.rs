@@ -636,8 +636,8 @@ fn hang(g: &mut G, owner: &str, items: &[TraceItem]) {
 fn step_label(kind: &str, msg: &str) -> (String, &'static str) {
     let outcome = kind.rsplit('.').next().unwrap_or("");
     let state = match outcome {
-        "fail" | "failed" | "no_auditor" | "conflict" | "reverify_fail" | "error" | "worktree_failed" | "worktree_fatal" => "fail",
-        "pass" | "merged" | "pushed" | "shared" | "nothing" | "off" | "skipped" | "skipped_reflex" | "closed" | "kept" => "ok",
+        "fail" | "failed" | "no_auditor" | "conflict" | "reverify_fail" | "error" | "worktree_failed" | "worktree_fatal" | "exhausted" => "fail",
+        "pass" | "merged" | "pushed" | "shared" | "nothing" | "off" | "skipped" | "skipped_reflex" | "closed" | "kept" | "ignored" => "ok",
         "keep" | "blocked" => "waiting",
         _ => "running",
     };
@@ -797,6 +797,18 @@ pub fn build(input: &Input) -> ActivityGraph {
                     hang(&mut g, &aid, items);
                 }
             } else if let Some(rest) = k.strip_prefix("decision.") {
+                // A workflow's verify, audit and hook steps and its failed end show as the fixed pipeline's steps.
+                let workflow = rest.strip_prefix("workflow.").and_then(|w| w.split_once('.')).and_then(|(kind, outcome)| match (kind, outcome) {
+                    ("verify", o) => Some(format!("verify.{o}")),
+                    ("audit", o) => Some(format!("audit.{o}")),
+                    ("hook", o) => Some(format!("post.{o}")),
+                    ("end", "failed") => Some("retry.failed".to_string()),
+                    _ => None,
+                });
+                if rest.starts_with("workflow.") && workflow.is_none() {
+                    continue;
+                }
+                let rest = workflow.as_deref().unwrap_or(rest);
                 let phase = rest.split('.').next().unwrap_or("");
                 let (step, label): (&'static str, &str) = match phase {
                     "verify" => ("verify", "verify"),

@@ -17,6 +17,8 @@ use crate::detect::EndDecision;
 use crate::hub::{Hub, LaunchRequest, quote};
 use crate::model::{HookEvent, LandMode, Level, Role, SessionState, Task, TaskStatus};
 
+mod workflow;
+
 pub(crate) const TICK: Duration = Duration::from_secs(5);
 const OUTPUT_TAIL: usize = 4000;
 
@@ -174,7 +176,7 @@ impl Orchestrator {
                 }
             }
             record(&self.hub, Kind::READY_GO, task, dec::ready_detail(task, active, self.hub.max_parallel())).await;
-            if self.start(task.clone()).await? {
+            if self.begin(task.clone()).await? {
                 active += 1;
                 if let Some(started) = self.hub.store.task(task.id).await? {
                     holding.push(started);
@@ -312,7 +314,14 @@ impl Orchestrator {
 
     /// Returns true when a worker session was started.
     async fn start(&self, mut task: Task) -> Result<bool> {
-        let Some(provider) = self.pick_provider(&task).await else {
+        // A workflow's agent step names its agent's provider and model, instructions and the verify commands it runs.
+        let step = self.agent_step(&task).await;
+        let from_step = step.as_ref().and_then(|s| s.provider.clone()).filter(|p| self.hub.provider_available(p) && self.hub.cooldown_until(p).is_none());
+        let picked = match from_step.clone() {
+            Some(p) => Some(p),
+            None => self.pick_provider(&task).await,
+        };
+        let Some(provider) = picked else {
             let note = "Waiting: no provider is available (missing binary, quota or auth cooldown)".to_string();
             if task.result.as_deref() != Some(note.as_str()) {
                 record(&self.hub, Kind::PICK_NONE, &task, dec::pick_detail(&self.hub, &task, None).await).await;
@@ -324,8 +333,16 @@ impl Orchestrator {
         let spec = self.hub.spec(&provider)?;
         // A model only carries over when it belongs to the chosen provider.
         let usual = task.model.clone().filter(|m| spec.models.contains(m)).or(crate::project_settings::model(&self.hub, &task, &provider).await);
-        let model = self.tier_gate(&task, &provider).await.or(usual);
-        record(&self.hub, Kind::PICK_CHOSEN, &task, dec::pick_detail(&self.hub, &task, Some(&provider)).await).await;
+        let step_model = step.as_ref().filter(|_| from_step.is_some()).and_then(|s| s.model.clone()).filter(|m| spec.models.is_empty() || spec.models.contains(m));
+        let model = match step_model {
+            Some(m) => Some(m),
+            None => self.tier_gate(&task, &provider).await.or(usual),
+        };
+        let pick = match (&step, &from_step) {
+            (Some(s), Some(p)) => format!("workflow step {} · agent {} → {p}", s.node, s.agent),
+            _ => dec::pick_detail(&self.hub, &task, Some(&provider)).await,
+        };
+        record(&self.hub, Kind::PICK_CHOSEN, &task, pick).await;
         task.attempts += 1;
         // `branches.mode = worktree`: the task's own branch and worktree, saved before the launch reads it.
         match crate::worktrees::prepare(&self.hub, &mut task).await {
@@ -359,8 +376,16 @@ impl Orchestrator {
             self.fail_for_person(task, reason).await?;
             return Ok(false);
         }
-        let previous_failure = if task.attempts > 1 { task.result.clone() } else { None };
-        let prompt = self.build_prompt(&task, &session, previous_failure.as_deref(), &crate::project_settings::verify(&self.hub, &task).await);
+        let prompt = match &step {
+            Some(s) => {
+                let view = Task { prompt: s.prompt.clone(), ..task.clone() };
+                self.build_prompt(&view, &session, s.failure.as_deref(), &s.verify)
+            }
+            None => {
+                let previous_failure = if task.attempts > 1 { task.result.clone() } else { None };
+                self.build_prompt(&task, &session, previous_failure.as_deref(), &crate::project_settings::verify(&self.hub, &task).await)
+            }
+        };
         let req = LaunchRequest {
             name: Some(session.clone()),
             provider: provider.clone(),
@@ -375,8 +400,15 @@ impl Orchestrator {
                 task.status = TaskStatus::Running;
                 task.session = Some(s.name.clone());
                 task.result = None;
+                if let Some(step) = &step {
+                    self.agent_launched(&mut task, step);
+                }
                 self.hub.put_task(&mut task).await?;
                 record(&self.hub, Kind::LAUNCH_STARTED, &task, format!("hub.launch {} · {provider} ({}) · attempt {}", s.name, s.model, task.attempts)).await;
+                if let Some(step) = &step {
+                    let visit = task.workflow_state.as_ref().and_then(|w| w.visits.get(&step.node)).copied().unwrap_or(1);
+                    record(&self.hub, Kind::WF_AGENT_START, &task, format!("{} · {} on {provider} ({}) · visit {visit}", step.node, step.agent, s.model)).await;
+                }
                 self.hub
                     .event(Level::Info, "task.started", Some(&s.name), Some(task.id), format!("Task #{} attempt {} on {provider} ({})", task.id, task.attempts, s.model))
                     .await;
@@ -389,7 +421,15 @@ impl Orchestrator {
                 self.hub.cool_down(&provider, Utc::now() + chrono::Duration::minutes(5));
                 task.result = Some(reason);
                 let used = format!("attempt {} of {} used", task.attempts, self.hub.config.orchestrator.max_attempts);
-                if task.attempts >= self.hub.config.orchestrator.max_attempts {
+                // A workflow's agent steps launch many times in one run; only its retries count against the limit.
+                let exhausted = match task.workflow_state.as_mut() {
+                    Some(st) => {
+                        st.retries += 1;
+                        st.retries as i64 >= self.hub.config.orchestrator.max_attempts
+                    }
+                    None => task.attempts >= self.hub.config.orchestrator.max_attempts,
+                };
+                if exhausted {
                     record(&self.hub, Kind::RETRY_FAILED, &task, used).await;
                     task.status = TaskStatus::Failed;
                 } else {
@@ -484,6 +524,9 @@ impl Orchestrator {
                 }
             }
         }
+        if task.workflow_state.is_some() {
+            return self.workflow_retry(task, reason).await;
+        }
         let headline = reason.lines().next().unwrap_or_default().chars().take(300).collect::<String>();
         task.result = Some(reason);
         let used = format!("attempt {} of {} used", task.attempts, self.hub.config.orchestrator.max_attempts);
@@ -570,6 +613,11 @@ impl Orchestrator {
         let hub = &self.hub;
         let cfg = &hub.config.orchestrator;
         let dir = hub.task_dir(&task).await;
+
+        // A workflow task walks its graph; only a done end goes on to landing and post_done below.
+        if task.workflow_state.is_some() && task.status != TaskStatus::Landing && !self.run_workflow(&mut task).await? {
+            return Ok(());
+        }
 
         if task.status == TaskStatus::Verifying {
             if let Some(failure) = self.verify(&task, &dir).await? {
@@ -784,13 +832,13 @@ impl Orchestrator {
         Ok(())
     }
 
-    async fn audit(&self, task: &Task) -> Result<Verdict> {
-        let hub = &self.hub;
-        let prompt = format!(
+    /// The auditor's prompt; `pass` is the final line that means pass (`VERDICT: PASS`, or a workflow audit's text).
+    fn audit_prompt(task: &Task, pass: &str) -> String {
+        format!(
             "You are a strict code auditor. Task #{id} \"{title}\" was just completed in this repository and passed its verification commands.\n\
              Task description:\n{body}\n\nWorker summary:\n{summary}\n\n\
              {changes} Check that the change does what the task asks, \
-             has tests, and leaves nothing broken or half-done.\nAnswer with exactly one final line:\nVERDICT: PASS\nor\nVERDICT: FAIL: <reason>",
+             has tests, and leaves nothing broken or half-done.\nAnswer with exactly one final line:\n{pass}\nor\nVERDICT: FAIL: <reason>",
             changes = match &task.git {
                 Some(g) => format!(
                     "The work is on branch `{b}`, made from `{base}`: inspect `git log {base}..HEAD`, `git diff $(git merge-base {base} HEAD)` and git status (uncommitted changes count too).",
@@ -803,7 +851,12 @@ impl Orchestrator {
             title = task.title,
             body = task.prompt.trim(),
             summary = task.result.as_deref().unwrap_or("(none)"),
-        );
+        )
+    }
+
+    async fn audit(&self, task: &Task) -> Result<Verdict> {
+        let hub = &self.hub;
+        let prompt = Self::audit_prompt(task, "VERDICT: PASS");
         for provider in &crate::project_settings::audit_chain(hub, task).await {
             if !hub.provider_available(provider) || hub.cooldown_until(provider).is_some() {
                 record(hub, Kind::AUDIT_UNAVAILABLE, task, format!("{provider} · not found or cooling down")).await;
@@ -853,6 +906,8 @@ impl Orchestrator {
         }
         task.status = TaskStatus::Pending;
         task.attempts = 0;
+        // A workflow runs again from its trigger (the same workflow: `task.workflow` stays).
+        task.workflow_state = None;
         hub.put_task(&mut task).await?;
         Ok(task)
     }
@@ -910,6 +965,17 @@ impl Orchestrator {
         task.result = Some(format!("The owner reviewed your branch and sent it back:\n{note}"));
         if let Some(git) = task.git.as_mut() {
             git.land = None;
+        }
+        // A workflow task goes back to its last agent step with the note; without one, it runs from the trigger.
+        if let Some(st) = task.workflow_state.as_mut() {
+            match st.last_agent.clone() {
+                Some(agent) => {
+                    st.node = agent;
+                    st.launched = false;
+                    st.failure = task.result.clone();
+                }
+                None => task.workflow_state = None,
+            }
         }
         hub.put_task(&mut task).await?;
         hub.event(Level::Info, "task.sent_back", None, Some(id), format!("Task #{id} sent back to an agent")).await;
@@ -971,7 +1037,7 @@ mod tests {
     }
 
     fn new_task(title: &str, deps: Vec<i64>) -> NewTask {
-        NewTask { title: title.into(), prompt: format!("do {title}"), depends_on: deps, provider: None, model: None, project: None }
+        NewTask { title: title.into(), prompt: format!("do {title}"), depends_on: deps, provider: None, model: None, project: None, workflow: None }
     }
 
     async fn settle(orch: &mut Orchestrator) {
@@ -1745,5 +1811,314 @@ mod tests {
         let t = hub.store.task(t.id).await.unwrap().unwrap();
         assert!(t.intake.is_none() && t.status == TaskStatus::Running);
         assert!(reflex.bodies.lock().unwrap().is_empty());
+    }
+
+    // ---- workflows (orchestrator/workflow.rs)
+
+    use crate::model::{Workflow, WorkflowEdge, WorkflowEdgeKind as EK, WorkflowNode, WorkflowNodeKind as NK, WorkflowOutcome, WorkflowTrigger};
+
+    /// `claude` is `/bin/sh` (a worker in the fake terminal); `codex` is a fake auditor that prints
+    /// `<dir>/audit-reply.txt`. Isolated agent logins in the temporary folder: nothing in the home folder is read.
+    async fn wf_setup(extra: &str) -> (Arc<Hub>, Arc<FakeTerminal>, tempfile::TempDir) {
+        let dir = tempfile::tempdir().unwrap();
+        let auditor = dir.path().join("auditor.sh");
+        std::fs::write(&auditor, format!("#!/bin/sh\ncat '{}/audit-reply.txt'\n", dir.path().display())).unwrap();
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&auditor, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let text = format!(
+            "[projects]\npath = \"{0}\"\n[workspace]\ndir = \"{0}\"\n[server]\ndata_dir = \"{0}/data\"\n[agents_home]\nmode = \"isolated\"\ndir = \"{0}/agent-home\"\n\
+             [orchestrator]\nprovider_order = [\"claude\"]\n{extra}\n[providers.claude]\nbinary = \"/bin/sh\"\n\
+             [providers.codex]\nbinary = \"{1}\"\nmodels = []\ndefault_model = \"m\"\n",
+            dir.path().display(),
+            auditor.display()
+        );
+        let config = Config::parse(&text, Path::new("/")).unwrap();
+        let term = Arc::new(FakeTerminal::default());
+        let hub = Hub::new(config, Store::memory().await.unwrap(), term.clone());
+        (hub, term, dir)
+    }
+
+    fn wn(id: &str, kind: NK) -> WorkflowNode {
+        WorkflowNode { id: id.into(), kind, label: id.into(), ..Default::default() }
+    }
+
+    fn we(from: &str, to: &str, kind: EK) -> WorkflowEdge {
+        WorkflowEdge { from: from.into(), to: to.into(), kind }
+    }
+
+    /// trigger → code (claude) → ver (`test -f fixed`, ≤ max) → done; ver fail → code; plus a failed end.
+    fn fix_flow(max: u32) -> Workflow {
+        Workflow {
+            id: "bugfix".into(),
+            trigger: WorkflowTrigger { keywords: vec!["bug".into()], ..Default::default() },
+            nodes: vec![
+                wn("t", NK::Trigger),
+                WorkflowNode { agent: Some("claude".into()), prompt: Some("Write a failing test first.".into()), ..wn("code", NK::Agent) },
+                WorkflowNode { command: Some("test -f fixed".into()), max_attempts: Some(max), ..wn("ver", NK::Verify) },
+                WorkflowNode { outcome: Some(WorkflowOutcome::Done), ..wn("done", NK::End) },
+                WorkflowNode { outcome: Some(WorkflowOutcome::Failed), ..wn("failed", NK::End) },
+            ],
+            edges: vec![we("t", "code", EK::Next), we("code", "ver", EK::Next), we("ver", "done", EK::Pass), we("ver", "code", EK::Fail)],
+            ..Default::default()
+        }
+    }
+
+    async fn report(hub: &Hub, id: i64, status: &str) -> String {
+        let t = hub.store.task(id).await.unwrap().unwrap();
+        let s = t.session.unwrap();
+        std::fs::write(hub.result_file(&s), format!(r#"{{"status":"{status}","summary":"step"}}"#)).unwrap();
+        s
+    }
+
+    fn workflow_kinds(kinds: &[String]) -> Vec<&str> {
+        kinds.iter().filter_map(|k| k.strip_prefix("workflow.")).collect()
+    }
+
+    #[tokio::test]
+    async fn a_keyword_workflow_loops_verify_back_to_its_agent_then_lands() {
+        let (hub, term, dir) = wf_setup("verify = [\"false\"]").await;
+        crate::workflows::save(&hub, None, fix_flow(3)).await.unwrap();
+        let t = hub.store.create_task(new_task("login bug", vec![])).await.unwrap();
+        let mut orch = Orchestrator::new(hub.clone());
+        orch.tick().await.unwrap();
+        let now = hub.store.task(t.id).await.unwrap().unwrap();
+        assert_eq!((now.status, now.workflow.as_deref()), (TaskStatus::Running, Some("bugfix")));
+        let st = now.workflow_state.clone().unwrap();
+        assert_eq!((st.node.as_str(), st.launched, st.chosen_by.as_str()), ("code", true, "keyword bug"));
+        let prompt = std::fs::read_to_string(hub.run_dir(now.session.as_ref().unwrap()).join("prompt.md")).unwrap();
+        assert!(prompt.contains("Write a failing test first.") && prompt.contains("do login bug") && prompt.contains("test -f fixed"), "{prompt}");
+        assert!(!prompt.contains("orchestrator runs: false"), "the project verify is not the workflow's: {prompt}");
+
+        // Reported done without the fix: verify fails, back to the agent with the output.
+        let first = report(&hub, t.id, "done").await;
+        settle(&mut orch).await;
+        let now = hub.store.task(t.id).await.unwrap().unwrap();
+        assert_eq!((now.status, now.workflow_state.as_ref().unwrap().node.as_str()), (TaskStatus::Pending, "code"), "{:?}", now.result);
+        assert!(!term.sessions.lock().unwrap().contains_key(&first), "the finished step's session is closed");
+        orch.tick().await.unwrap();
+        let now = hub.store.task(t.id).await.unwrap().unwrap();
+        assert_eq!(now.status, TaskStatus::Running);
+        let prompt = std::fs::read_to_string(hub.run_dir(now.session.as_ref().unwrap()).join("prompt.md")).unwrap();
+        assert!(prompt.contains("`test -f fixed` failed"), "{prompt}");
+
+        // Now the fix is there: verify passes, the done end lands it (shared folder) and closes the worker.
+        std::fs::write(dir.path().join("fixed"), "").unwrap();
+        report(&hub, t.id, "done").await;
+        settle_all(&mut orch).await;
+        let now = hub.store.task(t.id).await.unwrap().unwrap();
+        assert_eq!(now.status, TaskStatus::Done, "{:?}", now.result);
+        let kinds = decisions_of(&hub, t.id).await;
+        assert_eq!(
+            workflow_kinds(&kinds),
+            vec!["chosen", "trigger.next", "agent.start", "agent.done", "verify.start", "verify.fail", "agent.start", "agent.done", "verify.start", "verify.pass", "end.done"],
+            "{kinds:?}"
+        );
+        assert!(kinds.iter().any(|k| k == "land.shared") && kinds.iter().any(|k| k == "end.closed"), "{kinds:?}");
+        assert!(!kinds.iter().any(|k| k.starts_with("verify.") || k.starts_with("audit.")), "the fixed verify and audit never ran: {kinds:?}");
+
+        // The stats follow the events.
+        let stats = crate::workflows::stats(&hub, None, "bugfix").await.unwrap();
+        assert_eq!(stats.runs, 1);
+        let ver = stats.nodes.iter().find(|n| n.node == "ver").unwrap();
+        assert_eq!((ver.runs, ver.visits, ver.fail_pct), (1, 2, Some(50.0)));
+        assert!(ver.avg_ms.is_some());
+        let code = stats.nodes.iter().find(|n| n.node == "code").unwrap();
+        assert_eq!((code.visits, code.fail_pct), (2, Some(0.0)));
+        assert_eq!(stats.recent[0].status, TaskStatus::Done);
+        assert!(stats.recent[0].failures[0].contains("test -f fixed"), "{:?}", stats.recent);
+    }
+
+    #[tokio::test]
+    async fn verify_out_of_attempts_goes_to_the_failed_end() {
+        let (hub, _term, _dir) = wf_setup("").await;
+        crate::workflows::save(&hub, None, fix_flow(1)).await.unwrap();
+        let t = hub.store.create_task(new_task("a bug", vec![])).await.unwrap();
+        let mut orch = Orchestrator::new(hub.clone());
+        orch.tick().await.unwrap();
+        report(&hub, t.id, "done").await;
+        settle(&mut orch).await;
+        let now = hub.store.task(t.id).await.unwrap().unwrap();
+        assert_eq!(now.status, TaskStatus::Failed);
+        assert!(now.result.as_deref().unwrap().contains("`test -f fixed` failed"), "{:?}", now.result);
+        let kinds = decisions_of(&hub, t.id).await;
+        assert_eq!(workflow_kinds(&kinds)[4..], ["verify.start", "verify.exhausted", "end.failed"], "{kinds:?}");
+    }
+
+    #[tokio::test]
+    async fn tasks_without_a_matching_workflow_keep_the_fixed_pipeline() {
+        let (hub, _term, _dir) = wf_setup("verify = [\"true\"]").await;
+        crate::workflows::save(&hub, None, fix_flow(2)).await.unwrap();
+        let t = hub.store.create_task(new_task("add a page", vec![])).await.unwrap();
+        let mut orch = Orchestrator::new(hub.clone());
+        orch.tick().await.unwrap();
+        report(&hub, t.id, "done").await;
+        settle(&mut orch).await;
+        let now = hub.store.task(t.id).await.unwrap().unwrap();
+        assert_eq!((now.status, now.workflow.as_deref(), now.workflow_state.is_none()), (TaskStatus::Done, None, true));
+        let kinds = decisions_of(&hub, t.id).await;
+        assert!(workflow_kinds(&kinds).is_empty() && kinds.iter().any(|k| k == "verify.pass"), "{kinds:?}");
+    }
+
+    /// trigger → code → aud (codex) pass → hook (`echo hi > hooked`) → done; aud fail → failed.
+    fn audit_flow(max: u32, blocking: bool, hook: &str) -> Workflow {
+        Workflow {
+            id: "reviewed".into(),
+            trigger: WorkflowTrigger { default: true, ..Default::default() },
+            nodes: vec![
+                wn("t", NK::Trigger),
+                WorkflowNode { agent: Some("claude".into()), ..wn("code", NK::Agent) },
+                WorkflowNode { agent: Some("codex".into()), verdict: Some("LGTM".into()), max_attempts: Some(max), ..wn("aud", NK::Audit) },
+                WorkflowNode { command: Some(hook.into()), blocking: Some(blocking), event: Some("post_done".into()), ..wn("hook", NK::Hook) },
+                WorkflowNode { outcome: Some(WorkflowOutcome::Done), ..wn("done", NK::End) },
+                WorkflowNode { outcome: Some(WorkflowOutcome::Failed), ..wn("failed", NK::End) },
+            ],
+            edges: vec![
+                we("t", "code", EK::Next),
+                we("code", "aud", EK::Next),
+                we("aud", "hook", EK::Pass),
+                we("aud", "code", EK::Fail),
+                we("hook", "done", EK::Next),
+                we("hook", "failed", EK::Fail),
+            ],
+            ..Default::default()
+        }
+    }
+
+    #[tokio::test]
+    async fn an_audit_passes_on_its_verdict_text_and_the_hook_runs() {
+        let (hub, _term, dir) = wf_setup("").await;
+        std::fs::write(dir.path().join("audit-reply.txt"), "Looks fine.\nLGTM\n").unwrap();
+        crate::workflows::save(&hub, None, audit_flow(2, true, "echo hi > hooked")).await.unwrap();
+        let t = hub.store.create_task(new_task("anything", vec![])).await.unwrap();
+        let mut orch = Orchestrator::new(hub.clone());
+        orch.tick().await.unwrap();
+        assert_eq!(hub.store.task(t.id).await.unwrap().unwrap().workflow_state.unwrap().chosen_by, "default");
+        report(&hub, t.id, "done").await;
+        settle_all(&mut orch).await;
+        let now = hub.store.task(t.id).await.unwrap().unwrap();
+        assert_eq!(now.status, TaskStatus::Done, "{:?}", now.result);
+        assert_eq!(std::fs::read_to_string(dir.path().join("hooked")).unwrap(), "hi\n");
+        let kinds = decisions_of(&hub, t.id).await;
+        assert_eq!(workflow_kinds(&kinds)[4..], ["audit.start", "audit.pass", "hook.start", "hook.pass", "end.done"], "{kinds:?}");
+    }
+
+    #[tokio::test]
+    async fn a_failed_audit_goes_back_to_the_agent_then_a_blocking_hook_fails_the_task() {
+        let (hub, _term, dir) = wf_setup("").await;
+        std::fs::write(dir.path().join("audit-reply.txt"), "VERDICT: FAIL: no tests\n").unwrap();
+        crate::workflows::save(&hub, None, audit_flow(2, true, "exit 3")).await.unwrap();
+        let t = hub.store.create_task(new_task("anything", vec![])).await.unwrap();
+        let mut orch = Orchestrator::new(hub.clone());
+        orch.tick().await.unwrap();
+        report(&hub, t.id, "done").await;
+        settle(&mut orch).await;
+        let now = hub.store.task(t.id).await.unwrap().unwrap();
+        assert_eq!((now.status, now.workflow_state.as_ref().unwrap().node.as_str()), (TaskStatus::Pending, "code"));
+        orch.tick().await.unwrap();
+        let prompt = std::fs::read_to_string(hub.run_dir(hub.store.task(t.id).await.unwrap().unwrap().session.as_ref().unwrap()).join("prompt.md")).unwrap();
+        assert!(prompt.contains("Audit failed: codex (codex): no tests"), "{prompt}");
+        std::fs::write(dir.path().join("audit-reply.txt"), "LGTM").unwrap();
+        report(&hub, t.id, "done").await;
+        settle_all(&mut orch).await;
+        let now = hub.store.task(t.id).await.unwrap().unwrap();
+        assert_eq!(now.status, TaskStatus::Failed, "{:?}", now.result);
+        assert!(now.result.as_deref().unwrap().contains("hook `exit 3` failed"), "{:?}", now.result);
+        let kinds = decisions_of(&hub, t.id).await;
+        let wf = workflow_kinds(&kinds);
+        assert!(wf.ends_with(&["audit.pass", "hook.start", "hook.fail", "end.failed"]), "{kinds:?}");
+        assert!(wf.contains(&"audit.fail"), "{kinds:?}");
+    }
+
+    #[tokio::test]
+    async fn a_non_blocking_hook_failure_is_logged_and_the_task_goes_on() {
+        let (hub, _term, dir) = wf_setup("").await;
+        std::fs::write(dir.path().join("audit-reply.txt"), "LGTM").unwrap();
+        crate::workflows::save(&hub, None, audit_flow(1, false, "exit 3")).await.unwrap();
+        let t = hub.store.create_task(new_task("anything", vec![])).await.unwrap();
+        let mut orch = Orchestrator::new(hub.clone());
+        orch.tick().await.unwrap();
+        report(&hub, t.id, "done").await;
+        settle_all(&mut orch).await;
+        assert_eq!(hub.store.task(t.id).await.unwrap().unwrap().status, TaskStatus::Done);
+        assert!(workflow_kinds(&decisions_of(&hub, t.id).await).contains(&"hook.ignored"));
+    }
+
+    #[tokio::test]
+    async fn a_failed_agent_is_retried_with_its_reason_then_fails() {
+        let (hub, _term, _dir) = wf_setup("max_attempts = 2").await;
+        crate::workflows::save(&hub, None, fix_flow(3)).await.unwrap();
+        let t = hub.store.create_task(new_task("bug", vec![])).await.unwrap();
+        let mut orch = Orchestrator::new(hub.clone());
+        orch.tick().await.unwrap();
+        report(&hub, t.id, "failed").await;
+        orch.tick().await.unwrap();
+        let now = hub.store.task(t.id).await.unwrap().unwrap();
+        assert_eq!((now.status, now.workflow_state.as_ref().unwrap().retries), (TaskStatus::Running, 1), "retried at once in the same tick");
+        let prompt = std::fs::read_to_string(hub.run_dir(now.session.as_ref().unwrap()).join("prompt.md")).unwrap();
+        assert!(prompt.contains("Agent reported failure: step"), "{prompt}");
+        report(&hub, t.id, "failed").await;
+        orch.tick().await.unwrap();
+        assert_eq!(hub.store.task(t.id).await.unwrap().unwrap().status, TaskStatus::Failed);
+        let kinds = decisions_of(&hub, t.id).await;
+        assert!(workflow_kinds(&kinds).contains(&"agent.retry") && kinds.last().unwrap() == "retry.failed", "{kinds:?}");
+    }
+
+    #[tokio::test]
+    async fn a_restart_resumes_at_the_saved_node() {
+        let (hub, term, dir) = wf_setup("").await;
+        crate::workflows::save(&hub, None, fix_flow(2)).await.unwrap();
+        std::fs::write(dir.path().join("fixed"), "").unwrap();
+        // As a crash left it: pinned to the workflow, at its verify node.
+        let t = hub.store.create_task(NewTask { workflow: Some("bugfix".into()), ..new_task("x", vec![]) }).await.unwrap();
+        let mut t = hub.store.task(t.id).await.unwrap().unwrap();
+        t.status = TaskStatus::Verifying;
+        t.attempts = 1;
+        t.workflow_state = Some(crate::model::TaskWorkflowState { node: "ver".into(), last_agent: Some("code".into()), ..Default::default() });
+        hub.put_task(&mut t).await.unwrap();
+        settle_all(&mut Orchestrator::new(hub.clone())).await;
+        let now = hub.store.task(t.id).await.unwrap().unwrap();
+        assert_eq!(now.status, TaskStatus::Done, "{:?}", now.result);
+        assert!(term.sessions.lock().unwrap().is_empty(), "no agent was started again");
+        assert_eq!(workflow_kinds(&decisions_of(&hub, t.id).await), vec!["verify.start", "verify.pass", "end.done"]);
+    }
+
+    #[tokio::test]
+    async fn an_agent_def_gives_its_provider_model_and_instructions() {
+        let (hub, term, dir) = wf_setup("").await;
+        let def = crate::model::AgentDef {
+            name: "fixer".into(),
+            description: "Fixes bugs".into(),
+            instructions: "You fix bugs with the smallest change.".into(),
+            tools: None,
+            models: crate::model::AgentModels { claude: Some("opus".into()), codex: None, gemini: None },
+            effort: None,
+            targets: vec![crate::model::AgentProvider::Claude],
+        };
+        crate::agents::save(&hub.config.agents, dir.path(), crate::model::AgentScope::Project, def).unwrap();
+        let mut wf = fix_flow(2);
+        wf.nodes[1].agent = Some("fixer".into());
+        crate::workflows::save(&hub, None, wf.clone()).await.unwrap();
+        let t = hub.store.create_task(new_task("bug", vec![])).await.unwrap();
+        Orchestrator::new(hub.clone()).tick().await.unwrap();
+        let now = hub.store.task(t.id).await.unwrap().unwrap();
+        let s = hub.store.session(now.session.as_ref().unwrap()).await.unwrap().unwrap();
+        assert_eq!((s.provider.as_str(), s.model.as_str()), ("claude", "opus"));
+        let prompt = std::fs::read_to_string(hub.run_dir(&s.name).join("prompt.md")).unwrap();
+        assert!(prompt.contains("## Your role (fixer)\nYou fix bugs with the smallest change.") && prompt.contains("## The task\ndo bug"), "{prompt}");
+        let _ = term;
+        // An agent no one defined cannot be saved.
+        wf.nodes[1].agent = Some("ghost".into());
+        let err = crate::workflows::save(&hub, None, wf).await.unwrap_err();
+        assert!(format!("{err:#}").contains("no agent or provider is called `ghost`"), "{err:#}");
+    }
+
+    #[tokio::test]
+    async fn a_pinned_workflow_that_is_gone_fails_the_task() {
+        let (hub, _term, _dir) = wf_setup("").await;
+        let t = hub.store.create_task(NewTask { workflow: Some("gone".into()), ..new_task("x", vec![]) }).await.unwrap();
+        Orchestrator::new(hub.clone()).tick().await.unwrap();
+        let now = hub.store.task(t.id).await.unwrap().unwrap();
+        assert_eq!(now.status, TaskStatus::Failed);
+        assert!(now.result.unwrap().contains("workflow `gone` does not exist"));
     }
 }

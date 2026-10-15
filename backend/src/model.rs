@@ -190,8 +190,38 @@ pub struct Task {
     /// plan).
     #[serde(default)]
     pub created_by: String,
+    /// The workflow it runs (`Workflow::id`): pinned at creation, or chosen by a workflow's trigger when the task first
+    /// becomes ready (`decision.workflow.chosen`). `None`: the fixed pipeline (verify, audit, land, post_done).
+    #[serde(default)]
+    pub workflow: Option<String>,
+    /// Where the task is in its workflow, saved at every step so a restart resumes there.
+    #[serde(default)]
+    pub workflow_state: Option<TaskWorkflowState>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+}
+
+/// A workflow task's place in its graph (`orchestrator.rs`).
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, TS)]
+#[serde(default)]
+#[ts(export)]
+pub struct TaskWorkflowState {
+    /// The node the task is at.
+    pub node: String,
+    /// An agent node's session was started for this visit (it is the node's worker, not one still to launch).
+    pub launched: bool,
+    /// Times each node was run (verify and audit nodes stop following their fail edge at `max_attempts`).
+    pub visits: BTreeMap<String, u32>,
+    /// Retries after an agent failed, exited, timed out or hit a conflict (bounded by `orchestrator.max_attempts`).
+    pub retries: u32,
+    /// Nodes run in all; a run past 200 fails, so a graph with a loop cannot spin forever.
+    pub steps: u32,
+    /// The last agent node launched: a land conflict goes back there.
+    pub last_agent: Option<String>,
+    /// The failure the next agent launch gets in its prompt (a verify's output, an audit's reason).
+    pub failure: Option<String>,
+    /// Why this workflow: `pinned`, `keyword <word>` or `default`.
+    pub chosen_by: String,
 }
 
 /// What the intake gate made of a task before an LLM sees it: the project's Reflex (Thai through the glossary) and
@@ -1180,6 +1210,10 @@ pub struct ProjectSettings {
     /// through `PUT /api/hooks` only (optional here: `PATCH /api/projects/{slug}` keeps them).
     #[ts(as = "Option<Vec<Hook>>", optional)]
     pub hooks: Vec<Hook>,
+    /// The project's own workflows (`workflows.rs`); one with a machine workflow's id overrides it. Changed only
+    /// through `/api/workflows`, never by a settings PATCH (which may leave it out).
+    #[ts(as = "Option<Vec<Workflow>>", optional)]
+    pub workflows: Vec<Workflow>,
 }
 
 /// A project's manager: an interactive agent session (`<prefix>mgr-<slug>`) MAP keeps running while `enabled`.
@@ -3128,10 +3162,11 @@ pub struct TaskPageItem {
 
 /// Where a Configure item's value comes from: the machine (every project), the project alone, or a project value
 /// that replaces the machine one with the same key.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
 #[serde(rename_all = "snake_case")]
 #[ts(export)]
 pub enum ConfigSource {
+    #[default]
     Machine,
     Project,
     Override,
@@ -3668,6 +3703,285 @@ impl HookRun {
     pub fn ok(&self) -> bool {
         self.exit_code == Some(0) && !self.timed_out
     }
+}
+
+// ---- Configure › Workflows (workflows.rs): a task's steps as a graph the orchestrator walks
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum WorkflowNodeKind {
+    /// Where the task enters (exactly one): when it is ready (dependencies done, a slot free).
+    Trigger,
+    /// A worker session with an agent (`AgentDef`) or a provider; its `next` edge when it reports done.
+    #[default]
+    Agent,
+    /// A command in the task's folder: exit 0 follows `pass`, else `fail` while attempts last.
+    Verify,
+    /// An audit by the named auditor: its verdict text follows `pass`, else `fail`.
+    Audit,
+    /// A command with a timeout; a blocking failure follows `fail` (or fails the task).
+    Hook,
+    /// The task ends done (then landing and `post_done`) or failed.
+    End,
+}
+
+impl WorkflowNodeKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Trigger => "trigger",
+            Self::Agent => "agent",
+            Self::Verify => "verify",
+            Self::Audit => "audit",
+            Self::Hook => "hook",
+            Self::End => "end",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum WorkflowEdgeKind {
+    /// The way on after success. Out of a verify, audit or hook it means the same as `pass`.
+    #[default]
+    Next,
+    /// Out of a verify, audit or hook that passed. Out of a trigger or an agent it is read as `next`.
+    Pass,
+    /// Out of an agent (it failed, exited or timed out), a verify, an audit, or a blocking hook that failed.
+    Fail,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum WorkflowOutcome {
+    #[default]
+    Done,
+    Failed,
+}
+
+/// One step of a workflow. Only the fields of its kind are read.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, TS)]
+#[serde(default)]
+#[ts(export)]
+pub struct WorkflowNode {
+    /// `[A-Za-z0-9_-]`, 1 to 40 characters, unique in the workflow.
+    pub id: String,
+    pub kind: WorkflowNodeKind,
+    pub label: String,
+    /// Position on the editor's canvas.
+    pub x: f64,
+    pub y: f64,
+    /// agent, audit: an `AgentDef` name in scope (the project's or the user's agents) or a provider name.
+    pub agent: Option<String>,
+    /// agent: text put before the task's prompt, after the agent's own instructions.
+    pub prompt: Option<String>,
+    /// verify, hook: run with `sh -c` in the task's folder.
+    pub command: Option<String>,
+    /// verify (1–10, required), audit (default `orchestrator.max_attempts`): runs after which the fail edge is no
+    /// longer taken and the task goes to its failed end.
+    pub max_attempts: Option<u32>,
+    /// audit: the text that means pass (default `VERDICT: PASS`).
+    pub verdict: Option<String>,
+    /// hook: when it is meant to run (`pre_launch`, `post_verify`, `post_done`, `on_fail`, `on_stall`). Its place in
+    /// the graph decides when it really runs; this is a label.
+    pub event: Option<String>,
+    /// hook: a failure follows the fail edge (or fails the task); not blocking, it is logged and the task goes on.
+    /// Default true.
+    pub blocking: Option<bool>,
+    /// hook: default 600.
+    #[ts(type = "number | null")]
+    pub timeout_secs: Option<u64>,
+    /// end: default done.
+    pub outcome: Option<WorkflowOutcome>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct WorkflowEdge {
+    pub from: String,
+    pub to: String,
+    #[serde(default)]
+    pub kind: WorkflowEdgeKind,
+}
+
+/// Which tasks a workflow takes when they do not name one.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
+#[serde(default)]
+#[ts(export)]
+pub struct WorkflowTrigger {
+    /// Takes every task in its scope that no keyword workflow took.
+    pub default: bool,
+    /// Words matched in the task's title and prompt, case-insensitively, as whole words (`bug`, `fix`).
+    pub keywords: Vec<String>,
+    /// Globs of the paths the task is about; shown only, not matched yet.
+    pub paths: Vec<String>,
+}
+
+/// A task's steps as a graph: Configure › Workflows. Machine workflows apply to every project; a project's own one
+/// with the same id overrides it (`source: override`).
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize, TS)]
+#[serde(default)]
+#[ts(export)]
+pub struct Workflow {
+    /// `[A-Za-z0-9_-]`, 1 to 40 characters.
+    pub id: String,
+    pub name: String,
+    pub description: String,
+    pub trigger: WorkflowTrigger,
+    pub nodes: Vec<WorkflowNode>,
+    pub edges: Vec<WorkflowEdge>,
+    /// Set by the server when listing; ignored on save.
+    pub source: ConfigSource,
+}
+
+/// `GET /api/workflows?project=`: the machine's workflows merged with the project's.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct WorkflowList {
+    pub project: Option<String>,
+    pub workflows: Vec<Workflow>,
+}
+
+/// One node's numbers over the last runs.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct WorkflowNodeStats {
+    pub node: String,
+    /// Runs (tasks) that reached it.
+    pub runs: u32,
+    /// Times it ran (a retry loop runs a node more than once per task).
+    pub visits: u32,
+    /// Average time from the node's start to its outcome.
+    #[ts(type = "number | null")]
+    pub avg_ms: Option<i64>,
+    /// Share of its finished visits that failed, 0–100.
+    pub fail_pct: Option<f64>,
+}
+
+/// One task that ran the workflow.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct WorkflowRun {
+    #[ts(type = "number")]
+    pub task_id: i64,
+    pub title: String,
+    pub status: TaskStatus,
+    /// From its first workflow step to its last event.
+    #[ts(type = "number | null")]
+    pub duration_ms: Option<i64>,
+    /// What failed on the way (verify output, audit reasons), each shortened.
+    pub failures: Vec<String>,
+    pub at: DateTime<Utc>,
+}
+
+/// `GET /api/workflows/{id}/stats?project=`: per node over the last 30 runs of tasks that used it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct WorkflowStats {
+    pub workflow: String,
+    pub project: Option<String>,
+    pub runs: u32,
+    pub nodes: Vec<WorkflowNodeStats>,
+    /// Newest first.
+    pub recent: Vec<WorkflowRun>,
+}
+
+// ---- Configure › "Ask an agent to do it" (configure_ask.rs)
+
+/// The Configure tab an agent is asked about.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum ConfigTab {
+    Agents,
+    Rules,
+    Skills,
+    Perms,
+    Hooks,
+    Verify,
+    Workflows,
+}
+
+/// The language of the config an agent writes (rules, role prompts, labels). English unless the owner chose Thai.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum ConfigLanguage {
+    #[default]
+    En,
+    Th,
+}
+
+/// `POST /api/configure/ask`.
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct ConfigAskRequest {
+    pub tab: ConfigTab,
+    #[serde(default)]
+    pub project: Option<String>,
+    pub provider: String,
+    #[serde(default)]
+    pub model: Option<String>,
+    #[serde(default)]
+    pub effort: Option<Effort>,
+    /// May be empty for `workflows` with `from_runs`.
+    #[serde(default)]
+    pub prompt: String,
+    #[serde(default)]
+    pub language: ConfigLanguage,
+    /// The tab's current config as the dashboard has it (sent to the agent, shortened when large).
+    #[serde(default)]
+    pub context: serde_json::Value,
+    /// workflows: the workflow the ops are for.
+    #[serde(default)]
+    pub workflow_id: Option<String>,
+    /// workflows: also send the per-node stats and outcomes of its last 30 runs.
+    #[serde(default)]
+    pub from_runs: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum ConfigOpKind {
+    Add,
+    Change,
+    Remove,
+}
+
+/// One proposed change, shown as a `+` / `~` / `−` line the owner checks. The dashboard applies the checked ones to
+/// its tab and saves through that tab's own API; the backend never writes config from a proposal.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct ConfigOp {
+    pub op: ConfigOpKind,
+    /// What it changes: `agent:<name>`, `rule:<file>`, `skill:<name>`, `perm:<rule>:<agent>`, `hook:<event>`,
+    /// `verify.cmds`, `verify.max_attempts`, `audit.enabled`, `audit.auditor`, `audit.verdict`,
+    /// `workflow.node:<id>`, `workflow.edge`, `workflow.trigger`.
+    pub target: String,
+    /// The line the owner reads.
+    pub text: String,
+    /// The change itself; its shape per tab is in `configure_ask.rs` (`schema`). Workflows: the editor's op,
+    /// `{"op": "add", "after", "before", "node", "fail_to"?}`, `{"op": "insert_before", "target", "node"}`,
+    /// `{"op": "remove", "id", "bridge"?: [from, to, kind]}`, `{"op": "change", "id", "key", "to"}`.
+    pub value: serde_json::Value,
+}
+
+/// What the agent proposed.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct ConfigAskResult {
+    pub summary: String,
+    /// Why: facts the agent read, then a line for each proposal MAP dropped as invalid.
+    pub evidence: Vec<String>,
+    pub ops: Vec<ConfigOp>,
+    pub provider: String,
+    pub model: String,
+    pub language: ConfigLanguage,
+    #[ts(type = "number")]
+    pub duration_ms: i64,
 }
 
 // ---- activity graph (trace.rs): who made what, and what each agent used

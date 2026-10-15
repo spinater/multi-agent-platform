@@ -47,7 +47,9 @@ pub struct CreateBody {
 
 pub async fn create(State(hub): State<Arc<Hub>>, Json(b): Json<CreateBody>) -> Result<(StatusCode, Json<ProjectCreated>), ApiError> {
     let new = NewProject { name: b.name, slug: b.slug, description: b.description, fallback: b.fallback, model: b.model };
-    let (p, checks) = projects::create_with(&hub, new, b.settings).await?;
+    // Workflows are added through `/api/workflows`, which validates them.
+    let settings = ProjectSettings { workflows: vec![], ..b.settings };
+    let (p, checks) = projects::create_with(&hub, new, settings).await?;
     Ok((StatusCode::CREATED, Json(ProjectCreated { project: hub.project_info(p).await?, checks })))
 }
 
@@ -125,13 +127,15 @@ pub async fn update(State(hub): State<Arc<Hub>>, UrlPath(slug): UrlPath<String>,
     if let Some(s) = b.settings {
         // The source is fixed at creation, and the Thai words have their own endpoint (`thai/words`).
         // The manager has its own endpoint (`PUT …/manager`), which also starts and stops it; the env has `PUT /api/env`
-        // and the hooks `PUT /api/hooks`.
+        // the hooks `PUT /api/hooks`, the workflows
+        // `PUT /api/workflows`.
         let s = ProjectSettings {
             source: p.settings.source.clone(),
             thai_glossary: p.settings.thai_glossary.clone(),
             manager: p.settings.manager.clone(),
             env: p.settings.env.clone(),
             hooks: p.settings.hooks.clone(),
+            workflows: p.settings.workflows.clone(),
             ..project_settings::normalize(s)
         };
         project_settings::validate(&hub, &s)?;

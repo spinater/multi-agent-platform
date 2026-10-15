@@ -127,7 +127,8 @@ nothing is tied to one repository, session name or provider.
 | --- | --- |
 | `backend/src/detect.rs` | Pane parsing: rate limits and reset times, auth prompts, pending human input, last agent message |
 | `backend/src/watcher.rs` | Per-session state machine and automatic wake-up |
-| `backend/src/orchestrator.rs` | Task scheduling, provider failover, verify, audit, retry |
+| `backend/src/orchestrator.rs` | Task scheduling, provider failover, verify, audit, retry; `orchestrator/workflow.rs` walks a task's workflow |
+| `backend/src/workflows.rs`, `configure_ask.rs` | Workflows: storage, checks, trigger choice, run stats; Configure's "Ask an agent" runs |
 | `backend/src/hub.rs` | Launching and closing sessions; the single place that writes state and broadcasts it |
 | `backend/src/terminal/` | `Terminal` trait; `tmux.rs` in production, `fake.rs` in tests |
 | `backend/src/projects.rs` | Creating projects on a folder (existing or new) and deleting them; folder and corpus path rules |
@@ -1014,6 +1015,59 @@ task, with `MAP_EVENT`, `MAP_TASK_ID`, `MAP_TASK_TITLE`, `MAP_PROJECT`, `MAP_SES
 | `post_done` | `finish`, after `[orchestrator] post_done` (toml, then machine, then project hooks) | fails the task, as the toml commands do |
 | `on_fail` | wherever a task becomes failed (in the background) | never changes the task |
 | `on_stall` | `watcher.rs`, when a task's session turns stalled (once per stall) | never changes the task |
+| `decision.workflow.chosen` / `.error` | stays (progress) | `orchestrator/workflow.rs`: a task runs a [workflow](#workflows) (pinned, `keyword <word>`, `default`); the workflow is gone or broken |
+| `decision.workflow.<kind>.<outcome>` | stays (progress) | each step of a workflow, message `<node id> · …`: `trigger.next`, `agent.start` / `.done` / `.fail` / `.retry`, `verify.start` / `.pass` / `.fail` / `.exhausted`, `audit.start` / `.pass` / `.fail` / `.exhausted` / `.skipped`, `hook.start` / `.pass` / `.fail` / `.ignored`, `end.done` / `.failed` |
+
+The older `task.*` events (`task.started`, `task.retry`, `task.done`…) are still sent.
+
+## Workflows
+
+A workflow replaces the fixed pipeline (verify, audit, land, post_done) for the tasks it takes with a graph of steps
+(Configure › Workflows; `backend/src/workflows.rs` stores and checks them, `orchestrator/workflow.rs` runs them).
+Machine workflows are kept in the database (`runtime_settings`, key `workflows`); a project's own are in its settings,
+and one with a machine workflow's id overrides it there (`source`: `machine`, `project`, `override`). A settings PATCH
+never changes them: only `/api/workflows` does, and it checks every save.
+
+- **Which tasks.** A task can name one (`workflow` when creating it). Otherwise, when a task first becomes ready, the
+  first workflow whose `trigger.keywords` occurs in its title or prompt (whole words, case-insensitive; Thai as a
+  substring; the project's own before the machine's), else the first with `trigger.default`, is recorded on it
+  (`decision.workflow.chosen`). No match: the fixed pipeline, exactly as before. `trigger.paths` is shown, not matched.
+- **Nodes.** `trigger` (exactly one), `agent` (`agent`: an agent of the Agents
+  screen in the project's or the user's scope, or a provider name; `prompt`), `verify` (`command`, `max_attempts`
+  1–10), `audit` (`agent` = the auditor, `verdict`, default `VERDICT: PASS`, `max_attempts`), `hook` (`command`,
+  `event` as a label, `blocking` default true, `timeout_secs` default 600), `end` (`outcome` done or failed).
+- **Edges.** `next` and `pass` both mean "after success" (`pass` out of an agent is read as `next`); `fail` leaves
+  an agent that failed, a verify or audit that did not pass, or a blocking hook that failed. At most one of each per
+  node; a trigger has no fail edge, an end no edges. Every node but a failed end must be reachable from the trigger,
+  and every node but an end needs a next/pass edge.
+- **Running.** An agent node starts a worker as any task (worktree, folder trust, launch), on the agent's first
+  installed target CLI with its model (else the usual pick), with the agent's instructions and the node's prompt
+  before the task's and the workflow's verify commands in the protocol footer. When it reports done its session ends
+  (unless a person uses it) and the next edge is taken. A failed, exited or timed-out worker takes the node's fail
+  edge, else runs again with the failure, up to `max_attempts` retries in the run. Verify runs its command in the
+  task's folder: exit 0 → pass; else the fail edge (usually back to an agent, which gets the output) while the node
+  has run fewer than `max_attempts` times, else the first failed end. Audit asks its auditor headless (its
+  instructions, then the usual audit prompt with the node's verdict text): the verdict → pass, `VERDICT: FAIL` → as
+  verify; no auditor: `audit.required` decides. A hook's blocking failure takes its fail edge or fails the task; a
+  non-blocking one is logged. A done end lands the branch and runs `post_done` as every task; a failed end fails it.
+  A land conflict goes back to the last agent node. More than 200 steps in a run fail it (a loop that never ends).
+- **Resume.** The node, its visits and the retries are saved on the task (`workflow_state`) at every step; after a
+  restart the task continues at its node (a verify, audit or hook there runs again). Retry starts the workflow over;
+  Send back returns to the last agent node with the note.
+- **Stats** (`GET /api/workflows/{id}/stats`): per node over the last 30 tasks that ran it, from the
+  `decision.workflow.*` events: runs, visits, average time from a node's start to its outcome, fail %.
+
+**Ask an agent to do it** (`POST /api/configure/ask`, `backend/src/configure_ask.rs`): the Configure tabs' panel. One
+headless run of the chosen provider (its `headless` command, the model, and `effort_args` with `{effort}` where the
+provider has them: Codex `-c model_reasoning_effort=…`; otherwise the effort is only in the prompt) in a new empty
+temporary folder, never the project folder, with the provider's isolated env, killed after 180 s. The prompt explains
+the tab and its op schema, carries the tab's config JSON (cut at 24 000 characters), the request, the output language
+(English unless `language = th`; a Thai request still gets English config) and, for a workflow with `from_runs`, its
+stats and the last 30 runs (titles, status, durations, what failed). The last JSON object with `ops` in the reply is
+read; each op is checked against the tab (`agent:<name>`, `rule:<file>`, `skill:<name>`, `perm:<rule>:<agent>`,
+`hook:<event>`, `verify.cmds`…, `workflow.node:<id>` with the editor's `add` / `insert_before` / `remove` / `change`)
+and the invalid ones are dropped with a line in `evidence`. Nothing is written: the dashboard applies the ops the owner
+checks and saves through the tab's own API.
 
 ## Branches and worktrees
 
@@ -1181,7 +1235,10 @@ All routes are under `/api`. When `server.api_token` is set, send `Authorization
 | POST | `/sessions/{name}/prompt` | Type text and press Enter (`{"text": …}`) |
 | POST | `/sessions/{name}/key` | One allow-listed key (`C-c`, `Escape`, `Enter`, `Up`, `Down`, `Tab`, `BTab`, `y`, `n`) |
 | POST | `/sessions/{name}/trust` | `{}`: answer the CLI's folder-trust question (409 unless it is on screen and nobody is attached or typing): records the folder, moves the selection to the trust option, presses Enter; returns `folder`, `recorded`, `keys`, `answered` |
-| GET/POST | `/tasks` | List, or create (`title`, `prompt`, `depends_on`, `provider`, `model`) |
+| GET/POST | `/tasks` | List, or create (`title`, `prompt`, `depends_on`, `provider`, `model`, `workflow`) |
+| GET/PUT/DELETE | `/workflows?project=` | `WorkflowList` (machine merged with the project's, with `source`); PUT `{project?, workflow}` creates or replaces by id (400 with every problem), returns the `Workflow`; DELETE `{project?, id}` returns the list |
+| GET | `/workflows/{id}/stats?project=` | `WorkflowStats`: per node over the last 30 runs (runs, visits, `avg_ms`, `fail_pct`) and the recent runs |
+| POST | `/configure/ask` | `ConfigAskRequest` `{tab, project?, provider, model?, effort?, prompt, language, context, workflow_id?, from_runs}` → `ConfigAskResult` `{summary, evidence, ops: ConfigOp[], provider, model, language, duration_ms}`; 504 when the CLI timed out |
 | DELETE | `/tasks/{id}` | Delete a pending or finished task |
 | GET/POST | `/orchestrator` | Status, or `{"running": true}` |
 | GET | `/pipeline` | `provider_order`, `verify`, audit, `post_done` and retry settings from `[orchestrator]` |

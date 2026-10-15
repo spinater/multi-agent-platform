@@ -368,6 +368,8 @@ mod tests {
             git: None,
             scope: None,
             intake: None,
+            workflow: None,
+            workflow_state: None,
             created_by: String::new(),
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),

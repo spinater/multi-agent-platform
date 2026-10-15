@@ -231,7 +231,7 @@ mod tests {
     }
 
     fn task(title: &str, project: Option<&str>) -> NewTask {
-        NewTask { title: title.into(), prompt: "p".into(), depends_on: vec![], provider: None, model: None, project: project.map(String::from) }
+        NewTask { title: title.into(), prompt: "p".into(), depends_on: vec![], provider: None, model: None, project: project.map(String::from), workflow: None }
     }
 
     /// A project in a new folder next to the data dir, unless `settings` names one.

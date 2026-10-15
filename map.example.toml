@@ -166,6 +166,9 @@ timeout_secs = 600
 
 [providers.codex]
 # extra_args = ["--dangerously-bypass-approvals-and-sandbox"]
+# The reasoning effort of Configure's "Ask an agent" runs, put before the prompt ({effort}: low, medium, high, xhigh).
+# Every provider has this field; only codex has it set by default.
+# effort_args = ["-c", "model_reasoning_effort={effort}"]
 # default_model = "gpt-6-sol"
 # Device-code sign-in. codex signs out the current account as soon as it starts.
 # login = ["{binary}", "login", "--device-auth"]
