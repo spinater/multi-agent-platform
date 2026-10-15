@@ -3115,6 +3115,19 @@ pub struct TaskPageItem {
     pub started_at: Option<DateTime<Utc>>,
 }
 
+// ---- Configure screen: where each setting comes from
+
+/// Where a Configure item's value comes from: the machine (every project), the project alone, or a project value
+/// that replaces the machine one with the same key.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum ConfigSource {
+    Machine,
+    Project,
+    Override,
+}
+
 // ---- activity graph (trace.rs): who made what, and what each agent used
 
 /// One thing an agent did, read from its CLI's transcript (aggregated: the same command head `×count`).
