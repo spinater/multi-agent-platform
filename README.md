@@ -414,6 +414,31 @@ differently.
   file that holds another agent. Nothing is written outside the configured folders. Run one as the main agent with
   `claude --agent <name>` or `agy --agent <name>`.
 
+### Configure: Permissions and MCP servers
+
+Both tabs edit the provider CLIs' own files, for the machine (the CLI's state folder as MAP runs it: its isolated
+agent home in `[agents_home] mode = "isolated"`) or for one project. The columns are the providers MAP runs
+(`orchestrator.provider_order`, then the audit chain), because each CLI enforces its own settings.
+
+- **Permissions** (`permissions.rs`): rows `Read / Grep`, `Edit / Write`, `Bash(git *)`, `Bash(npm *, bun *)`,
+  `Bash(*)`, `WebFetch / WebSearch` and one `mcp__<server>__*` per MCP server; cells allow / ask / deny.
+  Claude Code: `permissions.allow / ask / deny` in `<home>/settings.json` or `<project>/.claude/settings.local.json`
+  (`Read`, `Grep`, `Glob`, `Bash(git *)`, `Bash`, `mcp__<server>`; the legacy `Bash(git:*)` reads the same; the shared
+  `.claude/settings.json` is read, never written). Gemini / agy: `tools.allowed` / `tools.exclude` (or the older
+  `allowedTools` / `excludeTools` a file already uses) in `<home>/settings.json` or `<project>/.gemini/settings.json`;
+  it has no ask list, so ask is neither list. Codex has no per-tool rules: its cells are `unsupported`, and its column
+  note shows `approval_policy` and `sandbox_mode`. In project scope a cell is what the CLI will apply: the stricter of
+  the project's and the machine's value (both CLIs merge the lists, and deny wins), `override` when the project's
+  stricter value wins, with a note when a project value loses. Other rules and keys in the files stay as they were.
+- **MCP servers** (`mcp.rs`): one list across Claude Code (`.claude.json` top-level `mcpServers` next to its config
+  folder; `<project>/.mcp.json`), Codex (`[mcp_servers.<name>]` in `config.toml`; `<project>/.codex/config.toml`,
+  edited with `toml_edit`) and Gemini / agy (`mcpServers` in `settings.json`; `<project>/.gemini/settings.json`). A
+  project definition replaces the machine one of the same CLI. Env and header values can be written but only their
+  names and whether they are set are returned. Test connection spawns the server in its own process group (stdio) or
+  POSTs to it (streamable HTTP, JSON or SSE replies), runs `initialize`, `notifications/initialized`, `tools/list`
+  within 15 s, always kills the group, and redacts the server's values from errors; the last result per scope is
+  kept in memory as the server's `status`.
+
 ### Knowledge (`#knowledge`, `#knowledge/<slug>`, `#knowledge/<slug>/doc/<path>`)
 
 A project's knowledge: the Markdown and text files in its folder (knowledge cards with their index, requirements,
@@ -1206,6 +1231,12 @@ All routes are under `/api`. When `server.api_token` is set, send `Authorization
 | GET | `/agents/{name}?project=&scope=` | The agent as one definition (from its Claude file, else agy, else Codex), its files and notes |
 | PUT | `/agents?dry_run=` | `{"project", "scope", "def"}`: write each target's file, remove the others'; `dry_run=true` only returns the plan |
 | DELETE | `/agents/{name}?project=&scope=` | Remove every file of the agent in that scope |
+| GET | `/permissions?project=` | `PermissionsView`: providers, rule rows with a cell per CLI (value, source, note), the files read; no project = machine scope |
+| PUT | `/permissions` | `PermissionsUpdate` `{"project"?, "cells": [{"rule", "provider", "value": "allow" \| "ask" \| "deny" \| null}]}`: set or clear; returns the view |
+| GET | `/mcp?project=` | `McpView`: MCP servers across the CLIs (env and header names only), sources, last test status, the files read |
+| PUT | `/mcp` | `McpSave` `{"project"?, "server": {name, transport, command, args, url, env, headers}, "providers"}`: write for those CLIs, remove from the scope's others; returns the view |
+| DELETE | `/mcp` | `{"project"?, "name"}`: remove it from every file of the scope (404 when none had it); returns the view |
+| POST | `/mcp/test` | `{"project"?, "name"}`: `McpTestResult` `{ok, tools, tool_names, error, duration_ms}` (15 s limit) |
 | GET | `/usage` | The latest usage report: windows, pace, tokens today, by project, skip state per provider |
 | POST | `/usage/refresh` | `{}`: read every provider now and return the report |
 | GET | `/updates` | The latest update check: installed and latest version, errors, update command and whether it is blocked, per provider |
