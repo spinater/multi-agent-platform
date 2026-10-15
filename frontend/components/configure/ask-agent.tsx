@@ -9,6 +9,7 @@ import { useState } from "react";
 
 import { configureApi, type AskReply, type ConfigOp } from "@/lib/api";
 import { providerColor } from "@/lib/colors";
+import type { JsonValue } from "@/lib/generated/serde_json/JsonValue";
 
 import { useApp } from "../app-context";
 import { Seg, useConfigure } from "./ui";
@@ -76,7 +77,7 @@ export function AskAgent({
     setPhase("thinking");
     setError("");
     try {
-      const r = await configureApi.ask({ tab, project: slug ?? undefined, provider: prov, model: m || undefined, effort, prompt: prompt.trim(), language: cfgLang, context, workflow_id: workflowId, from_runs: fromRuns });
+      const r = await configureApi.ask({ tab, project: slug, provider: prov, model: m || null, effort, prompt: prompt.trim(), language: cfgLang, context: (context ?? null) as JsonValue, workflow_id: workflowId ?? null, from_runs: fromRuns });
       setReply(r);
       setOn(Object.fromEntries(r.ops.map((_, i) => [i, true])));
       setPhase("ready");

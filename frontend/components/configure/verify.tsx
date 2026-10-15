@@ -6,7 +6,7 @@
 
 import { useEffect, useState } from "react";
 
-import { api } from "@/lib/api";
+import { api, type ConfigOp } from "@/lib/api";
 import type { PipelineInfo } from "@/lib/generated/PipelineInfo";
 import type { ReflexGates } from "@/lib/generated/ReflexGates";
 
@@ -44,11 +44,30 @@ export function VerifyTab() {
   const aSource = machine || value?.audit == null ? "machine" : "project";
   const setCmds = (c: string[]) => patch({ verify: c });
   const gates = value?.reflex_gates ?? { intake: false, audit: false, tier: false };
+  const applyOps = (ops: ConfigOp[]) => {
+    let n = 0;
+    let c = [...cmds];
+    let a = { ...audit };
+    for (const o of ops) {
+      const v = (o.value ?? {}) as { command?: string; index?: number; from?: string; to?: string; value?: unknown };
+      if (o.target === "verify.cmds") {
+        if (o.op === "add" && v.command) c.splice(Math.min(v.index ?? c.length, c.length), 0, v.command);
+        else if (o.op === "remove" && v.command && c.includes(v.command)) c = c.filter((x) => x !== v.command);
+        else if (o.op === "change" && v.from && v.to && c.includes(v.from)) c = c.map((x) => (x === v.from ? v.to! : x));
+        else continue;
+      } else if (o.target === "audit.enabled" && typeof v.value === "boolean") a = { ...a, enabled: v.value };
+      else if (o.target === "audit.auditor" && typeof v.value === "string") a = { ...a, provider: v.value };
+      else continue;
+      n++;
+    }
+    if (n) patch({ verify: c, audit: a });
+    return n;
+  };
 
   return (
     <>
       <TabHead title="Verify & audit" desc="How a task is proven done when its workflow does not say otherwise." savesTo={machine ? "map.toml [orchestrator.verify], [orchestrator.audit] (read only here)" : "project settings in the platform database (verify, audit, reflex_gates)"} />
-      {!machine && <AskAgent tab="verify" context={{ verify: cmds, audit, gates, max_attempts: pipe?.max_attempts }} />}
+      {!machine && <AskAgent tab="verify" context={{ verify: cmds, audit, gates, max_attempts: pipe?.max_attempts }} onApply={applyOps} />}
       {machine && <Note>Machine values come from map.toml and are read only here. Switch to Project to give a project its own commands.</Note>}
       <div className="grid gap-3.5 [grid-template-columns:repeat(auto-fit,minmax(min(340px,100%),1fr))]">
         <Box>

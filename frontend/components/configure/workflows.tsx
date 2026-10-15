@@ -12,6 +12,8 @@ import { useEffect, useState } from "react";
 import { configureApi, workflowsApi, type AskReply, type ConfigOp, type Workflow, type WorkflowEdge, type WorkflowNode, type WorkflowStats } from "@/lib/api";
 import { providerColor } from "@/lib/colors";
 import type { AgentsOverview } from "@/lib/generated/AgentsOverview";
+import type { Effort } from "@/lib/generated/Effort";
+import type { JsonValue } from "@/lib/generated/serde_json/JsonValue";
 
 import { api } from "@/lib/api";
 import { useApp } from "../app-context";
@@ -34,8 +36,8 @@ const EDGE: Record<WorkflowEdge["kind"], string> = { next: "#5d6673", pass: "#4a
 
 /** A suggested op on the graph (the design's `add` / `insertBefore` / `remove` / `change`). */
 type GraphOp =
-  | { op: "add"; after: string; before: string; failTo?: string; node: Partial<WorkflowNode> & { id: string; kind: Kind } }
-  | { op: "insertBefore"; target: string; node: Partial<WorkflowNode> & { id: string; kind: Kind } }
+  | { op: "add"; after: string; before: string; fail_to?: string | null; node: Partial<WorkflowNode> & { id: string; kind: Kind } }
+  | { op: "insert_before"; target: string; node: Partial<WorkflowNode> & { id: string; kind: Kind } }
   | { op: "remove"; id: string; bridge?: [string, string, WorkflowEdge["kind"]] }
   | { op: "change"; id: string; key: string; to: unknown };
 
@@ -87,6 +89,9 @@ function tidy(w: Graph): Graph {
     fwd.forEach((e) => {
       if (col[e.from] !== undefined && col[e.to] !== undefined && col[e.to] < col[e.from] + 1 && col[e.from] + 1 < w.nodes.length) col[e.to] = col[e.from] + 1;
     });
+  // An end nothing leads to (a failed end) sits with the other ends, in the last column.
+  const last = Math.max(0, ...Object.values(col));
+  w.nodes.forEach((n) => n.kind === "end" && col[n.id] === 0 && (col[n.id] = last));
   const groups: Record<number, FNode[]> = {};
   w.nodes.forEach((n) => (groups[col[n.id]] = groups[col[n.id]] ?? []).push(n));
   Object.entries(groups).forEach(([c, g]) => {
@@ -120,8 +125,8 @@ function applyOps(w0: Graph, ops: GraphOp[], ghost: boolean): Graph {
       drop((e) => e === old);
       E(o.after, o.node.id, old.kind);
       E(o.node.id, o.before, o.node.kind === "verify" || o.node.kind === "audit" ? "pass" : "next");
-      if (o.failTo) E(o.node.id, o.failTo, "fail");
-    } else if (o.op === "insertBefore") {
+      if (o.fail_to) E(o.node.id, o.fail_to, "fail");
+    } else if (o.op === "insert_before") {
       const t = byId(o.target);
       if (!t || byId(o.node.id)) continue;
       w.nodes.push(make(o.node, t.x, t.y + 100));
@@ -182,9 +187,9 @@ export function WorkflowsTab() {
   useEffect(() => {
     let live = true;
     workflowsApi.list(slug).then(
-      (l) => {
+      (list) => {
         if (!live) return;
-        const mine = l.filter((w) => scope === "project" || w.source === "machine");
+        const mine = list.workflows.filter((w) => scope === "project" || w.source === "machine");
         setLoaded(mine);
         setWfs(clone(mine));
         setRemoved([]);
@@ -275,7 +280,7 @@ export function WorkflowsTab() {
     edit((g) => {
       const s = g.nodes.find((n) => n.id === selN.id)!;
       const out = g.edges.find((e) => e.from === s.id && e.kind !== "fail");
-      g.nodes.push({ ...blankNode(id, kind, s.x + COLW / 2, s.y - 100), agent: kind === "agent" || kind === "audit" ? (agentNames[0] ?? null) : null });
+      g.nodes.push({ ...blankNode(id, kind, s.x + COLW / 2, s.y - 100), agent: kind === "agent" || kind === "audit" ? (agentNames[0] ?? "claude") : null });
       if (out && kind !== "end") {
         g.edges = g.edges.filter((e) => e !== out);
         g.edges.push({ from: s.id, to: id, kind: out.kind }, { from: id, to: out.to, kind: kind === "verify" || kind === "audit" ? "pass" : "next" });
@@ -290,7 +295,7 @@ export function WorkflowsTab() {
   const newWorkflow = () => {
     const id = `wf-${(wfs.length + 1).toString()}-${++seq}`;
     const g = tidy({
-      nodes: [blankNode("t", "trigger"), { ...blankNode("a1", "agent"), label: "Implement", agent: agentNames[0] ?? null }, { ...blankNode("v1", "verify"), label: "Verify" }, blankNode("done", "end"), { ...blankNode("failed", "end"), label: "Failed", outcome: "failed" }],
+      nodes: [blankNode("t", "trigger"), { ...blankNode("a1", "agent"), label: "Implement", agent: agentNames[0] ?? "claude" }, { ...blankNode("v1", "verify"), label: "Verify" }, blankNode("done", "end"), { ...blankNode("failed", "end"), label: "Failed", outcome: "failed" }],
       edges: [
         { from: "t", to: "a1", kind: "next" },
         { from: "a1", to: "v1", kind: "next" },
@@ -311,13 +316,13 @@ export function WorkflowsTab() {
     try {
       const r = await configureApi.ask({
         tab: "workflows",
-        project: slug ?? undefined,
+        project: slug,
         provider: prov,
-        model: model ?? undefined,
-        effort,
+        model: model ?? null,
+        effort: effort as Effort,
         prompt: prompt.trim(),
         language: cfgLang,
-        context: { workflow: w, agents: agentNames },
+        context: { workflow: w, agents: agentNames } as unknown as JsonValue,
         workflow_id: w.id,
         from_runs: !prompt.trim(),
       });
@@ -660,7 +665,7 @@ function triggerText(w: Workflow) {
 
 function opText(o: GraphOp, nameOf: (id: string) => string) {
   if (o.op === "add") return `Add ${TYPE[o.node.kind][2]} "${o.node.label ?? o.node.id}" between ${nameOf(o.after)} and ${nameOf(o.before)}`;
-  if (o.op === "insertBefore") return `Add ${o.node.event ?? ""} hook "${o.node.label ?? o.node.id}" before ${nameOf(o.target)} · ${o.node.command ?? ""}`;
+  if (o.op === "insert_before") return `Add ${o.node.event ?? ""} hook "${o.node.label ?? o.node.id}" before ${nameOf(o.target)} · ${o.node.command ?? ""}`;
   if (o.op === "remove") return `Remove "${nameOf(o.id)}"${o.bridge ? `; ${nameOf(o.bridge[0])} goes straight to ${nameOf(o.bridge[1])}` : ""}`;
   return `${nameOf(o.id)}: ${o.key} → ${String(o.to)}`;
 }
@@ -873,9 +878,9 @@ function Canvas({
                   </span>
                 )}
                 {st && !f && (
-                  <span className="absolute top-[66px] left-0.5 font-mono text-[9.5px] leading-none whitespace-nowrap" style={{ color: st.fail_pct >= 30 ? "#F2C14E" : "#5d6673" }}>
+                  <span className="absolute top-[66px] left-0.5 font-mono text-[9.5px] leading-none whitespace-nowrap" style={{ color: (st.fail_pct ?? 0) >= 30 ? "#F2C14E" : "#5d6673" }}>
                     {st.runs} runs · {fmtMs(st.avg_ms)}
-                    {n.kind === "verify" || n.kind === "audit" ? ` · ${Math.round(st.fail_pct)}% fail` : ""}
+                    {n.kind === "verify" || n.kind === "audit" ? ` · ${Math.round(st.fail_pct ?? 0)}% fail` : ""}
                   </span>
                 )}
               </div>

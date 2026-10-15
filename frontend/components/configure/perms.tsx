@@ -75,15 +75,13 @@ export function PermsTab() {
     let n = 0;
     const next = { ...changes };
     for (const o of ops) {
-      const v = o.value as { rule?: string; provider?: string; value?: PermValue } | null;
       const m = /^perm:(.+):([^:]+)$/.exec(o.target);
-      const rule = v?.rule ?? m?.[1];
-      const provider = v?.provider ?? m?.[2];
-      const value = v?.value ?? (typeof o.value === "string" ? (o.value as PermValue) : undefined);
-      if (!rule || !provider || !value || !ORDER.includes(value)) continue;
+      const mode = (o.value as { mode?: PermValue } | null)?.mode;
+      if (!m || !mode || !ORDER.includes(mode)) continue;
+      const [, rule, provider] = m;
       const cell = data?.rows.find((r) => r.rule === rule)?.cells.find((c) => c.provider === provider);
       if (!cell || cell.value === "unsupported") continue;
-      next[k(rule, provider)] = value;
+      next[k(rule, provider)] = mode;
       n++;
     }
     setChanges(next);

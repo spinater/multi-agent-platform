@@ -90,23 +90,20 @@ export function RulesTab() {
   };
   const applyOps = (ops: ConfigOp[]) => {
     let n = 0;
+    const bodies: Record<string, string> = {};
     for (const o of ops) {
       const path = o.target.replace(/^rule:/, "");
-      const v = o.value as { body?: string; append?: string; readers?: string[] } | string | null;
+      const v = (o.value ?? {}) as { append?: string; find?: string; replace?: string };
       const f = files.find((x) => x.path === path);
-      const body = drafts[path]?.body ?? f?.body ?? "";
-      if (o.op === "remove" && f) {
-        patch(path, { deleted: true });
-        n++;
-      } else if (typeof v === "string") {
-        patch(path, { body: o.op === "add" && f ? `${body.replace(/\n*$/, "\n")}${v}\n` : v, created: !f });
-        n++;
-      } else if (v && typeof v === "object") {
-        if (v.body !== undefined) patch(path, { body: v.body, created: !f });
-        if (v.append) patch(path, { body: `${body.replace(/\n*$/, "\n")}${v.append}\n`, created: !f });
-        if (v.readers) patch(path, { readers: v.readers });
-        n++;
-      }
+      const body = bodies[path] ?? drafts[path]?.body ?? f?.body ?? "";
+      let next: string | null = null;
+      if (o.op === "add" && v.append) next = `${body.replace(/\n*$/, "\n")}${v.append.replace(/\n*$/, "")}\n`;
+      else if (o.op === "change" && v.find && body.includes(v.find)) next = body.replace(v.find, v.replace ?? "");
+      else if (o.op === "remove" && v.find && body.includes(v.find)) next = body.replace(v.find, "");
+      if (next === null) continue;
+      bodies[path] = next;
+      patch(path, { body: next, ...(f ? {} : { created: true }) });
+      n++;
     }
     return n;
   };

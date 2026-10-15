@@ -6,10 +6,11 @@
 
 import { useEffect, useState } from "react";
 
-import { api } from "@/lib/api";
+import { api, type ConfigOp } from "@/lib/api";
 import type { SkillsOverview } from "@/lib/generated/SkillsOverview";
 
 import { useApp } from "../app-context";
+import { AskAgent } from "./ask-agent";
 import { Note, SourceBadge, Switch, TabHead, useConfigure } from "./ui";
 
 export function SkillsTab() {
@@ -64,6 +65,25 @@ export function SkillsTab() {
         desc="Turn skills on or off for this project. Agents pick which enabled skills they load in the Agents tab."
         savesTo={scope === "machine" ? "~/.claude/settings.json (per project: .claude/settings.local.json)" : ".claude/settings.local.json"}
       />
+      {scope === "project" && (
+        <AskAgent
+          tab="skills"
+          context={{ skills: skills.map((s) => ({ name: s.name, description: s.description, enabled: want[s.id] ?? s.enabled, loads: s.usage.loads, last_used: s.usage.last_used })) }}
+          onApply={(ops: ConfigOp[]) => {
+            const next = { ...want };
+            let n = 0;
+            for (const o of ops) {
+              const sk = skills.find((s) => s.name === o.target.replace(/^skill:/, ""));
+              const en = (o.value as { enabled?: boolean } | null)?.enabled;
+              if (o.op !== "change" || !sk || typeof en !== "boolean" || !sk.can_toggle) continue;
+              next[sk.id] = en;
+              n++;
+            }
+            setWant(next);
+            return n;
+          }}
+        />
+      )}
       {scope === "machine" && <Note>Skills are switched on or off per project. Here are the skills every project gets from the home folder and plugins; switch to Project to change one.</Note>}
       {error && <Note tone="bad">Could not read the skills: {error}</Note>}
       {!data && !error && <Note>Reading the skill folders…</Note>}

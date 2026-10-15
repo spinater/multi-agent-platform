@@ -98,13 +98,15 @@ export function HooksTab() {
   const applyOps = (ops: ConfigOp[]) => {
     let n = 0;
     for (const o of ops) {
-      const v = (o.value ?? {}) as Partial<HookItem> & { timeout?: string };
-      const target = (hooks ?? []).find((h) => h.id === o.target.replace(/^hook:/, ""));
-      if (o.op === "add" && v.event && v.command) {
-        add(v.event, v.command, v.blocking ?? undefined, v.timeout_secs ?? parseTimeout(v.timeout ?? "") ?? 60);
+      const event = o.target.replace(/^hook:/, "") as HookEvent;
+      if (!data?.events.some((e) => e.event === event)) continue;
+      const v = (o.value ?? {}) as { command?: string; blocking?: boolean; timeout_secs?: number; enabled?: boolean; set?: Partial<HookItem> };
+      const target = (hooks ?? []).find((h) => h.event === event && h.command === v.command && !h.read_only);
+      if (o.op === "add" && v.command) {
+        add(event, v.command, v.blocking, v.timeout_secs ?? 60);
         n++;
-      } else if (o.op === "change" && target) {
-        upd(target.id, v);
+      } else if (o.op === "change" && target && v.set) {
+        upd(target.id, v.set);
         n++;
       } else if (o.op === "remove" && target && mine(target)) {
         setHooks((hs) => (hs ?? []).filter((h) => h.id !== target.id));
