@@ -12,4 +12,8 @@ name: string, provider: string | null, model: string | null,
 /**
  * The first prompt typed into the new session.
  */
-prompt: string | null, clear_when: LaneClearWhen | null, status_prompt: string | null, };
+prompt: string | null, clear_when: LaneClearWhen | null, status_prompt: string | null, 
+/**
+ * `developer` (default), `manager` or another lowercase word.
+ */
+role: string | null, };

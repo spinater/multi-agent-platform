@@ -445,6 +445,10 @@ fn owned_config(hub: &Hub, name: &str, slug: &str, kind: &str, folder: &Path, pr
     let base = rules_for(hub, folder);
     let mut c = LaneConfig {
         name: name.to_string(),
+        project: Some(slug.to_string()),
+        role: Some(if kind == "manager" { "manager".to_string() } else { "developer".to_string() }),
+        rename_from: None,
+        added: false,
         socket: String::new(),
         session_match: vec![name.to_string()],
         path: Some(folder.to_path_buf()),
@@ -485,6 +489,9 @@ pub async fn sync_lanes(hub: &Hub) {
     for r in hub.store.owned_lanes(None).await.unwrap_or_default() {
         let Some(p) = projects.iter().find(|p| p.slug == r.project) else { continue };
         let mut c = owned_config(hub, &r.lane, &r.project, "lane", &hub.workspace_of(p), &r.provider);
+        if let Some(role) = &r.role {
+            c.role = Some(role.clone());
+        }
         if let Some(cw) = &r.clear_when {
             c.clear_when = cw.clone();
         }
@@ -509,6 +516,13 @@ pub async fn open_lane(hub: &Arc<Hub>, slug: &str, body: OpenLane, by: &str) -> 
     if !LANE_NAME.is_match(&short) {
         bail!("a lane name is 1–24 letters, digits or -");
     }
+    if short == "watch" {
+        bail!("`watch` is reserved");
+    }
+    let role = body.role.as_deref().map(|r| r.trim().to_ascii_lowercase()).filter(|r| !r.is_empty()).unwrap_or_else(|| "developer".into());
+    if !crate::config::valid_role(&role) {
+        bail!("a role is 1-24 lowercase letters, digits or -, starting with a letter (manager, developer, ...)");
+    }
     let lane = lane_session(hub, slug, &short);
     if find_lane(hub, slug, &short).await?.is_some() || hub.lanes.config(&lane).is_some() {
         bail!("lane `{short}` already exists in {slug}");
@@ -527,6 +541,7 @@ pub async fn open_lane(hub: &Arc<Hub>, slug: &str, body: OpenLane, by: &str) -> 
         clear_when: body.clear_when,
         opened_by: by.into(),
         created_at: Utc::now(),
+        role: Some(role),
     };
     let mut session = launch_lane(hub, &rec, false).await?;
     if by == "manager" {
@@ -614,22 +629,11 @@ pub async fn overview(hub: &Hub, slug: &str) -> Result<ProjectOverview> {
     })
 }
 
-/// The project's lanes: MAP-owned ones and `[[lanes]]` blocks watching its folder.
+/// The project's lanes: MAP-owned ones, lanes added on the dashboard, and `[[lanes]]` blocks naming it (`project`)
+/// or watching its folder.
 pub async fn project_lanes(hub: &Hub, slug: &str) -> Result<Vec<crate::model::LaneInfo>> {
-    let p = project(hub, slug).await?;
-    let folder = std::fs::canonicalize(hub.workspace_of(&p)).unwrap_or_else(|_| hub.workspace_of(&p));
-    let now = Utc::now();
-    let mut out = vec![];
-    for cfg in hub.lanes.configs() {
-        let mine = match &cfg.owned {
-            Some(o) => o.project == slug,
-            None => cfg.path.as_deref().is_some_and(|x| std::fs::canonicalize(x).unwrap_or_else(|_| x.to_path_buf()) == folder),
-        };
-        if mine {
-            out.push(hub.lanes.info(hub, &cfg, now).await?);
-        }
-    }
-    Ok(out)
+    project(hub, slug).await?;
+    hub.lanes.infos_for(hub, Some(slug)).await
 }
 
 /// A `[[lanes]]` block (someone else's session) of this project, by name.

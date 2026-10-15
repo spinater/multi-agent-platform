@@ -14,6 +14,21 @@ use sqlx::{Row, SqlitePool};
 use crate::model::{CaseScore, Decision, DecisionStats, DecisionSummary, Event, HourBucket, Lane, LaneAction, LaneSummary, LaneTell, Level, Plan, PlanStatus, PlanTask, Project, ReflexCase, Session, Task, TaskStatus, TellVerb};
 use crate::savings;
 
+/// One row of `watch_lanes`: a lane added from the dashboard to watch an existing tmux session.
+#[derive(Debug, Clone, PartialEq)]
+pub struct WatchLaneRow {
+    pub name: String,
+    pub project: String,
+    pub role: String,
+    /// `''`: tmux's default server.
+    pub socket: String,
+    pub session_match: Vec<String>,
+    pub path: Option<String>,
+    /// The other `[[lanes]]` keys as a JSON object.
+    pub data: String,
+    pub created_at: DateTime<Utc>,
+}
+
 #[derive(Clone)]
 pub struct Store {
     pub(crate) pool: SqlitePool,
@@ -642,6 +657,103 @@ impl Store {
     pub async fn delete_owned_lane(&self, lane: &str) -> Result<()> {
         sqlx::query("DELETE FROM owned_lanes WHERE lane = ?").bind(lane).execute(&self.pool).await?;
         Ok(())
+    }
+
+    // ---- lanes added from the dashboard to watch an existing session (lanes/watch.rs)
+
+    pub async fn watch_lanes(&self) -> Result<Vec<WatchLaneRow>> {
+        let rows = sqlx::query("SELECT * FROM watch_lanes ORDER BY project, created_at, name").fetch_all(&self.pool).await?;
+        Ok(rows
+            .iter()
+            .map(|r| WatchLaneRow {
+                name: r.get("name"),
+                project: r.get("project"),
+                role: r.get("role"),
+                socket: r.get("socket"),
+                session_match: serde_json::from_str(r.get::<&str, _>("session_match")).unwrap_or_default(),
+                path: r.get("path"),
+                data: r.get("data"),
+                created_at: r.get("created_at"),
+            })
+            .collect())
+    }
+
+    pub async fn put_watch_lane(&self, l: &WatchLaneRow) -> Result<()> {
+        sqlx::query(
+            "INSERT INTO watch_lanes (name, project, role, socket, session_match, path, data, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+             ON CONFLICT(name) DO UPDATE SET project = excluded.project, role = excluded.role, socket = excluded.socket,
+             session_match = excluded.session_match, path = excluded.path, data = excluded.data",
+        )
+        .bind(&l.name)
+        .bind(&l.project)
+        .bind(&l.role)
+        .bind(&l.socket)
+        .bind(serde_json::to_string(&l.session_match)?)
+        .bind(&l.path)
+        .bind(&l.data)
+        .bind(l.created_at)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    /// Removes the lane's definition only (its overrides, memory and history stay, as for a removed `[[lanes]]` block).
+    pub async fn delete_watch_lane(&self, name: &str) -> Result<bool> {
+        Ok(sqlx::query("DELETE FROM watch_lanes WHERE name = ?").bind(name).execute(&self.pool).await?.rows_affected() > 0)
+    }
+
+    /// Rows keyed by lane `name` in `lane_overrides`, `lane_memory`, `lane_tells` and `lane_history`.
+    pub async fn lane_rows(&self, name: &str) -> Result<i64> {
+        let n: i64 = sqlx::query(
+            "SELECT (SELECT COUNT(*) FROM lane_overrides WHERE lane = ?1) + (SELECT COUNT(*) FROM lane_memory WHERE lane = ?1)
+             + (SELECT COUNT(*) FROM lane_tells WHERE lane = ?1) + (SELECT COUNT(*) FROM lane_history WHERE lane = ?1) AS n",
+        )
+        .bind(name)
+        .fetch_one(&self.pool)
+        .await?
+        .get("n");
+        Ok(n)
+    }
+
+    /// Moves a lane's overrides, memory, tells and history from `old` to `new` in one transaction. Refused when `new`
+    /// already has rows (or is a dashboard lane). Returns the rows moved.
+    pub async fn rename_lane(&self, old: &str, new: &str) -> Result<u64> {
+        self.rename_lane_rows(old, new, false).await
+    }
+
+    /// [`Store::rename_lane`] for a lane added on the dashboard: its `watch_lanes` row moves in the same transaction.
+    pub async fn rename_watch_lane(&self, old: &str, new: &str) -> Result<u64> {
+        self.rename_lane_rows(old, new, true).await
+    }
+
+    async fn rename_lane_rows(&self, old: &str, new: &str, definition: bool) -> Result<u64> {
+        let mut tx = self.pool.begin().await?;
+        let taken: i64 = sqlx::query(
+            "SELECT (SELECT COUNT(*) FROM lane_overrides WHERE lane = ?1) + (SELECT COUNT(*) FROM lane_memory WHERE lane = ?1)
+             + (SELECT COUNT(*) FROM lane_tells WHERE lane = ?1) + (SELECT COUNT(*) FROM lane_history WHERE lane = ?1)
+             + (SELECT COUNT(*) FROM watch_lanes WHERE name = ?1) AS n",
+        )
+        .bind(new)
+        .fetch_one(&mut *tx)
+        .await?
+        .get("n");
+        if taken > 0 {
+            anyhow::bail!("lane `{new}` already has stored rows; not renaming `{old}` onto it");
+        }
+        let mut moved = 0;
+        for sql in [
+            "UPDATE lane_overrides SET lane = ?2 WHERE lane = ?1",
+            "UPDATE lane_memory SET lane = ?2 WHERE lane = ?1",
+            "UPDATE lane_tells SET lane = ?2 WHERE lane = ?1",
+            "UPDATE lane_history SET lane = ?2 WHERE lane = ?1",
+        ] {
+            moved += sqlx::query(sql).bind(old).bind(new).execute(&mut *tx).await?.rows_affected();
+        }
+        if definition && sqlx::query("UPDATE watch_lanes SET name = ?2 WHERE name = ?1").bind(old).bind(new).execute(&mut *tx).await?.rows_affected() == 0 {
+            anyhow::bail!("no dashboard lane `{old}`");
+        }
+        tx.commit().await?;
+        Ok(moved)
     }
 
     // ---- lanes (lanes.rs)

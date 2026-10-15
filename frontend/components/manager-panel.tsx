@@ -162,9 +162,9 @@ export function ManagerPanel({ slug }: { slug: string }) {
             {lanes.map((l) => (
               <li key={l.name} className="flex min-w-0 items-center gap-2 font-mono text-[11.5px]">
                 <button type="button" className="min-w-0 truncate text-link hover:underline" onClick={() => go("lanes", l.name)}>
-                  {l.name}
+                  {l.label}
                 </button>
-                <span className="text-muted">{l.owned ?? "watched"}</span>
+                <span className="text-muted">{l.role ?? l.owned ?? "watched"}</span>
                 <span className={l.stopped ? "text-bad" : "text-text-2"}>{l.stopped ? "stopped" : (l.sessions[0]?.state.replace("_", " ") ?? "not checked yet")}</span>
               </li>
             ))}
@@ -194,6 +194,7 @@ function OpenLaneForm({ slug, onDone }: { slug: string; onDone: () => void }) {
         prompt: prompt.trim() || null,
         clear_when: null,
         status_prompt: statusPrompt.trim() || null,
+        role: null,
       });
       toast(`Lane ${r.lane} opened on ${r.provider}`);
       setName("");

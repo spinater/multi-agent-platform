@@ -713,6 +713,8 @@ impl LaneOverride {
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct LanePatch {
+    /// A new name (lanes added on the dashboard only; their stored rows move with it).
+    pub name: Option<String>,
     pub watch: Option<bool>,
     pub actions: Option<bool>,
     pub clear_enabled: Option<bool>,
@@ -738,8 +740,12 @@ type Capture = (String, DateTime<Utc>);
 /// Lanes live in the hub: their settings, the last tick's view, the last captures.
 pub struct Lanes {
     base: Vec<LaneConfig>,
+    /// Lanes added from the dashboard to watch an existing session (`watch.rs`), from the database.
+    watched: Mutex<Vec<LaneConfig>>,
     /// MAP-owned lanes (`manager.rs`), rebuilt from the database.
     owned: Mutex<Vec<LaneConfig>>,
+    /// Every project's slug and canonical folder, for the lanes that name no project.
+    folders: Mutex<Vec<(String, PathBuf)>>,
     overrides: Mutex<BTreeMap<String, LaneOverride>>,
     snapshots: Mutex<BTreeMap<String, Snapshot>>,
     screens: Mutex<HashMap<(String, String), Capture>>,
@@ -753,7 +759,9 @@ impl Lanes {
     pub fn new(config: &Config) -> Self {
         Self {
             base: config.lanes.clone(),
+            watched: Mutex::default(),
             owned: Mutex::default(),
+            folders: Mutex::default(),
             overrides: Mutex::default(),
             snapshots: Mutex::default(),
             screens: Mutex::default(),
@@ -763,37 +771,81 @@ impl Lanes {
         }
     }
 
-    /// Reads the dashboard's changes (after a restart).
+    /// At startup: moves the stored rows of renamed `[[lanes]]` blocks (`rename_from`), then reads the dashboard's
+    /// changes and the lanes added there.
     pub async fn load(&self, store: &crate::store::Store) {
-        let Ok(rows) = store.lane_overrides().await else { return };
-        let mut map = self.overrides.lock().unwrap();
-        for (lane, data) in rows {
-            if let Ok(o) = serde_json::from_str::<LaneOverride>(&data) {
-                map.insert(lane, o);
+        for b in &self.base {
+            let Some(old) = &b.rename_from else { continue };
+            match rename_rows(store, old, &b.name).await {
+                Ok(0) => {}
+                Ok(n) => tracing::info!(lane = b.name, "lane renamed from {old}: {n} stored rows moved"),
+                Err(err) => tracing::warn!(lane = b.name, "lane rename from {old}: {err:#}"),
             }
         }
+        if let Ok(rows) = store.lane_overrides().await {
+            let mut map = self.overrides.lock().unwrap();
+            for (lane, data) in rows {
+                if let Ok(o) = serde_json::from_str::<LaneOverride>(&data) {
+                    map.insert(lane, o);
+                }
+            }
+        }
+        self.load_watched(store).await;
+    }
+
+    /// Re-reads the lanes added from the dashboard.
+    pub async fn load_watched(&self, store: &crate::store::Store) {
+        let rows = match store.watch_lanes().await {
+            Ok(r) => r,
+            Err(err) => {
+                tracing::warn!("watch lanes: {err:#}");
+                return;
+            }
+        };
+        let list: Vec<LaneConfig> = rows.iter().filter(|r| !self.base.iter().any(|b| b.name == r.name)).filter_map(|r| watch::config_of(r).ok()).collect();
+        *self.watched.lock().unwrap() = list;
+        self.forget_stale();
     }
 
     pub fn is_empty(&self) -> bool {
-        self.base.is_empty() && self.owned.lock().unwrap().is_empty()
+        self.base.is_empty() && self.owned.lock().unwrap().is_empty() && self.watched.lock().unwrap().is_empty()
     }
 
-    /// The `[[lanes]]` blocks of map.toml with the dashboard's changes (no MAP-owned lane).
+    /// The `[[lanes]]` blocks of map.toml and the lanes added on the dashboard, with the dashboard's changes (no
+    /// MAP-owned lane).
     pub fn base_configs(&self) -> Vec<LaneConfig> {
+        let watched = self.watched.lock().unwrap().clone();
         let o = self.overrides.lock().unwrap();
-        self.base.iter().map(|b| o.get(&b.name).map_or_else(|| b.clone(), |o| o.apply(b))).collect()
+        self.base.iter().chain(watched.iter()).map(|b| o.get(&b.name).map_or_else(|| b.clone(), |o| o.apply(b))).collect()
     }
 
     /// Replaces the MAP-owned lanes (`manager::sync_lanes`).
     pub fn set_owned(&self, lanes: Vec<LaneConfig>) {
-        let names: std::collections::HashSet<String> = lanes.iter().map(|l| l.name.clone()).collect();
         *self.owned.lock().unwrap() = lanes;
-        // A lane that is gone leaves no stale snapshot behind.
-        self.snapshots.lock().unwrap().retain(|k, _| names.contains(k) || self.base.iter().any(|b| &b.name == k));
+        self.forget_stale();
+    }
+
+    /// A lane that is gone leaves no stale snapshot behind.
+    fn forget_stale(&self) {
+        let names: std::collections::HashSet<String> = self.raw().into_iter().map(|l| l.name).collect();
+        self.snapshots.lock().unwrap().retain(|k, _| names.contains(k));
+    }
+
+    /// Every lane without the dashboard's changes: map.toml, then the dashboard's (a map.toml name wins), then MAP's.
+    fn raw(&self) -> Vec<LaneConfig> {
+        let watched = self.watched.lock().unwrap().clone();
+        let owned = self.owned.lock().unwrap().clone();
+        let mut out = self.base.clone();
+        for w in watched.into_iter().chain(owned) {
+            if !out.iter().any(|b| b.name == w.name) {
+                out.push(w);
+            }
+        }
+        out
     }
 
     fn base_of(&self, name: &str) -> Option<LaneConfig> {
-        self.base.iter().find(|b| b.name == name).cloned().or_else(|| self.owned.lock().unwrap().iter().find(|b| b.name == name).cloned())
+        self.raw().into_iter().find(|b| b.name == name)
     }
 
     /// The first tick has finished.
@@ -801,11 +853,31 @@ impl Lanes {
         self.ticked.load(Ordering::Relaxed)
     }
 
-    /// Every lane with the dashboard's changes applied, in map.toml order, then MAP's own lanes.
+    /// Every lane with the dashboard's changes applied, in map.toml order, then the lanes added on the dashboard,
+    /// then MAP's own lanes.
     pub fn configs(&self) -> Vec<LaneConfig> {
-        let owned = self.owned.lock().unwrap().clone();
+        let raw = self.raw();
         let o = self.overrides.lock().unwrap();
-        self.base.iter().chain(owned.iter()).map(|b| o.get(&b.name).map_or_else(|| b.clone(), |o| o.apply(b))).collect()
+        raw.iter().map(|b| o.get(&b.name).map_or_else(|| b.clone(), |o| o.apply(b))).collect()
+    }
+
+    /// Reads every project's folder (for the lanes that name no project).
+    pub async fn refresh_projects(&self, hub: &Hub) {
+        let Ok(projects) = hub.store.projects().await else { return };
+        let list = projects.iter().map(|p| (p.slug.clone(), canonical(&hub.workspace_of(p)))).collect();
+        *self.folders.lock().unwrap() = list;
+    }
+
+    /// The lane's project: MAP's own lane's, the lane's `project` key, else the project whose folder is its `path`.
+    pub fn project_of(&self, cfg: &LaneConfig) -> Option<String> {
+        if let Some(o) = &cfg.owned {
+            return Some(o.project.clone());
+        }
+        if let Some(p) = &cfg.project {
+            return Some(p.clone());
+        }
+        let path = canonical(cfg.path.as_deref()?);
+        self.folders.lock().unwrap().iter().find(|(_, f)| *f == path).map(|(s, _)| s.clone())
     }
 
     pub fn config(&self, name: &str) -> Option<LaneConfig> {
@@ -846,7 +918,16 @@ impl Lanes {
     }
 
     pub async fn update(&self, hub: &Hub, name: &str, patch: LanePatch) -> Result<LaneConfig> {
+        self.config(name).ok_or_else(|| anyhow!("no lane `{name}`"))?;
+        let renamed = patch.name.as_deref().map(str::trim).filter(|n| !n.is_empty() && *n != name).map(String::from);
+        if let Some(new) = &renamed {
+            self.rename(hub, name, new).await?;
+        }
+        let name = renamed.as_deref().unwrap_or(name);
         let before = self.config(name).ok_or_else(|| anyhow!("no lane `{name}`"))?;
+        if patch.watch.is_none() && patch.actions.is_none() && patch.clear_enabled.is_none() && patch.status_prompt.is_none() {
+            return Ok(before);
+        }
         let cfg = self
             .save_override(hub, name, |o| {
                 if patch.watch.is_some() {
@@ -911,9 +992,20 @@ impl Lanes {
         let history = hub.store.lane_history(&cfg.name, 30).await?;
         let status_age_mins = snap.status.as_ref().and_then(status_at).map(|at| (now - at).num_minutes());
         let stopped = cfg.owned.is_some() && !hub.term.exists(&cfg.name).await.unwrap_or(false);
+        let project = self.project_of(cfg);
+        // A persistent lane's session is `<prefix>lane-<slug>-<short>`: the short name is what the owner gave.
+        let label = match (&cfg.owned, &project) {
+            (Some(o), Some(slug)) if o.kind == "lane" => {
+                cfg.name.strip_prefix(&format!("{}lane-{slug}-", hub.config.workspace.session_prefix)).unwrap_or(&cfg.name).to_string()
+            }
+            _ => cfg.name.clone(),
+        };
         Ok(LaneInfo {
-            project: cfg.owned.as_ref().map(|o| o.project.clone()),
+            project,
             owned: cfg.owned.as_ref().map(|o| o.kind.clone()),
+            role: cfg.role.clone(),
+            label,
+            added: cfg.added,
             stopped,
             name: cfg.name.clone(),
             socket: cfg.socket.clone(),
@@ -937,27 +1029,53 @@ impl Lanes {
         })
     }
 
+    /// Every lane (tests; the API filters with [`Lanes::infos_for`]).
+    #[cfg(test)]
     pub async fn infos(&self, hub: &Hub) -> Result<Vec<LaneInfo>> {
+        self.infos_for(hub, None).await
+    }
+
+    /// Every lane, or one project's.
+    pub async fn infos_for(&self, hub: &Hub, project: Option<&str>) -> Result<Vec<LaneInfo>> {
+        self.refresh_projects(hub).await;
         let now = Utc::now();
         let mut out = vec![];
         for cfg in self.configs() {
+            if project.is_some_and(|p| self.project_of(&cfg).as_deref() != Some(p)) {
+                continue;
+            }
             out.push(self.info(hub, &cfg, now).await?);
         }
         Ok(out)
     }
 
-    /// The full report: every lane as the last tick saw it (a muted lane is one line).
+    /// The full report: every lane as the last tick saw it (a muted lane is one line), grouped by project when the
+    /// lanes belong to more than one.
     pub fn report(&self, now: DateTime<Utc>) -> String {
+        let mut groups: Vec<(Option<String>, Vec<LaneConfig>)> = vec![];
+        for cfg in self.configs() {
+            let p = self.project_of(&cfg);
+            match groups.iter_mut().find(|(g, _)| *g == p) {
+                Some((_, list)) => list.push(cfg),
+                None => groups.push((p, vec![cfg])),
+            }
+        }
+        // Projects first (in the order their first lane appears), lanes of no project last.
+        groups.sort_by_key(|(p, _)| p.is_none());
+        let headed = groups.len() > 1;
         let snaps = self.snapshots.lock().unwrap();
         let mut parts = vec![format!("🕐 lanes · {}", now.with_timezone(&Local).format("%d/%m/%Y %H:%M"))];
-        for cfg in self.configs() {
-            if !cfg.watch {
-                parts.push(format!("🤖 {}\n   ⏸ paused via /watch — send /watch to watch it again", cfg.name));
-                continue;
-            }
-            match snaps.get(&cfg.name) {
-                Some(s) if !s.report.is_empty() => parts.push(s.report.clone()),
-                _ => parts.push(format!("🤖 {}\n   (not checked yet)", cfg.name)),
+        for (project, list) in &groups {
+            for (i, cfg) in list.iter().enumerate() {
+                let part = if !cfg.watch {
+                    format!("🤖 {}\n   ⏸ paused via /watch — send /watch to watch it again", cfg.name)
+                } else {
+                    match snaps.get(&cfg.name) {
+                        Some(s) if !s.report.is_empty() => s.report.clone(),
+                        _ => format!("🤖 {}\n   (not checked yet)", cfg.name),
+                    }
+                };
+                parts.push(if headed && i == 0 { format!("📁 {}\n\n{part}", project.as_deref().unwrap_or("no project")) } else { part });
             }
         }
         parts.join(&format!("\n\n{}\n\n", "─".repeat(28)))
@@ -1046,6 +1164,7 @@ pub async fn run(hub: Arc<Hub>) {
 /// One round over every lane.
 pub async fn tick(hub: &Arc<Hub>, now: DateTime<Utc>) {
     let _one = hub.lanes.busy.lock().await;
+    hub.lanes.refresh_projects(hub).await;
     for cfg in hub.lanes.configs() {
         let snap = tick_lane(hub, &cfg, now).await;
         hub.lanes.snapshots.lock().unwrap().insert(cfg.name.clone(), snap);
@@ -1489,9 +1608,21 @@ fn merge<T: Serialize + serde::de::DeserializeOwned + Clone>(cur: &T, src: Optio
     out
 }
 
+fn canonical(p: &Path) -> PathBuf {
+    std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf())
+}
+
 fn same_dir(a: &Path, b: &Path) -> bool {
-    let canon = |p: &Path| std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());
-    canon(a) == canon(b)
+    canonical(a) == canonical(b)
+}
+
+/// Moves the stored rows of lane `old` to `new` when `old` has some and `new` none (a rename in map.toml);
+/// returns the rows moved (0: nothing to do).
+pub async fn rename_rows(store: &crate::store::Store, old: &str, new: &str) -> Result<u64> {
+    if store.lane_rows(old).await? == 0 || store.lane_rows(new).await? > 0 {
+        return Ok(0);
+    }
+    store.rename_lane(old, new).await
 }
 
 /// Fills lane settings (status prompt, thresholds) and the Telegram chat and users from agent-watcher's
@@ -1558,6 +1689,8 @@ pub async fn import_watcher_in(hub: &Hub, path: &str, home: &Path) -> Result<Lan
     }
     Ok(LaneImport { updated, skipped, chat_id, allowed_user_ids: allowed })
 }
+
+pub mod watch;
 
 #[cfg(test)]
 pub(crate) mod tests;

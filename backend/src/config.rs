@@ -683,6 +683,16 @@ impl ProjectsConfig {
 #[serde(deny_unknown_fields)]
 pub struct LaneConfig {
     pub name: String,
+    /// The project (slug) the lane belongs to; none: the project whose folder is `path`, else no project.
+    #[serde(default)]
+    pub project: Option<String>,
+    /// What the lane does in its project: `manager`, `developer` or any other lowercase word.
+    #[serde(default)]
+    pub role: Option<String>,
+    /// The lane's previous name: at startup MAP moves its overrides, memory, tells and history to `name` (once, when
+    /// the new name has none), and with `session_match` empty the old name keeps matching its session.
+    #[serde(default)]
+    pub rename_from: Option<String>,
     /// `tmux -L <socket>`; empty: tmux's default server.
     #[serde(default)]
     pub socket: String,
@@ -721,6 +731,24 @@ pub struct LaneConfig {
     /// MAP-owned lanes (a project's manager, persistent lanes): which project, and what kind. Never from map.toml.
     #[serde(skip)]
     pub owned: Option<OwnedLane>,
+    /// Added from the dashboard (a watched session stored in the database, `lanes::watch`), not map.toml.
+    #[serde(skip)]
+    pub added: bool,
+}
+
+/// A lane name given on the dashboard: 1-48 of `a-z 0-9 . _ -`.
+pub fn valid_lane_name(name: &str) -> bool {
+    !name.is_empty() && name.len() <= 48 && name.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || matches!(c, '-' | '_' | '.'))
+}
+
+/// A role: 1-24 of `a-z 0-9 -`, starting with a letter.
+pub fn valid_role(role: &str) -> bool {
+    role.len() <= 24 && role.starts_with(|c: char| c.is_ascii_lowercase()) && role.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+}
+
+/// A tmux socket name (`-L`): letters, digits, `-`, `_`, `.`, not starting with `.`; empty is the default server.
+pub fn valid_socket(socket: &str) -> bool {
+    socket.is_empty() || (socket.len() <= 64 && socket.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.')) && !socket.starts_with('.'))
 }
 
 /// A lane MAP started itself (`manager.rs`): its session runs on MAP's own tmux server.
@@ -816,12 +844,34 @@ impl Config {
             }
             lane.name = name.clone();
             lane.socket = lane.socket.trim().to_string();
-            if !lane.socket.is_empty() && (!lane.socket.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.')) || lane.socket.starts_with('.')) {
+            if !valid_socket(&lane.socket) {
                 bail!("lanes.{name}.socket `{}` may use only letters, digits, -, _ and . (a name, not a path)", lane.socket);
+            }
+            lane.project = lane.project.take().map(|p| p.trim().to_string()).filter(|p| !p.is_empty());
+            if let Some(p) = &lane.project
+                && !p.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_'))
+            {
+                bail!("lanes.{name}.project `{p}` must be a project slug");
+            }
+            lane.role = lane.role.take().map(|r| r.trim().to_ascii_lowercase()).filter(|r| !r.is_empty());
+            if let Some(r) = &lane.role
+                && !valid_role(r)
+            {
+                bail!("lanes.{name}.role `{r}` must be 1-24 lowercase letters, digits or -, starting with a letter");
+            }
+            lane.rename_from = lane.rename_from.take().map(|r| r.trim().to_string()).filter(|r| !r.is_empty());
+            if let Some(old) = &lane.rename_from
+                && (old == &name || old.len() > 48 || !old.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.')))
+            {
+                bail!("lanes.{name}.rename_from `{old}` must be another lane name (1-48 letters, digits, -, _ or .)");
             }
             lane.session_match.retain(|g| !g.trim().is_empty());
             if lane.session_match.is_empty() {
                 lane.session_match.push(name.clone());
+                // Renamed away from its session's name: the old name still finds the session.
+                if let Some(old) = &lane.rename_from {
+                    lane.session_match.push(old.clone());
+                }
             }
             for (key, rel) in [("status_file", &lane.status_file), ("tasks_dir", &lane.tasks_dir)] {
                 let p = Path::new(rel);
@@ -844,6 +894,13 @@ impl Config {
             }
             if lane.ask_when.max_sessions_per_round == 0 {
                 lane.ask_when.max_sessions_per_round = 1;
+            }
+        }
+        for lane in &self.lanes {
+            if let Some(old) = &lane.rename_from
+                && seen.contains(old)
+            {
+                bail!("lanes.{}.rename_from `{old}` is still a lane in map.toml; remove that block or the key", lane.name);
             }
         }
         self.lane_watch.interval_secs = self.lane_watch.interval_secs.max(5);

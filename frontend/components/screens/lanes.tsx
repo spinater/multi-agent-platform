@@ -7,6 +7,7 @@ import { lanesApi } from "@/lib/api";
 import type { LaneInfo } from "@/lib/generated/LaneInfo";
 
 import { useApp } from "../app-context";
+import { ProjectLanesHead } from "../lanes/add-lane";
 import { ImportWatcher } from "../lanes/import-watcher";
 import { LaneCard } from "../lanes/lane-card";
 import { Btn, errText } from "../project-ui";
@@ -17,33 +18,37 @@ import { TopBar } from "../shell/top-bar";
 const REFRESH_MS = 10_000;
 
 const TOML_EXAMPLE = `[[lanes]]
-name = "my-agent"
-socket = ""                  # empty: tmux's default server
+name = "developer-myapp"
+project = "myapp"             # the project's slug; default: the project whose folder is path
+role = "developer"            # manager, developer or another word
+socket = ""                   # empty: tmux's default server
 session_match = ["my-agent*"] # globs; empty: the name
 path = "/path/to/project"     # status file, cards, git`;
 
-const WATCHED = "";
+/** Manager first, then developer, then other roles, then lanes without one; MAP's manager before a watched one. */
+const roleOrder = (l: LaneInfo) => (l.role === "manager" ? 0 : l.role === "developer" ? 1 : l.role ? 2 : 3);
+const byRole = (a: LaneInfo, b: LaneInfo) =>
+  roleOrder(a) - roleOrder(b) || (a.owned === "manager" ? -1 : b.owned === "manager" ? 1 : 0) || a.label.localeCompare(b.label);
 
-/** MAP-owned lanes grouped by project (the manager first), then the `[[lanes]]` blocks. */
-function groupLanes(lanes: LaneInfo[]): [string, LaneInfo[]][] {
-  const by = new Map<string, LaneInfo[]>();
-  for (const l of lanes) {
-    const key = l.project ?? WATCHED;
-    by.set(key, [...(by.get(key) ?? []), l]);
-  }
-  const keys = [...by.keys()].filter((k) => k !== WATCHED).sort();
-  if (by.has(WATCHED)) keys.push(WATCHED);
-  return keys.map((k) => [k, (by.get(k) ?? []).sort((a, b) => (a.owned === "manager" ? -1 : b.owned === "manager" ? 1 : a.name.localeCompare(b.name)))]);
+/** Lanes by project (every project of the dashboard, even one without lanes), then the lanes of no project. */
+function groupLanes(lanes: LaneInfo[], projects: string[]): [string | null, LaneInfo[]][] {
+  const keys = [...new Set([...projects, ...lanes.map((l) => l.project).filter((p): p is string => p !== null)])];
+  const out: [string | null, LaneInfo[]][] = keys.map((k) => [k, lanes.filter((l) => l.project === k).sort(byRole)]);
+  const loose = lanes.filter((l) => l.project === null).sort(byRole);
+  if (loose.length > 0) out.push([null, loose]);
+  return out;
 }
 
-/** Lanes (`#lanes`, `#lanes/<name>` scrolls to one): tmux sessions someone else owns, which MAP watches, reports to
- * Telegram and, when allowed, nudges (`/clear`, the status prompt) while idle with nobody attached. */
+/** Lanes (`#lanes`, `#lanes/<name>` scrolls to one): agent sessions MAP watches, each belonging to a project. The
+ * current project's lanes, or every project's under a header each in "All projects". MAP reports them to Telegram
+ * and, when allowed, nudges them (`/clear`, the status prompt) while idle with nobody attached. */
 export function LanesScreen() {
-  const { route } = useApp();
+  const { route, project, scope, projects } = useApp();
   const [lanes, setLanes] = useState<LaneInfo[] | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
+  const all = scope === "all";
 
   const load = useCallback(
     () =>
@@ -76,7 +81,18 @@ export function LanesScreen() {
     return () => window.clearTimeout(t);
   }, [focused, ready]);
 
-  const replace = (l: LaneInfo) => setLanes((all) => all?.map((x) => (x.name === l.name ? l : x)) ?? null);
+  const replace = (l: LaneInfo) => setLanes((xs) => xs?.map((x) => (x.name === l.name ? l : x)) ?? null);
+  const nameOf = (slug: string) => projects.find((p) => p.project.slug === slug)?.project.name ?? slug;
+
+  // The current project's group (the default workspace: lanes of no project); a deep link to a lane of another
+  // project shows that lane's group too.
+  const linked = focused ? lanes?.find((l) => l.name === focused) : undefined;
+  const groups = lanes
+    ? groupLanes(
+        lanes,
+        projects.map((p) => p.project.slug),
+      ).filter(([g]) => all || g === project || (linked !== undefined && g === linked.project))
+    : [];
 
   return (
     <>
@@ -85,7 +101,7 @@ export function LanesScreen() {
         <PageHeader
           kicker="Watch"
           title="Lanes"
-          lead="Lanes are tmux sessions someone else owns, on tmux's default server or a named socket. MAP watches them and notifies Telegram. It only types into one (/clear, the status prompt) when that is allowed, the session is idle, and nobody is attached."
+          lead="Every lane belongs to a project: its manager and developer agents, in tmux sessions MAP watches and reports to Telegram. MAP only types into one (/clear, the status prompt) when that is allowed, the session is idle, and nobody is attached."
           actions={
             <Btn size="sm" onClick={refresh} disabled={busy}>
               <RefreshCw className={busy ? "size-3 animate-spin" : "size-3"} />
@@ -116,30 +132,45 @@ export function LanesScreen() {
         {error && <p className="text-[12px] text-bad">{error}</p>}
         {!lanes ? (
           !error && <p className="font-mono text-[11.5px] text-muted">loading…</p>
-        ) : lanes.length === 0 ? (
-          <Card className="flex max-w-[860px] flex-col gap-3.5 p-[18px]">
-            <SectionTitle note="map.toml">No lanes yet</SectionTitle>
-            <p className="text-[13px] leading-normal text-text-2">
-              Add a <code>[[lanes]]</code> block to <code>map.toml</code> for each tmux session to watch, then restart MAP. Thresholds, the status prompt and
-              Telegram go in the same file, or come from an agent-watcher config below.
-            </p>
-            <pre className="overflow-x-auto rounded-lg border border-line bg-inset px-3 py-2 font-mono text-[11.5px] whitespace-pre text-accent-soft">{TOML_EXAMPLE}</pre>
-            <div className="border-t border-line pt-3.5">
-              <ImportWatcher onDone={() => void load()} />
-            </div>
-          </Card>
         ) : (
-          <div className="flex min-w-0 flex-col gap-6">
-            {groupLanes(lanes).map(([group, list]) => (
-              <section key={group} className="flex min-w-0 flex-col gap-3">
-                <SectionTitle note={group === WATCHED ? "map.toml [[lanes]]" : "MAP's own: the manager and persistent lanes"}>{group === WATCHED ? "Watched lanes" : `Project ${group}`}</SectionTitle>
-                <div className="grid min-w-0 gap-4 xl:grid-cols-2">
-                  {list.map((l) => (
-                    <LaneCard key={l.name} lane={l} onChange={replace} onReload={() => void load()} focused={focused === l.name} />
-                  ))}
-                </div>
+          <div className="flex min-w-0 flex-col gap-8">
+            {groups.map(([group, list]) => (
+              <section key={group ?? "-"} className="flex min-w-0 flex-col gap-3">
+                {group === null ? (
+                  <SectionTitle note="[[lanes]] naming no project and outside every project's folder">No project</SectionTitle>
+                ) : (
+                  <ProjectLanesHead slug={group} title={nameOf(group)} lanes={list} onDone={() => void load()} />
+                )}
+                {list.length > 0 && (
+                  <div className="grid min-w-0 gap-4 xl:grid-cols-2">
+                    {list.map((l) => (
+                      <LaneCard key={l.name} lane={l} onChange={replace} onReload={() => void load()} focused={focused === l.name} />
+                    ))}
+                  </div>
+                )}
               </section>
             ))}
+            {groups.length === 0 && (
+              <Card className="flex max-w-[860px] flex-col gap-3.5 p-[18px]">
+                <SectionTitle note="pick a project">No lanes here</SectionTitle>
+                <p className="text-[13px] leading-normal text-text-2">
+                  Lanes belong to projects. Pick a project in the top bar to set up its manager and developer lanes, or switch to All projects to see every lane.
+                </p>
+              </Card>
+            )}
+            {lanes.length === 0 && (
+              <Card className="flex max-w-[860px] flex-col gap-3.5 p-[18px]">
+                <SectionTitle note="map.toml">Or declare lanes in map.toml</SectionTitle>
+                <p className="text-[13px] leading-normal text-text-2">
+                  A <code>[[lanes]]</code> block in <code>map.toml</code> watches a tmux session too (restart MAP after adding it). Thresholds, the status prompt and Telegram go in the
+                  same file, or come from an agent-watcher config below.
+                </p>
+                <pre className="overflow-x-auto rounded-lg border border-line bg-inset px-3 py-2 font-mono text-[11.5px] whitespace-pre text-accent-soft">{TOML_EXAMPLE}</pre>
+                <div className="border-t border-line pt-3.5">
+                  <ImportWatcher onDone={() => void load()} />
+                </div>
+              </Card>
+            )}
           </div>
         )}
       </Main>

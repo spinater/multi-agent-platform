@@ -90,6 +90,8 @@ import type { OpenLane } from "./generated/OpenLane";
 import type { OwnedLaneRecord } from "./generated/OwnedLaneRecord";
 import type { LaneScreen } from "./generated/LaneScreen";
 import type { LaneTell } from "./generated/LaneTell";
+import type { TmuxSessionInfo } from "./generated/TmuxSessionInfo";
+import type { WatchLane } from "./generated/WatchLane";
 import type { TelegramInfo } from "./generated/TelegramInfo";
 import type { TellVerb } from "./generated/TellVerb";
 
@@ -359,13 +361,21 @@ export const decisionsApi = {
 // ---- lanes (backend lanes.rs): tmux sessions someone else owns that MAP watches, and Telegram. Only booleans come
 // back for the bot token, never its value.
 
-export type LanePatch = { watch?: boolean; actions?: boolean; clear_enabled?: boolean; status_prompt?: string };
+/** `name` renames a lane added on the dashboard (its history and settings move with it). */
+export type LanePatch = { name?: string; watch?: boolean; actions?: boolean; clear_enabled?: boolean; status_prompt?: string };
 
 const lanePath = (name: string) => `/lanes/${encodeURIComponent(name)}`;
 const sessionQuery = (session?: string | null) => (session ? `session=${encodeURIComponent(session)}` : "");
 
 export const lanesApi = {
-  list: () => request<LaneInfo[]>("GET", "/lanes"),
+  /** Every lane, or one project's. */
+  list: (project?: string | null) => request<LaneInfo[]>("GET", project ? `/lanes?project=${encodeURIComponent(project)}` : "/lanes"),
+  /** A tmux server's sessions for the lane picker (read only; MAP's own left out). `socket` empty: the default server. */
+  tmuxSessions: (socket = "") => request<TmuxSessionInfo[]>("GET", `/tmux/sessions${socket ? `?socket=${encodeURIComponent(socket)}` : ""}`),
+  /** Watch an existing tmux session as one of the project's lanes (watch only until actions are turned on). */
+  watch: (slug: string, body: WatchLane) => request<LaneInfo>("POST", `/projects/${encodeURIComponent(slug)}/lanes/watch`, body),
+  /** Forget a lane added on the dashboard; the tmux session itself is never touched. */
+  unwatch: (slug: string, name: string) => request<{ ok: boolean }>("DELETE", `/projects/${encodeURIComponent(slug)}/lanes/watch/${encodeURIComponent(name)}`),
   /** The dashboard's changes over map.toml: watch, actions, `/clear` on or off, the status prompt. */
   update: (name: string, body: LanePatch) => request<LaneInfo>("PATCH", lanePath(name), body),
   /** The tail of the last capture (ANSI stripped); without `session`, the lane's first session. */

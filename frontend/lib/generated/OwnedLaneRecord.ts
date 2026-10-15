@@ -16,4 +16,8 @@ name: string, provider: string, model: string | null, prompt: string | null, sta
 /**
  * Who opened it: `owner` or `manager`.
  */
-opened_by: string, created_at: string, };
+opened_by: string, created_at: string, 
+/**
+ * The lane's role in the project (`developer` when opened without one; older records have none).
+ */
+role: string | null, };
