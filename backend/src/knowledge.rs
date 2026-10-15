@@ -103,7 +103,7 @@ fn title_of(body: &str, path: &str) -> String {
 static LINK: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\]\(([^)\s]+?)(?:\s+\x22[^)]*\x22)?\)").unwrap());
 
 /// Relative link targets in Markdown text (no URLs, mail links or bare anchors), without their `#anchor`.
-fn links(body: &str) -> Vec<String> {
+pub(crate) fn links(body: &str) -> Vec<String> {
     let mut in_code = false;
     let mut out = vec![];
     for line in body.lines() {
@@ -126,7 +126,7 @@ fn links(body: &str) -> Vec<String> {
 }
 
 /// `a/b/../c` → `a/c`; `None` when it climbs out of the project.
-fn normalize(path: &Path) -> Option<PathBuf> {
+pub(crate) fn normalize(path: &Path) -> Option<PathBuf> {
     let mut out = PathBuf::new();
     for c in path.components() {
         match c {

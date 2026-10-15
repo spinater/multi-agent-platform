@@ -132,6 +132,7 @@ pub fn router(hub: Arc<Hub>) -> Router {
         .route("/projects/{slug}/knowledge/dismiss", post(projects::knowledge_dismiss))
         .route("/projects/{slug}/knowledge/search", get(projects::knowledge_search))
         .route("/projects/{slug}/knowledge/doc", get(projects::knowledge_doc))
+        .route("/projects/{slug}/knowledge/graph", get(projects::knowledge_graph))
         .route("/providers/{name}/login", get(projects::login_state).post(projects::login_start))
         .route("/providers/{name}/login/code", post(projects::login_code))
         // ---- usage: plan limits per provider (usage.rs)
@@ -289,7 +290,7 @@ pub(crate) fn manager_scope<'a>(method: &axum::http::Method, path: &'a str) -> O
     let name = |s: &str| !s.is_empty() && s.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_');
     let ok = match (method, seg.as_slice()) {
         (&Method::GET, [] | ["overview" | "orchestrator" | "manager" | "tasks" | "plans" | "lanes" | "git" | "knowledge" | "decisions" | "thai" | "activity"]) => true,
-        (&Method::GET, ["decisions", "summary"] | ["knowledge", "search" | "doc"]) => true,
+        (&Method::GET, ["decisions", "summary"] | ["knowledge", "search" | "doc" | "graph"]) => true,
         (&Method::GET, ["tasks", t] | ["tasks", t, "trace"]) => id(t),
         (&Method::GET, ["lanes", n, "screen"]) => name(n),
         (&Method::POST, ["pause" | "resume" | "tasks" | "lanes" | "plans"]) => true,

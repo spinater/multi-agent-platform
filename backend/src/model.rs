@@ -3158,6 +3158,70 @@ pub struct TaskPageItem {
     pub started_at: Option<DateTime<Utc>>,
 }
 
+// ---- Knowledge graph (knowledge_graph.rs): docs, the code they cite, and the links between them
+
+/// A node of `GET /api/projects/{slug}/knowledge/graph`: a document or a code file.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct KnowledgeGraphNode {
+    /// `doc:<path>` or `code:<path>`.
+    pub id: String,
+    /// `doc` or `code`.
+    pub kind: String,
+    pub label: String,
+    pub path: String,
+    /// The document's kind (cards, requirements, …); `None` for code.
+    pub doc_kind: Option<KnowledgeKind>,
+    /// The domain (cluster) it belongs to: `KnowledgeGraphDomain::id`.
+    pub domain: String,
+    /// A document's worst health finding.
+    pub level: Option<Level>,
+    /// `ok`, `stale` (a document whose sources changed after it, or a code file such a document cites) or `missing`
+    /// (a cited file that does not exist).
+    pub state: String,
+    pub lines: u32,
+    pub degree: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct KnowledgeGraphEdge {
+    pub from: String,
+    pub to: String,
+    /// `source` (frontmatter `sources:`), `mention` (a code path in the text), `link` (a Markdown link to a doc).
+    pub kind: String,
+    /// `ok`, `stale` or `missing`.
+    pub state: String,
+}
+
+/// A cluster: the code folder most of its members point at (`api/billing`), or a document folder.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct KnowledgeGraphDomain {
+    pub id: String,
+    pub name: String,
+    /// A generated one-line summary (counts and the main documents; no LLM).
+    pub summary: String,
+    pub docs: u32,
+    pub code: u32,
+    /// Members with a warning or an error.
+    pub flagged: u32,
+}
+
+/// `GET /api/projects/{slug}/knowledge/graph`: built from the index on every request (no LLM): documents, the code
+/// files they cite, the links between them, clustered by the code folders they point at.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct KnowledgeGraph {
+    pub slug: String,
+    pub domains: Vec<KnowledgeGraphDomain>,
+    pub nodes: Vec<KnowledgeGraphNode>,
+    pub edges: Vec<KnowledgeGraphEdge>,
+    /// Documents in the index; `nodes` keeps the most useful ones when there are more than the cap.
+    pub total_docs: u32,
+    pub truncated: bool,
+}
+
 // ---- Configure screen: where each setting comes from
 
 /// Where a Configure item's value comes from: the machine (every project), the project alone, or a project value

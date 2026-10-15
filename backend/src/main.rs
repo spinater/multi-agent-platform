@@ -12,6 +12,7 @@ mod hooks;
 mod hub;
 mod intake;
 mod knowledge;
+mod knowledge_graph;
 mod lanes;
 mod manager;
 mod mcp;

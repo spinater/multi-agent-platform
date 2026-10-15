@@ -509,6 +509,15 @@ pub async fn knowledge(State(hub): State<Arc<Hub>>, UrlPath(slug): UrlPath<Strin
     Ok(Json(crate::knowledge::overview(&hub, &project, false).await?))
 }
 
+/// `GET /api/projects/{slug}/knowledge/graph`: documents, the code they cite and the links between them, clustered.
+pub async fn knowledge_graph(State(hub): State<Arc<Hub>>, UrlPath(slug): UrlPath<String>) -> ApiResult<crate::model::KnowledgeGraph> {
+    let project = load(&hub, &slug).await?;
+    let o = crate::knowledge::overview(&hub, &project, false).await?;
+    let root = std::path::PathBuf::from(&o.root);
+    let g = tokio::task::spawn_blocking(move || crate::knowledge_graph::build(&o.slug, &root, &o.docs, &o.issues)).await.map_err(anyhow::Error::from)?;
+    Ok(Json(g))
+}
+
 pub async fn knowledge_reindex(State(hub): State<Arc<Hub>>, UrlPath(slug): UrlPath<String>) -> ApiResult<crate::model::KnowledgeOverview> {
     let project = load(&hub, &slug).await?;
     Ok(Json(crate::knowledge::overview(&hub, &project, true).await?))
