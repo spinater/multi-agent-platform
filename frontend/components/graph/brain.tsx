@@ -6,7 +6,7 @@ import { activityMarks, prefersReducedMotion } from "@/lib/activity";
 import { isHeld } from "@/lib/intake";
 
 import type { Graph, GraphNode, NodeType } from "./model";
-import { depthStep, graphColumns, hash, layout, type View } from "./layouts";
+import { ORBIT_RINGS, depthStep, graphColumns, hash, layout, type OrbitLayer, type View } from "./layouts";
 
 /** Imperative controls for the toolbar: reset the camera, or fly to a node. */
 export type CanvasControls = { fit: () => void; fly: (id: string) => void };
@@ -71,7 +71,7 @@ class Engine {
   ctx: CanvasRenderingContext2D;
   props: CanvasProps;
   nodes = new Map<string, Live>();
-  cam = { yaw: 0.6, pitch: 0.38, yawT: 0.6, pitchT: 0.38, R: 300, zoom: 1, zoomT: 1, px: 0, py: 0, pxT: 0, pyT: 0, ox: 0 };
+  cam = { yaw: 0.6, pitch: 0.55, yawT: 0.6, pitchT: 0.55, R: 300, zoom: 1, zoomT: 1, px: 0, py: 0, pxT: 0, pyT: 0, ox: 0 };
   ga: Record<View, number> = { orbit: 0, graph: 0 };
   W = 0;
   H = 0;
@@ -219,7 +219,7 @@ class Engine {
       };
     }
     if (prevView !== null && prevView !== props.view) {
-      if (props.view === "orbit") this.cam.pitchT = 0.38;
+      if (props.view === "orbit") this.cam.pitchT = 0.55;
       this.cam.pxT = 0;
       this.cam.pyT = 0;
     }
@@ -229,7 +229,7 @@ class Engine {
 
   /** Adds new nodes at their parent's position, drops gone ones, and sets every target. */
   sync() {
-    const { graph, view, all } = this.props;
+    const { graph, view } = this.props;
     this.lastGraph = graph;
     const seen = new Set<string>();
     // What arrives with the first load appears in place; later nodes grow out of their parent and ease.
@@ -244,7 +244,7 @@ class Engine {
       seen.add(n.id);
     }
     for (const k of [...this.nodes.keys()]) if (!seen.has(k)) this.nodes.delete(k);
-    const targets = layout(graph, view, !all);
+    const targets = layout(graph, view);
     for (const [id, n] of this.nodes) {
       const t = targets.get(id) ?? [0, 0, 0];
       n.tx = t[0];
@@ -410,18 +410,21 @@ class Engine {
     const go = this.ga.orbit;
     const gg = this.ga.graph;
     if (go > 0.01) {
-      for (const y of [-0.7, -0.35, 0, 0.35, 0.7]) poly(ring(Math.sqrt(1 - y * y), y), 0.045 * go);
-      for (let m = 0; m < 6; m++) {
-        const th = (m * Math.PI) / 6;
-        poly(
-          Array.from({ length: 73 }, (_, i) => {
-            const t = (i / 72) * Math.PI * 2;
-            return [Math.cos(t) * Math.cos(th), Math.sin(t), Math.cos(t) * Math.sin(th)] as [number, number, number];
-          }),
-          0.035 * go,
-        );
+      // One flat ring per layer, named where it passes nearest the viewer.
+      const names: Record<OrbitLayer, string> = { group: p.all ? "PROJECTS" : "PROVIDERS", session: "SESSIONS", task: "TASKS", run: "RUNS", stage: "PIPELINE" };
+      ctx.font = this.mono(8.5);
+      spacing(1.5);
+      ctx.textAlign = "left";
+      for (const [layer, r] of Object.entries(ORBIT_RINGS) as [OrbitLayer, number][]) {
+        poly(ring(r, 0), (layer === "stage" ? 0.2 : 0.12) * go, layer === "stage" ? 1.2 : 1);
+        const t = -Math.PI / 2 - cam.yaw + 0.5;
+        const q = P(Math.cos(t) * r, 0, Math.sin(t) * r);
+        ctx.globalAlpha = 0.55 * go;
+        ctx.fillStyle = this.c("var(--muted)");
+        ctx.fillText(names[layer], q[0] + 4, q[1] - 4);
+        ctx.globalAlpha = 1;
       }
-      poly(ring(1.2, 0), 0.2 * go, 1.2);
+      spacing(0);
     }
     // Column headers need room; on a phone the nodes speak for themselves.
     if (gg > 0.02 && W >= 600) {

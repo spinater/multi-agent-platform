@@ -1,8 +1,9 @@
 "use client";
 
-/** Configure › Agents › Relation map (design: Configure.dc.html `drawRel`, circle layout): agents on an inner ring in
- * provider colours, what they get on an outer ring in arcs (skills, rules, MCP servers, tools), curved edges from
- * each agent to everything it gets. Hover traces links; clicking an item pins the highlight; clicking an agent
+/** Configure › Agents › Relation map (design: Configure.dc.html `drawRel`, circle layout), in layers: agents on the
+ * inner ring in provider colours, then one ring per kind of thing they get (tools, rules, skills, MCP servers), the
+ * smallest kind innermost so the busiest one has the outer ring to itself; curved edges from each agent to
+ * everything it gets. Hover traces links; clicking an item pins the highlight; clicking an agent
  * selects it in the editor. Hollow dashed nodes are disabled skills or MCP servers that are not connected. */
 
 import { useEffect, useRef, useState } from "react";
@@ -26,6 +27,24 @@ function resolve(color: string, el: HTMLElement): string {
   if (!m) return color;
   const v = getComputedStyle(el).getPropertyValue(m[1]).trim();
   return v.startsWith("#") && v.length === 7 ? v : "#8b95a5";
+}
+
+/** The rings: the agents' radius grows with their number; each kind of item that has any gets its own ring
+ * outside it, fewest first. */
+function rings(agentCount: number, items: RelItem[]) {
+  const r1 = Math.max(110, (agentCount * 30) / (2 * Math.PI));
+  const kinds = TYPES.map((type) => ({ type, list: items.filter((i) => i.type === type) }))
+    .filter((k) => k.list.length > 0)
+    .sort((a, b) => a.list.length - b.list.length);
+  const layers = kinds.map((k, i) => ({ ...k, r: r1 + 62 + i * 50 }));
+  return { r1, layers };
+}
+
+/** The canvas height that fits every ring and the outer labels. */
+function heightFor(agentCount: number, items: RelItem[]) {
+  const { r1, layers } = rings(agentCount, items);
+  const outer = layers.length ? layers[layers.length - 1].r : r1;
+  return Math.max(520, Math.round(2 * (outer + 100) + 44));
 }
 
 export function RelationMap({
@@ -76,17 +95,11 @@ export function RelationMap({
     const faint = "#5d6673";
     const cx = W / 2;
     const cy = (H - 44) / 2 + 4;
-    const m = Math.min(W, H - 90);
-    // The inner ring grows so agent names do not collide; the outer ring stays outside it.
-    const R1 = Math.max(m * 0.15, (agents.length * 46) / (2 * Math.PI));
-    const R2 = Math.max(m * 0.28, R1 + 90);
-    const gap = 0.2;
-    const n = Math.max(1, items.length);
-    const span = Math.PI * 2 - gap * TYPES.length;
     const pos: Record<string, { x: number; y: number; ang: number }> = {};
     const P: typeof pts.current = [];
-    const short = (s: string) => (s.length > 14 ? `${s.slice(0, 13)}…` : s);
-    const node = (x: number, y: number, r: number, col: string, off: boolean, ring: string | null) => {
+    const { r1: R1, layers } = rings(agents.length, items);
+    const outer = layers[layers.length - 1]?.type;
+    const short = (s: string, max = 14) => (s.length > max ? `${s.slice(0, Math.max(1, max - 1))}…` : s);    const node = (x: number, y: number, r: number, col: string, off: boolean, ring: string | null) => {
       ctx.beginPath();
       ctx.arc(x, y, r, 0, Math.PI * 2);
       if (off) {
@@ -119,29 +132,28 @@ export function RelationMap({
       ctx.fillText(txt, 0, 0);
       ctx.restore();
     };
-    let a = -Math.PI / 2 + gap / 2;
-    for (const ty of TYPES) {
-      const g = items.filter((r) => r.type === ty);
-      const a0 = a;
-      g.forEach((r, i) => {
-        const ang = a + ((i + 0.5) * span) / n;
-        pos[r.id] = { x: cx + Math.cos(ang) * R2, y: cy + Math.sin(ang) * R2, ang };
+    // A faint guide per layer, named at the top in its colour.
+    const guide = (r: number, name: string, col: string) => {
+      ctx.beginPath();
+      ctx.arc(cx, cy, r, 0, Math.PI * 2);
+      ctx.strokeStyle = rgba(col, 0.16);
+      ctx.lineWidth = 1;
+      ctx.stroke();
+      ctx.font = "600 9px 'JetBrains Mono',monospace";
+      ctx.textAlign = "left";
+      ctx.textBaseline = "middle";
+      ctx.fillStyle = rgba(col, 0.8);
+      ctx.fillText(name, cx + 6, cy - r - 7);
+    };
+    guide(R1, `AGENTS · ${agents.length}`, "#9aa3ad");
+    for (const { type, r, list } of layers) {
+      guide(r, `${RT[type].toUpperCase()} · ${list.length}`, RC[type]);
+      // Every layer starts half a step past the top, so its first node never sits on the name.
+      const step = (Math.PI * 2) / list.length;
+      list.forEach((it, i) => {
+        const ang = -Math.PI / 2 + step * (i + 0.5);
+        pos[it.id] = { x: cx + Math.cos(ang) * r, y: cy + Math.sin(ang) * r, ang };
       });
-      a += (g.length * span) / n;
-      if (g.length) {
-        ctx.beginPath();
-        ctx.arc(cx, cy, R2 - 12, a0, a);
-        ctx.strokeStyle = rgba(RC[ty], 0.35);
-        ctx.lineWidth = 2;
-        ctx.stroke();
-        const mid = (a0 + a) / 2;
-        ctx.font = "600 9.5px 'JetBrains Mono',monospace";
-        ctx.textAlign = "center";
-        ctx.textBaseline = "middle";
-        ctx.fillStyle = rgba(RC[ty], 0.85);
-        ctx.fillText(RT[ty].toUpperCase(), cx + Math.cos(mid) * (R2 - 30), cy + Math.sin(mid) * (R2 - 30));
-      }
-      a += gap;
     }
     agents.forEach((ag, i) => {
       const ang = -Math.PI / 2 + Math.PI / Math.max(1, agents.length) + (i * Math.PI * 2) / Math.max(1, agents.length);
@@ -166,7 +178,12 @@ export function RelationMap({
         const on = !!focus && (focus === `agent:${ag.id}` || focus === r.id);
         ctx.beginPath();
         ctx.moveTo(A.x, A.y);
-        ctx.quadraticCurveTo(cx + ((A.x + B.x) / 2 - cx) * 0.3, cy + ((A.y + B.y) / 2 - cy) * 0.3, B.x, B.y);
+        // Bend along the rings (half way round, half way out) instead of through the middle.
+        let d = B.ang - A.ang;
+        d = Math.atan2(Math.sin(d), Math.cos(d));
+        const mid = A.ang + d / 2;
+        const rm = (Math.hypot(A.x - cx, A.y - cy) + Math.hypot(B.x - cx, B.y - cy)) / 2;
+        ctx.quadraticCurveTo(cx + Math.cos(mid) * rm, cy + Math.sin(mid) * rm, B.x, B.y);
         ctx.strokeStyle = rgba(RC[r.type], on ? 0.9 : focus ? 0.05 : r.off ? 0.12 : 0.28);
         ctx.lineWidth = on ? 1.8 : 1;
         if (r.off) ctx.setLineDash([3, 3]);
@@ -177,7 +194,19 @@ export function RelationMap({
       const p = pos[r.id];
       ctx.globalAlpha = related(r.id) ? 1 : 0.25;
       node(p.x, p.y, 5, r.off ? faint : RC[r.type], r.off, focus === r.id ? text : null);
-      label(short(r.label), p.x + Math.cos(p.ang) * 10, p.y + Math.sin(p.ang) * 10, p.ang, focus === r.id ? text : r.off ? faint : nav);
+      const col = focus === r.id ? text : r.off ? faint : nav;
+      if (r.type === outer) label(short(r.label), p.x + Math.cos(p.ang) * 10, p.y + Math.sin(p.ang) * 10, p.ang, col);
+      else {
+        const L = layers.find((l) => l.type === r.type)!;
+        const room = Math.floor(((2 * Math.PI * L.r) / L.list.length - 8) / 6.2);
+        if (room >= 3 || focus === r.id) {
+          ctx.font = "400 10px 'JetBrains Mono',monospace";
+          ctx.textAlign = "center";
+          ctx.textBaseline = "top";
+          ctx.fillStyle = col;
+          ctx.fillText(focus === r.id ? r.label : short(r.label, room), p.x, p.y + 8);
+        }
+      }
       ctx.globalAlpha = 1;
       P.push({ x: p.x, y: p.y, r: 5, id: r.id, kind: "res" });
     }
@@ -186,11 +215,17 @@ export function RelationMap({
       const id = `agent:${ag.id}`;
       ctx.globalAlpha = related(id) ? 1 : 0.25;
       node(p.x, p.y, 10, resolve(ag.color, c), false, selected === ag.id ? "#FF7A1A" : focus === id ? text : null);
-      ctx.font = "600 11.5px Geist,sans-serif";
-      ctx.textAlign = "center";
-      ctx.textBaseline = "top";
+      // Names point in to the centre, where nothing else is drawn.
+      ctx.save();
+      ctx.font = "600 11px Geist,sans-serif";
       ctx.fillStyle = text;
-      ctx.fillText(ag.name, p.x, p.y + 15);
+      ctx.translate(p.x, p.y);
+      const left = Math.cos(p.ang) < 0;
+      ctx.rotate(left ? p.ang + Math.PI : p.ang);
+      ctx.textAlign = left ? "left" : "right";
+      ctx.textBaseline = "middle";
+      ctx.fillText(short(ag.name, Math.floor((R1 - 26) / 6.4)), left ? 15 : -15, 0);
+      ctx.restore();
       ctx.globalAlpha = 1;
       P.push({ x: p.x, y: p.y, r: 11, id, kind: "agent" });
     }
@@ -232,7 +267,7 @@ export function RelationMap({
         <span className="text-[14px] leading-none font-semibold">Relation map</span>
         <span className="text-[11.5px] leading-[1.4] text-muted">Which skills, rules, MCP servers and tools each agent gets.</span>
       </div>
-      <div className="relative h-[520px] overflow-hidden rounded-[10px] border border-line max-sm:h-[380px]" style={{ background: "radial-gradient(600px 400px at 50% 50%, color-mix(in srgb, var(--panel-2) 80%, transparent) 0%, var(--inset) 70%)" }}>
+      <div className="relative overflow-hidden rounded-[10px] border border-line" style={{ height: heightFor(agents.length, items), background: "radial-gradient(600px 400px at 50% 50%, color-mix(in srgb, var(--panel-2) 80%, transparent) 0%, var(--inset) 70%)" }}>
         <canvas
           ref={ref}
           className="absolute inset-0 block size-full"
