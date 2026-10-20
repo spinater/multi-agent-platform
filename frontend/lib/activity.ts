@@ -2,6 +2,7 @@
 
 import { useSyncExternalStore } from "react";
 
+import type { LaneInfo } from "./generated/LaneInfo";
 import type { Session } from "./generated/Session";
 import type { SessionState } from "./generated/SessionState";
 import type { Task } from "./generated/Task";
@@ -12,7 +13,7 @@ import type { TaskStatus } from "./generated/TaskStatus";
  * animates for state that was already there. The feed, the rows and the canvas read the marks; the canvas reads
  * them every frame through `marks()` without re-rendering. Times are `Date.now()` milliseconds. */
 
-export type ActivityKind = "spawn" | "phase" | "done" | "failed" | "cancelled" | "session";
+export type ActivityKind = "spawn" | "phase" | "done" | "failed" | "cancelled" | "session" | "lane";
 
 export type Activity = {
   id: number;
@@ -97,6 +98,31 @@ export function trackSession(s: Session) {
   } else if (before.state !== s.state) marks.session.set(s.name, { at: now, from: before.state, to: s.state });
   if (s.last_line && s.last_line !== before?.last_line) marks.line.set(s.name, now);
   changed();
+}
+
+/** Each lane's state word and sub-agents when last seen; the first read of a lane only sets them. */
+const lanes = new Map<string, { state: string; subs: Set<string> }>();
+const subName = (row: string) => row.replace(/^[●◯○]\s*/, "").split(/\s+/)[0] ?? row;
+
+/** A lane read (every poll): its state changes and sub-agents that start or finish join the feed as `lane` items. */
+export function trackLanes(list: LaneInfo[], stateOf: (l: LaneInfo) => string) {
+  const now = Date.now();
+  let any = false;
+  for (const l of list) {
+    const state = stateOf(l);
+    const subs = new Set(l.sessions.flatMap((s) => s.sub_agents).map(subName));
+    const before = lanes.get(l.name);
+    lanes.set(l.name, { state, subs });
+    if (!before) continue;
+    const item = (title: string) => {
+      push({ at: now, kind: "lane", taskId: null, session: l.name, project: l.project, provider: "claude", model: l.role, title, from: null, to: null, attempt: 1 });
+      any = true;
+    };
+    for (const s of subs) if (!before.subs.has(s)) item(`sub-agent ${s} started`);
+    for (const s of before.subs) if (!subs.has(s)) item(`sub-agent ${s} finished`);
+    if (before.state !== state) item(`${before.state} → ${state}`);
+  }
+  if (any) changed();
 }
 
 export function forgetSession(name: string) {

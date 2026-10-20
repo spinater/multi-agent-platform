@@ -3,7 +3,11 @@
 /**
  * Cards in the lane's `tasks_dir` (`todo/`, `todo-human/`, `done/`).
  */
-export type LaneTasks = { todo: number, todo_human: number, done: number, 
+export type LaneTasks = { todo: number, 
+/**
+ * The to-do cards' file names without `.md`, in name order (card numbers first), at most [`TODO_CARDS`].
+ */
+todo_cards: Array<string>, todo_human: number, done: number, 
 /**
  * The most recently finished card (file name without `.md`).
  */

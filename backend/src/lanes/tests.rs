@@ -225,6 +225,10 @@ fn pane_reading_context_hint_input_and_state() {
     let agents = format!("{}  ● reviewer · ↓ 3.4k tokens · 2m\n", claude("● x", "✻ Cooked for 1m", "", "? for shortcuts"));
     assert_eq!(parse_pane(&agents, n, ict()).agents.len(), 1);
     assert_eq!(trim_agent_line("●   reviewer   · ↓ 3.4k tokens · 2m"), "● reviewer · 2m");
+    // The main agent waits on a background sub-agent: still at work, never prompted or cleared under it.
+    let (state, why, _) = classify(&agents, &agents, n, ict());
+    assert_eq!(state, Raw::Busy);
+    assert!(why.contains("sub-agents: ● reviewer"), "{why}");
 }
 
 #[test]
@@ -258,6 +262,7 @@ fn status_file_is_lenient() {
     std::fs::write(dir.path().join("tasks/done/100-b.md"), "").unwrap();
     let t = task_facts(dir.path(), "tasks").unwrap();
     assert_eq!((t.todo, t.todo_human, t.done, t.last_done.as_deref()), (1, 0, 1, Some("100-b")));
+    assert_eq!(t.todo_cards.len(), 1);
 }
 
 // ---- ticks on a fake terminal

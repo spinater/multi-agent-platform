@@ -2879,11 +2879,17 @@ pub struct LaneStatusFile {
     pub at: Option<String>,
 }
 
+/// How many to-do card names a lane reports (`LaneTasks::todo_cards`).
+pub const TODO_CARDS: usize = 30;
+
 /// Cards in the lane's `tasks_dir` (`todo/`, `todo-human/`, `done/`).
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[ts(export)]
 pub struct LaneTasks {
     pub todo: u32,
+    /// The to-do cards' file names without `.md`, in name order (card numbers first), at most [`TODO_CARDS`].
+    #[serde(default)]
+    pub todo_cards: Vec<String>,
     pub todo_human: u32,
     pub done: u32,
     /// The most recently finished card (file name without `.md`).

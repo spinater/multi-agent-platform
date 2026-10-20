@@ -13,6 +13,7 @@ import { ActivityFeed } from "./activity";
 import type { Command } from "./command-data";
 import { Btn, Pill, SideTitle, TONE_TEXT } from "./command-ui";
 import { EventLog } from "./events";
+import { LaneCards } from "./lanes/lane-cards";
 import { LanesCard } from "./lanes/lanes-card";
 import { ParallelStepper } from "./parallel";
 import { SessionRows } from "./sessions";
@@ -202,7 +203,10 @@ export function LeftColumn({
             )}
           </span>
         )}
-        <TaskRows tasks={cmd.tasks} label={(t) => `#${t.id}`} selected={selected} onSelect={select} projectOf={cmd.all ? (t) => cmd.projectName(t.project) : undefined} />
+        {(cmd.tasks.length > 0 || !cmd.lanes.some((l) => (l.tasks?.todo ?? 0) > 0)) && (
+          <TaskRows tasks={cmd.tasks} label={(t) => `#${t.id}`} selected={selected} onSelect={select} projectOf={cmd.all ? (t) => cmd.projectName(t.project) : undefined} />
+        )}
+        <LaneCards lanes={cmd.lanes} />
       </section>
     </Column>
   );

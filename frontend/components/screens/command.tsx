@@ -46,12 +46,14 @@ const CONNECTION: Record<Connection, [string, Tone]> = {
   unauthorized: ["token required", "warn"],
 };
 
-const VIEW_TABS: [View, "cc.graph" | "cc.orbit"][] = [
+const VIEW_TABS: [View, "cc.graph" | "cc.orbit" | "cc.circle"][] = [
   ["graph", "cc.graph"],
+  ["circle", "cc.circle"],
   ["orbit", "cc.orbit"],
 ];
 
 const HINTS: Record<View, string> = {
+  circle: "LAYERS FROM THE CENTRE OUT · DRAG = PAN · CLICK = CARD · WHEEL = ZOOM",
   orbit:
     "DRAG = ORBIT · CLICK = CARD · WHEEL = ZOOM · CHIP ISOLATES A PROVIDER",
   graph:
@@ -120,7 +122,7 @@ function storedShowDone(): boolean {
 function storedView(scope: string): View {
   try {
     const v = localStorage.getItem(`map.command.view.${scope}`);
-    if (v === "orbit" || v === "graph") return v;
+    if (v === "orbit" || v === "circle" || v === "graph") return v;
   } catch {
     // Storage blocked: use the default.
   }

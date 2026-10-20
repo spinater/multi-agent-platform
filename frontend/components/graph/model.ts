@@ -141,6 +141,20 @@ export function laneSession(l: LaneInfo): Session {
   };
 }
 
+/** A lane's sub-agent row (`◯ card-475-browser-hit-test ▱▱▱ 2m46s`) as its name and time. */
+export function subAgentLabel(row: string): string {
+  return row.replace(/^[●◯○]\s*/, "").replace(/[▱▰]+/g, " ").replace(/\s+/g, " ").trim();
+}
+
+/** A lane's sub-agents: `a:<lane>:<i>`, on the task ring under the lane, drawn as working sessions. */
+function subAgents(lane: LaneInfo, session: Session): { id: string; label: string; session: Session }[] {
+  const rows = lane.sessions.flatMap((x) => x.sub_agents);
+  return rows.map((row, i) => {
+    const label = subAgentLabel(row);
+    return { id: `a:${lane.name}:${i}`, label, session: { ...session, name: `${lane.name} › ${label.split(" ")[0]}`, state: "working", detail: `sub-agent of ${lane.name}: ${label}`, spawned_by: lane.name } };
+  });
+}
+
 export function buildGraph(input: BuildInput): Graph {
   const { sessions, tasks, events, groups, stages } = input;
   const color = new Map(groups.map((g) => [g.key, g.color]));
@@ -164,6 +178,7 @@ export function buildGraph(input: BuildInput): Graph {
   for (const { lane, session } of input.lanes ?? []) {
     const g = input.groupOfLane?.(lane) ?? "lanes";
     nodes.push({ id: `l:${lane.name}`, type: "session", group: g, label: lane.label ?? lane.name, color: gcolor(g), parent: `p:${g}`, ref: { kind: "session", session } });
+    for (const a of subAgents(lane, session)) nodes.push({ id: a.id, type: "task", group: g, label: a.label, color: gcolor(g), parent: `l:${lane.name}`, ref: { kind: "session", session: a.session } });
   }
   for (const st of stages) nodes.push({ id: `g:${st.id}`, type: "stage", group: null, label: st.label, color: "var(--text-2)", parent: "orch", ref: { kind: "stage", stage: st } });
   let runs = 0;
@@ -185,6 +200,7 @@ export function buildGraph(input: BuildInput): Graph {
   for (const g of groups) add("orch", `p:${g.key}`, "hub", activeGroups.has(g.key));
   for (const s of sessions) add(`p:${input.groupOfSession(s)}`, `s:${s.name}`, "own", working.has(s.name));
   for (const { lane, session } of input.lanes ?? []) add(`p:${input.groupOfLane?.(lane) ?? "lanes"}`, `l:${lane.name}`, "own", session.state === "working");
+  for (const { lane, session } of input.lanes ?? []) for (const a of subAgents(lane, session)) add(`l:${lane.name}`, a.id, "work", true);
   for (const s of sessions) if (s.task_id != null && taskIds.has(s.task_id)) add(`s:${s.name}`, `t:${s.task_id}`, "work", working.has(s.name));
   for (const t of tasks) if (!t.session || !byName.has(t.session)) add(`p:${taskGroup(t)}`, `t:${t.id}`, "own", false);
   for (const t of tasks) for (const d of t.depends_on) if (taskIds.has(d)) add(`t:${d}`, `t:${t.id}`, "dep", false);

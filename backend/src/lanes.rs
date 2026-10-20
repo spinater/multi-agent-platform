@@ -225,8 +225,8 @@ pub fn classify(first: &str, second: &str, now: DateTime<Utc>, local: FixedOffse
         (Raw::Waiting, "a question/permission dialog is open on screen".to_string())
     } else if busy_spinner(&pane) {
         (Raw::Busy, if pane.spinner_text.is_empty() { "busy".to_string() } else { pane.spinner_text.clone() })
-    } else if moving {
-        (Raw::Busy, "screen still moving".to_string())
+    } else if moving || !pane.agents.is_empty() {
+        (Raw::Busy, if moving { "screen still moving".to_string() } else { format!("waiting on its sub-agents: {}", pane.agents.iter().map(|a| trim_agent_line(a)).collect::<Vec<_>>().join(" · ")) })
     } else if !pane.input_text.is_empty() {
         (Raw::PendingInput, format!("unsent text in input box: \"{}\"", pane.input_text))
     } else {
@@ -323,16 +323,18 @@ fn md_files(dir: &Path) -> Vec<(String, std::time::SystemTime)> {
         .collect()
 }
 
-/// Cards in `tasks_dir`; `None` without a `todo/` folder (the lane does not use cards).
+/// Cards in `tasks_dir` (the first [`crate::model::TODO_CARDS`] to-do names, by file name); `None` without `todo/`.
 pub fn task_facts(path: &Path, rel: &str) -> Option<LaneTasks> {
     let dir = path.join(rel);
     if !dir.join("todo").is_dir() {
         return None;
     }
-    let mut done = md_files(&dir.join("done"));
+    let (mut done, mut todo) = (md_files(&dir.join("done")), md_files(&dir.join("todo")));
     done.sort_by_key(|d| std::cmp::Reverse(d.1));
+    todo.sort();
     Some(LaneTasks {
-        todo: md_files(&dir.join("todo")).len() as u32,
+        todo: todo.len() as u32,
+        todo_cards: todo.into_iter().take(crate::model::TODO_CARDS).map(|t| t.0).collect(),
         todo_human: md_files(&dir.join("todo-human")).len() as u32,
         done: done.len() as u32,
         last_done: done.first().map(|d| d.0.clone()),

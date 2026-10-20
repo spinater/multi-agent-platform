@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 
+import { trackLanes } from "@/lib/activity";
 import { api, lanesApi } from "@/lib/api";
 import { projectColor, providerColor } from "@/lib/colors";
 import type { Event } from "@/lib/generated/Event";
@@ -15,6 +16,7 @@ import { heldReason, isHeld } from "@/lib/intake";
 import { useApp } from "./app-context";
 import { SESSION_TONE, type Tone } from "./command-ui";
 import { QUEUE, buildGraph, buildStages, laneSession, type Graph, type Group } from "./graph/model";
+import { laneState } from "./lanes/lanes-card";
 import { workspaceName } from "./shell/top-bar";
 
 /** Key of a project in the all-projects groups; the default workspace has no slug. */
@@ -63,9 +65,17 @@ export function useCommand(pinned: number | null = null, showDone = false) {
   // Lanes (agent sessions MAP watches) join the graph: the project's, or every project's in all-projects mode.
   useEffect(() => {
     let stop = false;
-    const load = () => lanesApi.list(all ? null : project).then((l) => !stop && setLanes(l), () => {});
+    const load = () =>
+      lanesApi.list(all ? null : project).then(
+        (l) => {
+          if (stop) return;
+          trackLanes(l, (x) => laneState(x)[0]);
+          setLanes(l);
+        },
+        () => {},
+      );
     void load();
-    const t = window.setInterval(load, 15_000);
+    const t = window.setInterval(load, 10_000);
     return () => {
       stop = true;
       window.clearInterval(t);

@@ -61,6 +61,8 @@ const SESSION_TONE: Record<string, string> = {
   exited: "--idle",
 };
 const HIT: Record<NodeType, number> = { orch: 18, group: 14, stage: 12, session: 9, task: 9, run: 5 };
+/** The circle view looks straight down on the orbit's rings. */
+const CIRCLE_PITCH = Math.PI / 2;
 const LINK_ALPHA = { hub: 0.3, own: 0.16, work: 0.5, dep: 0.22, stage: 0.5, infra: 0.12 } as const;
 
 /** The command centre's canvas (design: `draw()` in Agent Command Centre.dc.html): nodes ease towards their
@@ -72,7 +74,7 @@ class Engine {
   props: CanvasProps;
   nodes = new Map<string, Live>();
   cam = { yaw: 0.6, pitch: 0.55, yawT: 0.6, pitchT: 0.55, R: 300, zoom: 1, zoomT: 1, px: 0, py: 0, pxT: 0, pyT: 0, ox: 0 };
-  ga: Record<View, number> = { orbit: 0, graph: 0 };
+  ga: Record<View, number> = { orbit: 0, circle: 0, graph: 0 };
   W = 0;
   H = 0;
   dpr = 1;
@@ -100,7 +102,8 @@ class Engine {
     this.ctx = cv.getContext("2d")!;
     this.props = props;
     this.ga[props.view] = 1;
-    if (props.view !== "orbit") {
+    if (props.view === "circle") this.cam.pitch = this.cam.pitchT = CIRCLE_PITCH;
+    else if (props.view !== "orbit") {
       this.cam.pitch = this.cam.pitchT = 0;
       this.cam.yaw = this.cam.yawT = 0;
     }
@@ -220,6 +223,7 @@ class Engine {
     }
     if (prevView !== null && prevView !== props.view) {
       if (props.view === "orbit") this.cam.pitchT = 0.55;
+      if (props.view === "circle") this.cam.pitchT = CIRCLE_PITCH;
       this.cam.pxT = 0;
       this.cam.pyT = 0;
     }
@@ -352,7 +356,7 @@ class Engine {
       if (p.motion && !this.dragging && !this.flyTo) cam.yawT += 0.0016;
     } else {
       cam.yawT = Math.round(cam.yaw / (Math.PI * 2)) * Math.PI * 2;
-      cam.pitchT = 0;
+      cam.pitchT = view === "circle" ? CIRCLE_PITCH : 0;
     }
     cam.yaw += (cam.yawT - cam.yaw) * 0.08;
     cam.pitch += (cam.pitchT - cam.pitch) * 0.08;
@@ -407,7 +411,7 @@ class Engine {
     };
     spacing(0);
 
-    const go = this.ga.orbit;
+    const go = this.ga.orbit + this.ga.circle;
     const gg = this.ga.graph;
     if (go > 0.01) {
       // One flat ring per layer, named where it passes nearest the viewer.

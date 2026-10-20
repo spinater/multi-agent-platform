@@ -2,7 +2,7 @@ import type { Graph, GraphNode } from "./model";
 
 /** The two canvas views (design: `layout()` in Agent Command Centre.dc.html). Positions are in a unit space the
  * camera scales to the canvas; orbit uses all three axes, graph lies flat. */
-export const VIEWS = ["orbit", "graph"] as const;
+export const VIEWS = ["orbit", "circle", "graph"] as const;
 export type View = (typeof VIEWS)[number];
 
 export type Point = [number, number, number];
@@ -82,7 +82,7 @@ export function layout(graph: Graph, view: View): Map<string, Point> {
   const stageIndex = new Map(stages.map((n, i) => [n.id, i]));
   const SN = Math.max(1, stages.length);
 
-  if (view === "orbit") {
+  if (view === "orbit" || view === "circle") {
     for (const [id, pt] of orbitLayout(graph, keys)) out.set(id, pt);
     for (const n of stages) {
       const t = ((stageIndex.get(n.id) ?? 0) / SN) * Math.PI * 2;
@@ -110,6 +110,13 @@ export function layout(graph: Graph, view: View): Map<string, Point> {
     arr.forEach((n, k) => out.set(n.id, [g.tasks + Number(d) * step, (k - (arr.length - 1) / 2) * sp, 0]));
   }
   stages.forEach((n, i) => out.set(n.id, [g.stages, SN > 1 ? -0.8 + (1.6 * i) / (SN - 1) : 0, 0]));
+  // A lane's sub-agents sit just right of their lane.
+  const subs = graph.nodes.filter((n) => n.type === "task" && n.ref.kind === "session" && n.parent);
+  subs.forEach((n, i) => {
+    const p = out.get(n.parent!);
+    const k = subs.slice(0, i).filter((x) => x.parent === n.parent).length;
+    if (p) out.set(n.id, [p[0] + 0.16, p[1] + k * 0.07, 0]);
+  });
   for (const n of graph.nodes) {
     if (n.type !== "run" || !n.parent) continue;
     const p = out.get(n.parent);

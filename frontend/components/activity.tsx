@@ -69,12 +69,39 @@ function seeds(events: Event[], cmd: Command): Activity[] {
   return out;
 }
 
+const LANE_EVENT: Record<string, string> = {
+  "lane.card_done": "card done",
+  "lane.ask": "prompted",
+  "lane.tell": "tell queued",
+  "lane.clear": "context cleared",
+  "lane.resume": "resumed",
+  "lane.stall": "stalled",
+  "lane.rate_limited": "rate limited",
+};
+
+/** What the lanes in scope did, from the event log (live over the WebSocket): cards done, prompts, tells, clears. */
+function laneEvents(cmd: Command): Activity[] {
+  const names = new Set(cmd.lanes.map((l) => l.name));
+  const out: Activity[] = [];
+  for (const e of cmd.events) {
+    const what = LANE_EVENT[e.kind];
+    if (!what || !e.session || !names.has(e.session)) continue;
+    // The message starts with an icon and `<lane>: `; the rest is the news.
+    const text = e.message.replace(/^\P{L}*/u, "").replace(new RegExp(`^${e.session}(\\s›\\s\\S+)?:\\s*`), "");
+    out.push({ id: -e.id, at: new Date(e.at).getTime(), kind: "lane", taskId: null, session: e.session, project: null, provider: "claude", model: null, title: `${what} · ${text}`, from: null, to: null, attempt: 1 });
+    if (out.length >= 12) break;
+  }
+  return out;
+}
+
 function glyph(a: Activity): [string, string] {
   switch (a.kind) {
     case "spawn":
       return ["↗", providerColor(a.provider)];
     case "session":
       return ["○", providerColor(a.provider)];
+    case "lane":
+      return ["▸", "var(--p-claude)"];
     case "done":
       return ["✓", "var(--ok)"];
     case "failed":
@@ -94,6 +121,8 @@ function headline(a: Activity, label: (id: number) => string): string {
       return `${who} → ${on} spawned${a.attempt > 1 ? ` · try ${a.attempt}` : ""}`;
     case "session":
       return `${a.session} started · ${on}`;
+    case "lane":
+      return a.session ?? "lane";
     case "phase":
       return a.from ? `${who} ${a.from} → ${a.to}` : `${who} ${a.to}`;
     default:
@@ -108,6 +137,7 @@ const labeller = (cmd: Command) => (id: number) => {
 
 /** Where a click on an item goes: the new session for a spawn, else the task. */
 function target(a: Activity, cmd: Command): string {
+  if (a.kind === "lane") return `l:${a.session}`;
   if (a.session && (a.kind === "spawn" || a.taskId == null) && cmd.sessions.some((s) => s.name === a.session)) return `s:${a.session}`;
   return a.taskId != null ? `t:${a.taskId}` : `s:${a.session}`;
 }
@@ -116,14 +146,14 @@ function target(a: Activity, cmd: Command): string {
 function useScoped(cmd: Command) {
   const { items } = useActivity();
   const tasks = new Set(cmd.tasks.map((t) => t.id));
-  const sessions = new Set(cmd.sessions.map((s) => s.name));
+  const sessions = new Set([...cmd.sessions.map((s) => s.name), ...cmd.lanes.map((l) => l.name)]);
   return items.filter((a) => (a.taskId != null ? tasks.has(a.taskId) : !!a.session && sessions.has(a.session)));
 }
 
 /** Spawns, phase changes and results, newest first; each new one slides in tinted by its colour. */
 export function ActivityFeed({ cmd, now, onOpen, limit = 8 }: { cmd: Command; now: number; onOpen: (id: string) => void; limit?: number }) {
   const live = useScoped(cmd);
-  const list = [...live, ...seeds(cmd.events, cmd)].slice(0, limit);
+  const list = [...live, ...laneEvents(cmd), ...seeds(cmd.events, cmd)].sort((a, b) => b.at - a.at).slice(0, limit);
   const label = labeller(cmd);
   if (list.length === 0) return <p className="font-mono text-[11px] text-muted">Quiet. Spawns, phase changes and results show up here as they happen.</p>;
   return (
