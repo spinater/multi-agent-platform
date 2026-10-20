@@ -5,7 +5,8 @@
  * on every load, no LLM. A force layout on a canvas: each domain is a soft colour cloud with its name in capitals;
  * a document is a rounded rectangle outlined in its kind's colour (ringed yellow or red for findings), a code file a
  * diamond (grey, yellow stale, red missing). Drag a node (the layout reheats), drag empty space to pan, wheel to zoom
- * around the cursor, hover to highlight neighbours, click for the side panel. */
+ * around the cursor, hover to highlight neighbours, click for the side panel. The graph, circle and orbit modes
+ * (`layouts.ts`) place every node in layers instead; "free" is the force layout. */
 
 import { useEffect, useMemo, useRef, useState } from "react";
 
@@ -14,13 +15,15 @@ import type { KnowledgeGraph } from "@/lib/generated/KnowledgeGraph";
 import type { KnowledgeGraphNode } from "@/lib/generated/KnowledgeGraphNode";
 import type { KnowledgeKind } from "@/lib/generated/KnowledgeKind";
 
+import { MODES, bounds, drawGuides, mono, place, type LabelSide, type Mode, type Placed } from "./layouts";
+import { Panel } from "./panel";
 import { KIND_LABEL, KINDS } from "./shared";
 
 export const KIND_COLOR: Record<KnowledgeKind, string> = { card: "#FF7A1A", requirement: "#38bdf8", task: "#4ade80", rulebook: "#F2C14E", doc: "#8b95a5", memory: "#B48CF2" };
 const DOMAIN_PAL = ["#F2A65A", "#5EA8F2", "#B48CF2", "#4FD1B5", "#F27A9B", "#C9D45C", "#7DD3FC", "#E6E9EF"];
 
 type SimNode = KnowledgeGraphNode & { x: number; y: number; vx: number; vy: number; fixed: boolean; r: number };
-type Sel = { kind: "node"; id: string } | { kind: "domain"; id: string } | null;
+export type Sel = { kind: "node"; id: string } | { kind: "domain"; id: string } | null;
 
 function rgba(hex: string, a: number) {
   const v = parseInt(hex.slice(1), 16);
@@ -39,6 +42,20 @@ export function KnowledgeGraphView({ slug, onOpenDoc }: { slug: string; onOpenDo
   const [sel, setSel] = useState<Sel>(null);
   const [hover, setHover] = useState<string | null>(null);
   const [seed, setSeed] = useState(0);
+  const [mode, setModeState] = useState<Mode>(storedMode);
+  const setMode = (m: Mode) => {
+    setModeState(m);
+    try {
+      localStorage.setItem("map.knowledge.mode", m);
+    } catch {
+      // Storage blocked: the mode lasts for this page only.
+    }
+  };
+  const layered = useRef<Placed | null>(null);
+  const modeRef = useRef(mode);
+  useEffect(() => {
+    modeRef.current = mode;
+  }, [mode]);
   const canvas = useRef<HTMLCanvasElement>(null);
   const sim = useRef<{ nodes: SimNode[]; alpha: number; view: { x: number; y: number; k: number } } | null>(null);
   const raf = useRef(0);
@@ -106,6 +123,30 @@ export function KnowledgeGraphView({ slug, onOpenDoc }: { slug: string; onOpenDo
     sim.current = { nodes, alpha: 1, view: prev ?? { x: 0, y: 0, k: 0.32 } };
   }, [graph, seed]);
 
+  // The layered modes: fixed spots, then fit the view to them.
+  useEffect(() => {
+    if (!graph || mode === "free") {
+      layered.current = null;
+      if (sim.current) sim.current.alpha = 1;
+      return;
+    }
+    const p = place(mode, graph, graph.nodes.filter((n) => visible.has(n.id)), (d) => domColor.get(d) ?? "#8b95a5");
+    layered.current = p;
+    const S = sim.current;
+    const c = canvas.current;
+    const nb = bounds(p.pos);
+    // The graph mode's domain column sits left of every node.
+    const b = nb && mode === "graph" ? { ...nb, x0: Math.min(nb.x0, -860), x1: Math.max(nb.x1, 560) } : nb;
+    if (S && c && b) {
+      const pad = mode === "graph" ? 20 : 160;
+      const kw = c.clientWidth / (b.x1 - b.x0 + 2 * pad);
+      // The graph mode fits its width and scrolls down by panning; the round ones fit whole.
+      const k = Math.max(0.15, Math.min(1.1, mode === "graph" ? kw : Math.min(kw, c.clientHeight / (b.y1 - b.y0 + 2 * pad))));
+      // The graph mode starts at the top; the round ones centred.
+      S.view = { k, x: -((b.x0 + b.x1) / 2) * k, y: mode === "graph" ? -c.clientHeight / 2 - (b.y0 - 80) * k : -((b.y0 + b.y1) / 2) * k };
+      S.alpha = 1;
+    }
+  }, [graph, mode, visible, domColor, seed]);
   // Simulation + drawing loop.
   useEffect(() => {
     if (!graph || hidden) return;
@@ -117,7 +158,16 @@ export function KnowledgeGraphView({ slug, onOpenDoc }: { slug: string; onOpenDo
       if (!S) return;
       byId.clear();
       S.nodes.forEach((n) => byId.set(n.id, n));
-      if (S.alpha > 0.01) {
+      const P = layered.current;
+      if (P) {
+        // Ease every node to its spot; no forces.
+        for (const n of S.nodes) {
+          const t = P.pos.get(n.id);
+          if (!t) continue;
+          n.x += (t[0] - n.x) * 0.18;
+          n.y += (t[1] - n.y) * 0.18;
+        }
+      } else if (S.alpha > 0.01) {
         const nodes = S.nodes.filter((n) => visible.has(n.id));
         // Repulsion on a grid (only nearby cells).
         const cell = 70;
@@ -214,8 +264,10 @@ export function KnowledgeGraphView({ slug, onOpenDoc }: { slug: string; onOpenDo
       const dimmed = (n: SimNode) => (near ? n.id !== focus && !near.has(n.id) : domFocus ? n.domain !== domFocus : filtering ? !matches(n) : false);
       const shown = S.nodes.filter((n) => visible.has(n.id));
 
-      // Domain clouds.
-      for (const n of shown) {
+      const P = layered.current;
+      if (P) drawGuides(ctx, P.guides, k, rgba);
+      // Domain clouds (free layout only).
+      for (const n of P ? [] : shown) {
         const col = domColor.get(n.domain) ?? "#8b95a5";
         const g = ctx.createRadialGradient(n.x, n.y, 0, n.x, n.y, 70);
         g.addColorStop(0, rgba(col, domFocus && n.domain !== domFocus ? 0.03 : 0.1));
@@ -231,13 +283,25 @@ export function KnowledgeGraphView({ slug, onOpenDoc }: { slug: string; onOpenDo
         const b = byId.get(e.to);
         if (!a || !b || !visible.has(a.id) || !visible.has(b.id)) continue;
         const on = !!focus && (e.from === focus || e.to === focus);
-        ctx.globalAlpha = focus ? (on ? 0.95 : 0.06) : dimmed(a) && dimmed(b) ? 0.08 : 0.45;
+        // The round layers have every edge crossing the middle: faint until a node is in focus.
+        const base = P && mode !== "graph" ? 0.1 : P ? 0.3 : 0.45;
+        ctx.globalAlpha = focus ? (on ? 0.95 : 0.04) : dimmed(a) && dimmed(b) ? 0.05 : base;
         ctx.lineWidth = (on ? 1.6 : 1) / Math.sqrt(k);
         ctx.strokeStyle = e.state === "missing" ? "#F26D6D" : e.state === "stale" ? "#F2C14E" : e.kind === "link" ? "#8b95a5" : "#5d6673";
         ctx.setLineDash(e.state === "missing" ? [5, 4] : e.kind === "mention" ? [4, 4] : e.kind === "source" ? [1.5, 3] : []);
         ctx.beginPath();
         ctx.moveTo(a.x, a.y);
-        ctx.lineTo(b.x, b.y);
+        if (P && mode === "graph") {
+          const mx = (a.x + b.x) / 2;
+          ctx.bezierCurveTo(mx, a.y, mx, b.y, b.x, b.y);
+        } else if (P && mode === "circle") {
+          // Bend along the rings instead of through the middle.
+          const aa = Math.atan2(a.y, a.x);
+          let d = Math.atan2(b.y, b.x) - aa;
+          d = Math.atan2(Math.sin(d), Math.cos(d));
+          const rm = (Math.hypot(a.x, a.y) + Math.hypot(b.x, b.y)) / 2;
+          ctx.quadraticCurveTo(Math.cos(aa + d / 2) * rm, Math.sin(aa + d / 2) * rm, b.x, b.y);
+        } else ctx.lineTo(b.x, b.y);
         ctx.stroke();
       }
       ctx.setLineDash([]);
@@ -251,9 +315,9 @@ export function KnowledgeGraphView({ slug, onOpenDoc }: { slug: string; onOpenDo
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
       for (const [id, [sx, sy, cnt]] of cent) {
-        if (cnt < 3) continue;
+        if (cnt < 3 || P) continue;
         const col = domColor.get(id) ?? "#8b95a5";
-        ctx.font = `600 ${12 / k}px 'JetBrains Mono',monospace`;
+        ctx.font = `600 ${12 / k}px ${mono()}`;
         ctx.fillStyle = rgba(col, domFocus && id !== domFocus ? 0.25 : 0.8);
         ctx.fillText(id.replace(/^docs: /, "").toUpperCase(), sx / cnt, sy / cnt);
       }
@@ -299,17 +363,32 @@ export function KnowledgeGraphView({ slug, onOpenDoc }: { slug: string; onOpenDo
           ctx.stroke();
         }
       }
+      // Screen room between neighbours on each circle ring: labels only when they fit.
+      const roomOnRing = new Map<string, number>();
+      if (P && mode === "circle")
+        for (const kind of ["doc", "code"]) {
+          const list = shown.filter((n) => n.kind === kind);
+          const r = list.length ? Math.hypot(list[0].x, list[0].y) : 0;
+          roomOnRing.set(kind, list.length ? (2 * Math.PI * r) / list.length : 0);
+        }
       // Labels: constant screen size, placed greedily (below, above, right, left) where they do not overlap.
       if (labels) {
-        ctx.font = `400 ${10.5 / k}px 'JetBrains Mono',monospace`;
+        ctx.font = `400 ${10.5 / k}px ${mono()}`;
         const order = [...shown].sort((a, b) => Number(b.id === focus) - Number(a.id === focus) || Number(near?.has(b.id) ?? 0) - Number(near?.has(a.id) ?? 0) || b.degree - a.degree);
         for (const n of order) {
-          if (dimmed(n) || (n.id !== focus && !near?.has(n.id) && (k < 0.5 || (k < 0.9 && n.degree < 8)))) continue;
+          const key = n.id === focus || !!near?.has(n.id);
+          if (dimmed(n) || (!key && (!P || mode === "orbit") && (k < 0.5 || (k < 0.9 && n.degree < 8)))) continue;
+          if (!key && mode === "circle" && P && (roomOnRing.get(n.kind) ?? 0) * k < 11) continue;
           const text = n.label.length > 28 ? `${n.label.slice(0, 27)}…` : n.label;
           const tw = ctx.measureText(text).width;
           const th = 12 / k;
           const pad = n.r + 4 / k;
-          const spots: [number, number][] = [
+          const s: LabelSide = P?.side.get(n.id) ?? "free";
+          if (s === "in" || s === "out") {
+            radial(ctx, text, n, s, pad, n.id === focus ? "#ffffff" : "#a3acb9");
+            continue;
+          }
+          const spots: [number, number][] = s === "left" ? [[n.x - pad - tw, n.y - th / 2]] : s === "right" ? [[n.x + pad, n.y - th / 2]] : [
             [n.x - tw / 2, n.y + pad],
             [n.x - tw / 2, n.y - pad - th],
             [n.x + pad, n.y - th / 2],
@@ -352,13 +431,14 @@ export function KnowledgeGraphView({ slug, onOpenDoc }: { slug: string; onOpenDo
     }
     return best;
   };
-  const drag = useRef<{ node: SimNode | null; sx: number; sy: number; ox: number; oy: number; moved: boolean } | null>(null);
+  const drag = useRef<{ node: SimNode | null; hit: SimNode | null; sx: number; sy: number; ox: number; oy: number; moved: boolean } | null>(null);
   const onDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
     const n = hit(e);
     const v = sim.current!.view;
-    drag.current = { node: n, sx: e.clientX, sy: e.clientY, ox: v.x, oy: v.y, moved: false };
+    const movable = mode === "free" ? n : null;
+    drag.current = { node: movable, hit: n, sx: e.clientX, sy: e.clientY, ox: v.x, oy: v.y, moved: false };
     e.currentTarget.setPointerCapture(e.pointerId);
-    if (n) n.fixed = true;
+    if (movable) movable.fixed = true;
   };
   const onMove = (e: React.PointerEvent<HTMLCanvasElement>) => {
     const d = drag.current;
@@ -386,7 +466,7 @@ export function KnowledgeGraphView({ slug, onOpenDoc }: { slug: string; onOpenDo
     drag.current = null;
     if (!d) return;
     if (d.node) d.node.fixed = false;
-    if (!d.moved) setSel(d.node ? { kind: "node", id: d.node.id } : null);
+    if (!d.moved) setSel(d.hit ? { kind: "node", id: d.hit.id } : null);
   };
   useEffect(() => {
     const c = canvas.current;
@@ -395,6 +475,12 @@ export function KnowledgeGraphView({ slug, onOpenDoc }: { slug: string; onOpenDo
       const S = sim.current;
       if (!S) return;
       e.preventDefault();
+      // The graph mode is a long list: the wheel scrolls it, and zooms with Ctrl (or a pinch).
+      if (layered.current && modeRef.current === "graph" && !e.ctrlKey) {
+        S.view.y -= e.deltaY;
+        S.view.x -= e.deltaX;
+        return;
+      }
       const b = c.getBoundingClientRect();
       const mx = e.clientX - b.left - b.width / 2;
       const my = e.clientY - b.top - b.height / 2;
@@ -430,7 +516,19 @@ export function KnowledgeGraphView({ slug, onOpenDoc }: { slug: string; onOpenDo
           {btn("Documents", showDocs, () => setShowDocs(!showDocs))}
           {btn("Code files", showCode, () => setShowCode(!showCode))}
           {btn("Labels", labels, () => setLabels(!labels))}
-          {btn("Re-layout", false, () => setSeed(seed + 1))}
+          <div className="flex overflow-hidden rounded-md border border-line-2">
+            {MODES.map((m) => (
+              <button
+                key={m}
+                onClick={() => setMode(m)}
+                className="h-[24px] cursor-pointer px-2.5 font-mono text-[11px] font-medium"
+                style={{ background: mode === m ? "var(--accent)" : "transparent", color: mode === m ? "var(--accent-text)" : "var(--text-2)" }}
+              >
+                {m}
+              </button>
+            ))}
+          </div>
+          {btn(mode === "free" ? "Re-layout" : "Fit", false, () => setSeed(seed + 1))}
           {btn(hidden ? "Show" : "Hide", hidden, () => setHidden(!hidden))}
         </div>
       </div>
@@ -476,7 +574,7 @@ export function KnowledgeGraphView({ slug, onOpenDoc }: { slug: string; onOpenDo
                 </span>
                 <span>· · cites (sources) · - - mentions · ── links</span>
               </div>
-              <span className="pointer-events-none absolute top-2.5 right-3 font-mono text-[10.5px] text-muted/70">drag a node · drag empty space to pan · wheel to zoom · click to inspect</span>
+              <span className="pointer-events-none absolute top-2.5 right-3 font-mono text-[10.5px] text-muted/70">{mode === "free" ? "drag a node · " : ""}drag to pan · {mode === "graph" ? "wheel to scroll · ctrl+wheel to zoom" : "wheel to zoom"} · click to inspect</span>
               {!graph && !error && <span className="absolute inset-0 flex items-center justify-center font-mono text-[12px] text-muted">building the graph…</span>}
             </div>
             <Panel graph={graph} sel={sel} setSel={setSel} domColor={domColor} onOpenDoc={onOpenDoc} />
@@ -487,127 +585,29 @@ export function KnowledgeGraphView({ slug, onOpenDoc }: { slug: string; onOpenDo
   );
 }
 
-function Panel({
-  graph,
-  sel,
-  setSel,
-  domColor,
-  onOpenDoc,
-}: {
-  graph: KnowledgeGraph | null;
-  sel: Sel;
-  setSel: (s: Sel) => void;
-  domColor: Map<string, string>;
-  onOpenDoc: (path: string) => void;
-}) {
-  const lbl = "font-mono text-[9.5px] leading-none font-medium tracking-[0.12em] text-muted uppercase";
-  if (!graph) return <div className="flex max-w-[380px] min-w-0 flex-[1_1_280px] flex-col rounded-[10px] border border-line p-3.5" />;
-  const node = sel?.kind === "node" ? graph.nodes.find((n) => n.id === sel.id) : undefined;
-  const dom = sel?.kind === "domain" ? graph.domains.find((d) => d.id === sel.id) : node ? graph.domains.find((d) => d.id === node.domain) : undefined;
-  const nodeById = new Map(graph.nodes.map((n) => [n.id, n]));
-  const item = (n: KnowledgeGraphNode, meta: string, metaColor = "var(--muted)") => (
-    <button
-      key={n.id}
-      onClick={() => setSel({ kind: "node", id: n.id })}
-      className="flex cursor-pointer items-center gap-2 rounded-[7px] border border-line px-2 py-1.5 text-left text-[12px] leading-[1.3] text-text hover:border-accent/40"
-    >
-      <span className={n.kind === "doc" ? "size-[7px] flex-none rounded-[2px]" : "size-[7px] flex-none rotate-45"} style={{ background: n.kind === "doc" ? KIND_COLOR[n.doc_kind ?? "doc"] : n.state === "missing" ? "#F26D6D" : n.state === "stale" ? "#F2C14E" : "#8b95a5" }} />
-      <span className="min-w-0 flex-1 truncate">{n.kind === "doc" ? n.label : n.path}</span>
-      <span className="flex-none font-mono text-[10.5px]" style={{ color: metaColor }}>
-        {meta}
-      </span>
-    </button>
-  );
-  let body: React.ReactNode;
-  if (node) {
-    const out = graph.edges.filter((e) => e.from === node.id).map((e) => ({ e, n: nodeById.get(e.to)! })).filter((x) => x.n);
-    const inc = graph.edges.filter((e) => e.to === node.id).map((e) => ({ e, n: nodeById.get(e.from)! })).filter((x) => x.n);
-    body = (
-      <>
-        <div className="flex items-center gap-2">
-          <span className={node.kind === "doc" ? "size-[9px] rounded-[2px]" : "size-[9px] rotate-45"} style={{ background: node.kind === "doc" ? KIND_COLOR[node.doc_kind ?? "doc"] : "#8b95a5" }} />
-          <span className={lbl}>{node.kind === "doc" ? KIND_LABEL[node.doc_kind ?? "doc"] : "code file"}</span>
-          <button onClick={() => setSel(null)} className="ml-auto cursor-pointer font-mono text-[11px] text-muted">
-            clear ×
-          </button>
-        </div>
-        <span className="text-[17px] leading-[1.25] font-semibold [overflow-wrap:anywhere]">{node.kind === "doc" ? node.label : node.label}</span>
-        <span className="font-mono text-[11px] leading-[1.4] [overflow-wrap:anywhere] text-text-2">{node.path}</span>
-        {node.state !== "ok" && (
-          <span className="rounded-[7px] border px-2.5 py-2 font-mono text-[11.5px] leading-[1.45]" style={{ borderColor: node.state === "missing" ? "rgba(242,109,109,.4)" : "rgba(242,193,78,.4)", color: node.state === "missing" ? "#F26D6D" : "#F2C14E" }}>
-            {node.kind === "code"
-              ? node.state === "missing"
-                ? "cited by a document but not in the repo (moved, renamed or deleted)"
-                : "a document citing it is stale: the code changed after the document"
-              : node.state === "missing"
-                ? "cites a file that does not exist"
-                : "a file it cites changed after it was last updated"}
-          </span>
-        )}
-        {node.kind === "doc" && (
-          <button onClick={() => onOpenDoc(node.path)} className="cursor-pointer self-start text-[12.5px] font-medium text-link hover:text-link-hover">
-            Open the document →
-          </button>
-        )}
-        {out.length > 0 && (
-          <div className="flex flex-col gap-1.5">
-            <span className={lbl}>{node.kind === "doc" ? "cites and links" : "points at"}</span>
-            {out.slice(0, 40).map(({ e, n }) => item(n, e.kind, e.state === "missing" ? "#F26D6D" : e.state === "stale" ? "#F2C14E" : undefined))}
-          </div>
-        )}
-        {inc.length > 0 && (
-          <div className="flex flex-col gap-1.5">
-            <span className={lbl}>{node.kind === "doc" ? "linked from" : "cited by"}</span>
-            {inc.slice(0, 40).map(({ e, n }) => item(n, e.kind))}
-          </div>
-        )}
-      </>
-    );
-  } else if (dom) {
-    const members = graph.nodes.filter((n) => n.domain === dom.id).sort((a, b) => b.degree - a.degree);
-    body = (
-      <>
-        <div className="flex items-center gap-2">
-          <span className="size-[9px] rounded-full" style={{ background: domColor.get(dom.id) }} />
-          <span className={lbl}>domain</span>
-          <button onClick={() => setSel(null)} className="ml-auto cursor-pointer font-mono text-[11px] text-muted">
-            clear ×
-          </button>
-        </div>
-        <span className="text-[17px] leading-[1.25] font-semibold">{dom.name}</span>
-        <span className="text-[12.5px] leading-[1.55] text-text-2">{dom.summary}.</span>
-        <div className="flex flex-col gap-1.5">
-          <span className={lbl}>documents</span>
-          {members.filter((n) => n.kind === "doc").slice(0, 30).map((n) => item(n, `${n.degree}`))}
-        </div>
-        <div className="flex flex-col gap-1.5">
-          <span className={lbl}>code</span>
-          {members.filter((n) => n.kind === "code").slice(0, 30).map((n) => item(n, n.state === "ok" ? `${n.degree}` : n.state, n.state === "missing" ? "#F26D6D" : n.state === "stale" ? "#F2C14E" : undefined))}
-        </div>
-      </>
-    );
-  } else {
-    body = (
-      <>
-        <span className={lbl}>domains</span>
-        <span className="text-[12.5px] leading-[1.55] text-text-2">Click a node to see what it cites and who cites it, or pick a domain:</span>
-        {graph.domains.slice(0, 40).map((d) => (
-          <button key={d.id} onClick={() => setSel({ kind: "domain", id: d.id })} className="flex cursor-pointer items-center gap-2 rounded-[7px] border border-line px-2 py-1.5 text-left text-[12px] text-text hover:border-accent/40">
-            <span className="size-[7px] flex-none rounded-full" style={{ background: domColor.get(d.id) }} />
-            <span className="min-w-0 flex-1 truncate">{d.name}</span>
-            <span className="flex-none font-mono text-[10.5px]" style={{ color: d.flagged ? "#F2C14E" : "var(--muted)" }}>
-              {d.docs}·{d.code}
-              {d.flagged ? ` · ${d.flagged}!` : ""}
-            </span>
-          </button>
-        ))}
-      </>
-    );
+/** The mode picked last (per browser); the layered graph first. */
+function storedMode(): Mode {
+  try {
+    const m = localStorage.getItem("map.knowledge.mode");
+    if ((MODES as readonly string[]).includes(m ?? "")) return m as Mode;
+  } catch {
+    // Storage blocked: the default.
   }
-  return (
-    <div className="flex max-h-[580px] max-w-[380px] min-w-0 flex-[1_1_280px] flex-col gap-3 overflow-auto rounded-[10px] border border-line bg-surface p-3.5">
-      {body}
-      <span className="mt-auto font-mono text-[10.5px] leading-normal text-muted/80">built from the index on each load · no LLM · domains are the code folders documents cite</span>
-    </div>
-  );
+  return "graph";
+}
+
+/** A label along the radius from the middle: outward past an outer-ring node, inward from an inner-ring one. */
+function radial(ctx: CanvasRenderingContext2D, text: string, n: { x: number; y: number }, side: "in" | "out", pad: number, color: string) {
+  const ang = Math.atan2(n.y, n.x);
+  const left = Math.cos(ang) < 0;
+  const outward = side === "out";
+  ctx.save();
+  ctx.translate(n.x, n.y);
+  ctx.rotate(left ? ang + Math.PI : ang);
+  ctx.textBaseline = "middle";
+  ctx.textAlign = outward === left ? "right" : "left";
+  ctx.fillStyle = color;
+  ctx.globalAlpha = 1;
+  ctx.fillText(text, outward === left ? -pad : pad, 0);
+  ctx.restore();
 }
