@@ -107,6 +107,15 @@ function shortPath(path: string | undefined, keep = 2): string {
   return parts.length > keep ? `…/${parts.slice(-keep).join("/")}` : path;
 }
 
+/** Whether the graph shows finished work (exited sessions, cancelled tasks); hidden unless turned on (per browser). */
+function storedShowDone(): boolean {
+  try {
+    return localStorage.getItem("map.command.done") === "1";
+  } catch {
+    return false;
+  }
+}
+
 /** The last view picked in each scope; all projects start on the graph (a per-browser convenience). */
 function storedView(scope: string): View {
   try {
@@ -225,6 +234,15 @@ function CommandCentre() {
   const [hidden, setHidden] = useState<Partial<Record<NodeType, boolean>>>({});
   const [names, setNames] = useState(true);
   const [motion, setMotion] = useState(true);
+  const [showDone, setShowDoneState] = useState(storedShowDone);
+  const setShowDone = (on: boolean) => {
+    setShowDoneState(on);
+    try {
+      localStorage.setItem("map.command.done", on ? "1" : "0");
+    } catch {
+      // Storage blocked: the choice lasts for this page only.
+    }
+  };
   const [search, setSearch] = useState("");
   const [full, setFull] = useState(false);
   const [modal, setModal] = useState<Modal | null>(() =>
@@ -232,7 +250,7 @@ function CommandCentre() {
   );
   const controls = useRef<CanvasControls | null>(null);
   const pinned = selected?.startsWith("t:") ? Number(selected.slice(2)) : null;
-  const cmd = useCommand(pinned);
+  const cmd = useCommand(pinned, showDone);
   const all = cmd.all;
   // `#command/activity`: the project's live task flow in place of the graph.
   const activity = route.arg === "activity";
@@ -494,6 +512,7 @@ function CommandCentre() {
             [
               ["names", names, setNames],
               ["motion", motion, setMotion],
+              ["done", showDone, setShowDone],
             ] as const
           ).map(([label, on, set]) => (
             <button

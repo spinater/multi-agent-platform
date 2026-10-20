@@ -23,6 +23,13 @@ Rules that hold after every change. Breaking one is a bug even when every test p
 
 <!-- MAP:FILL stack-and-commands: the language, framework and package manager; then a short list of the real commands: install, run locally, the gate (bash scripts/verify.sh), and slow suites (db, e2e) with when they are required. -->
 
+## Code size
+
+- A source file stays under 600 lines. When a change would take a file past 600, split it by responsibility first
+  (one module per concern), in the same card, and keep the split a pure move with no behaviour change.
+- A file already over 600 lines never grows: a change to it either leaves it no longer, or splits it.
+- Generated files, lock files, fixtures and docs are exempt. The gate checks this (`scripts/verify.sh`).
+
 ## Deploy
 
 <!-- MAP:FILL deploy: how a change reaches users (or "not deployed yet"), who may deploy, and the command or pipeline. Never put secrets here. -->

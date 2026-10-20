@@ -51,8 +51,9 @@ export type ProjectSummary = {
 
 /** Everything the command centre shows, scoped to the current project or merged across all of them. Done tasks are
  * left out of the live views (they are on the Done tasks page, `#command/done`), except `pinned`: a done task opened
- * from there keeps its card. */
-export function useCommand(pinned: number | null = null) {
+ * from there keeps its card. Unless `showDone`, the graph also leaves out what has finished: exited sessions (and their
+ * runs) and cancelled tasks; the lists still have them. With it, the graph has done tasks too. */
+export function useCommand(pinned: number | null = null, showDone = false) {
   const app = useApp();
   const { sessions: allSessions, tasks: allTasks, events: allEvents, providers, projects, server, scope, project, orchestrator } = app;
   const all = scope === "all";
@@ -145,8 +146,8 @@ export function useCommand(pinned: number | null = null) {
     const groupKeys = new Set(groups.map((g) => g.key));
     const stages = buildStages(pipeline, server?.database, tasks.some((t) => t.git));
     const graph: Graph = buildGraph({
-      sessions,
-      tasks,
+      sessions: showDone ? sessions : sessions.filter((s) => s.state !== "exited"),
+      tasks: showDone ? scoped : tasks.filter((t) => t.status !== "cancelled" || t.id === pinned),
       events,
       groups,
       stages,
@@ -204,7 +205,7 @@ export function useCommand(pinned: number | null = null) {
       /** Lanes in the graph (`l:<name>` nodes). */
       lanes: shownLanes,
     };
-  }, [all, allSessions, allTasks, allEvents, providers, projects, server, project, orchestrator, pipeline, pinned, lanes]);
+  }, [all, allSessions, allTasks, allEvents, providers, projects, server, project, orchestrator, pipeline, pinned, lanes, showDone]);
 }
 
 export type Command = ReturnType<typeof useCommand>;
