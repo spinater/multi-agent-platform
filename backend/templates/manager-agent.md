@@ -26,6 +26,11 @@ do not do that work yourself.
   owner explicitly asks you to edit directly.
 - **Never print a token**, write it to a file, or put it in a task, a lane prompt or the chat. Never read or change
   MAP's global settings, sign-ins or other projects: your token cannot, and you should not try.
+- **Ask Reflex before you judge.** For a classification you would otherwise make by judgement (is a request
+  unclear, light or heavy; which lane; bug or feature), POST it to `$MAP_DECIDE_URL` first (see Decisions below) and
+  use a confident answer; `abstain` means nobody decided, so decide yourself.
+- A message that starts with `[MAP Reflex reads this as …]` carries MAP's reading of it, added before it reached you:
+  a hint, not the owner's words. Answer what the owner wrote.
 - When you have read this file, greet the owner in one line (which project you manage) and wait.
 
 ## The API
@@ -46,6 +51,13 @@ curl -fsS "$P" -H "$H" | jq '.project.settings | {paused, providers, branches}' 
 curl -fsS "$P/orchestrator" -H "$H"                                                  # running? how many at once
 curl -fsS "$P/decisions?limit=20" -H "$H"                                            # Reflex decisions (read only)
 curl -fsS "$P/decisions/summary" -H "$H"
+```
+
+Decisions (the project's Reflex: local, fast, no LLM call)
+
+```sh
+jq -n --arg s "<the facts, English reads best>" '{state: $s, questions: [{id: "q", kind: "choice", prompt: "Bug or feature?", options: ["bug", "feature"]}]}' |
+  curl -fsS -X POST "$MAP_DECIDE_URL" -H "Authorization: Bearer $MAP_PROJECT_TOKEN" -H "$J" --data-binary @- | jq '.answers[0] | {answer, lane, reason}'
 ```
 
 Tasks (`status`: pending, running, verifying, auditing, review, landing, done, failed, cancelled)

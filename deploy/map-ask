@@ -1,0 +1,101 @@
+#!/bin/sh
+# map-ask — ask the project's Reflex or search its knowledge from a session MAP did not start (a lane in your own tmux).
+# Sessions MAP starts have $MAP_DECIDE_URL and $MAP_KNOWLEDGE_URL instead; this posts to the same endpoints.
+#
+#   map-ask "<facts>" --question "Is this a bug or a feature?" --options bug,feature    one option, or abstain
+#   map-ask "<facts>" --question "Does this need a migration?" --yes-no                  yes, no, or abstain
+#   map-ask --search "refund rules"                                                      knowledge and past tasks
+#   map-ask --doc .docs/knowledge/domain/refunds.md                                      one document
+#
+# Prints the answer (`light`, `yes`) or `abstain: <why>`; exits 0 on an answer, 3 on abstain. An abstain means nobody
+# decided: decide yourself. Facts read best in English (Thai goes through the project's glossary).
+# The project: --project, else $MAP_PROJECT, else the project of the lane watching the tmux session you are in.
+# MAP_URL and MAP_TOKEN come from the environment or ~/.config/map/tell.env, as for map-tell; the token goes to curl
+# on stdin, never argv.
+set -eu
+
+conf="${XDG_CONFIG_HOME:-$HOME/.config}/map/tell.env"
+if [ -f "$conf" ]; then
+  [ -n "${MAP_URL:-}" ] || MAP_URL=$(sed -n 's/^[[:space:]]*\(export[[:space:]]*\)\{0,1\}MAP_URL=//p' "$conf" | tail -n 1 | tr -d "\"'")
+  [ -n "${MAP_TOKEN:-}" ] || MAP_TOKEN=$(sed -n 's/^[[:space:]]*\(export[[:space:]]*\)\{0,1\}MAP_TOKEN=//p' "$conf" | tail -n 1 | tr -d "\"'")
+fi
+MAP_URL="${MAP_URL:-http://127.0.0.1:4400}"
+MAP_URL="${MAP_URL%/}"
+MAP_TOKEN="${MAP_TOKEN:-${MAP_PROJECT_TOKEN:-}}"
+
+usage() {
+  sed -n '2,15p' "$0" | sed 's/^# \{0,1\}//'
+  exit "${1:-2}"
+}
+
+state="" question="" options="" yesno=0 search="" doc="" project="${MAP_PROJECT:-}"
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --question) question="${2:-}"; shift 2 || usage ;;
+    --options) options="${2:-}"; shift 2 || usage ;;
+    --yes-no) yesno=1; shift ;;
+    --search) search="${2:-}"; shift 2 || usage ;;
+    --doc) doc="${2:-}"; shift 2 || usage ;;
+    --project) project="${2:-}"; shift 2 || usage ;;
+    -h|--help) usage 0 ;;
+    -*) echo "map-ask: unknown argument $1" >&2; usage ;;
+    *) state="$1"; shift ;;
+  esac
+done
+command -v python3 >/dev/null 2>&1 || { echo "map-ask: needs python3" >&2; exit 1; }
+
+# curl with the token from stdin (a config line), so it never shows up in `ps`. Extra arguments go to curl.
+api() {
+  { if [ -n "$MAP_TOKEN" ]; then printf 'header = "Authorization: Bearer %s"\n' "$MAP_TOKEN"; fi; } |
+    curl -sS --fail-with-body -K - "$@"
+}
+
+if [ -z "$project" ]; then
+  session=""
+  if [ -n "${TMUX:-}" ]; then session=$(tmux display-message -p '#S' 2>/dev/null || true); fi
+  [ -n "$session" ] || { echo "map-ask: no project: pass --project or run it from inside a lane's tmux session" >&2; exit 1; }
+  project=$(api "$MAP_URL/api/lanes" | python3 -I -c '
+import json, sys
+s = sys.argv[1]
+for l in json.load(sys.stdin):
+    if l.get("project") and (l["name"] == s or any(x["name"] == s for x in l.get("sessions", []))):
+        print(l["project"]); break' "$session")
+  [ -n "$project" ] || { echo "map-ask: no lane with a project watches tmux session '$session': pass --project" >&2; exit 1; }
+fi
+case "$project" in *[!a-z0-9-]*) echo "map-ask: '$project' is not a project slug" >&2; exit 1 ;; esac
+base="$MAP_URL/api/projects/$project"
+
+if [ -n "$search" ]; then
+  api -G "$base/knowledge/search" --data-urlencode "q=$search"
+  echo
+  exit 0
+fi
+if [ -n "$doc" ]; then
+  api -G "$base/knowledge/doc" --data-urlencode "path=$doc"
+  echo
+  exit 0
+fi
+
+[ -n "$state" ] && [ -n "$question" ] || usage
+if [ "$yesno" = 0 ] && [ -z "$options" ]; then
+  echo "map-ask: pass --options a,b,c or --yes-no" >&2
+  exit 2
+fi
+body=$(python3 -I -c '
+import json, sys
+state, prompt, options, yesno = sys.argv[1:5]
+q = {"id": "q", "prompt": prompt}
+if yesno == "1":
+    q["kind"] = "noul"
+else:
+    q["kind"] = "choice"
+    q["options"] = [o.strip() for o in options.split(",") if o.strip()]
+print(json.dumps({"state": state, "questions": [q]}))' "$state" "$question" "$options" "$yesno")
+api -X POST -H 'Content-Type: application/json' --data-binary "$body" "$base/decide" | python3 -I -c '
+import json, sys
+a = json.load(sys.stdin)["answers"][0]
+v = a.get("answer")
+if v is None:
+    print("abstain: " + (a.get("error") or a.get("reason") or "nobody decided"))
+    sys.exit(3)
+print(("yes" if v else "no") if isinstance(v, bool) else v)'

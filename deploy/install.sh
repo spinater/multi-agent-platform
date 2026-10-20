@@ -120,7 +120,9 @@ stop_service() {
 if [ "$UNINSTALL" = 1 ]; then
   stop_service
   # Only the app: config, data and projects stay (an older prefix may hold data/ and workspace/, which are kept).
-  [ "$(readlink "$HOME/.local/bin/map" 2>/dev/null)" = "$PREFIX/bin/map" ] && rm -f "$HOME/.local/bin/map"
+  for b in map map-tell map-ask; do
+    [ "$(readlink "$HOME/.local/bin/$b" 2>/dev/null)" = "$PREFIX/bin/$b" ] && rm -f "$HOME/.local/bin/$b"
+  done
   rm -rf "$PREFIX/bin" "$PREFIX/dashboard"
   rmdir "$PREFIX" 2>/dev/null || true
   say "service and app removed; config $CONFIG_DIR, data $DATA_DIR and projects $PROJECTS_DIR are kept"
@@ -139,9 +141,12 @@ say "building the dashboard"
 
 mkdir -p "$PREFIX/bin" "$CONFIG_DIR/templates" "$CONFIG_DIR/agents" "$PROJECTS_DIR"
 install -m 755 "$REPO/backend/target/release/map" "$PREFIX/bin/map"
+# The lane helpers: map-tell queues a tell, map-ask asks the project's Reflex or knowledge from a lane MAP did not start.
+install -m 755 "$REPO/deploy/map-tell" "$REPO/deploy/map-ask" "$PREFIX/bin/"
 if [ "$MODE" = system ]; then
-  # One with the machine: `map` on PATH like any other tool.
-  mkdir -p "$HOME/.local/bin" && ln -sf "$PREFIX/bin/map" "$HOME/.local/bin/map"
+  # One with the machine: `map` and the lane helpers on PATH like any other tool.
+  mkdir -p "$HOME/.local/bin"
+  for b in map map-tell map-ask; do ln -sf "$PREFIX/bin/$b" "$HOME/.local/bin/$b"; done
 fi
 rm -rf "$PREFIX/dashboard" && cp -R "$REPO/frontend/out" "$PREFIX/dashboard"
 

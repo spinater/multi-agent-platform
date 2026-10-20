@@ -747,6 +747,23 @@ map-tell --tells
 It reads `MAP_URL` and `MAP_TOKEN` (`server.api_token`) from the environment or `~/.config/map/tell.env`, and passes
 the token to curl on stdin.
 
+`deploy/map-ask` gives a lane MAP did not start what MAP's own sessions get from `$MAP_DECIDE_URL` and
+`$MAP_KNOWLEDGE_URL`: the project's Reflex and knowledge (the project is the one of the lane watching your tmux
+session, or `--project`). Both helpers are installed into `<prefix>/bin` (and `~/.local/bin` in system mode).
+
+```sh
+map-ask "<facts>" --question "Bug or feature?" --options bug,feature   # prints the answer, or `abstain: …` (exit 3)
+map-ask "<facts>" --question "Needs a migration?" --yes-no
+map-ask --search "refund rules"                                       # knowledge and past tasks
+```
+
+Every `ask` with a note (the dashboard's Ask, the manager panel, Telegram's `/ask`, `map-tell --tell ask`) is read
+by Reflex before it is typed: a chat Reflex shared by every project (`<data_dir>/chat/corpus.git`, seeded from
+`backend/templates/chat/`, on the port two below `reflex.port_base`) picks `status`, `task`, `reply` or `chat`, and a
+confident read goes in front of the note as `[MAP Reflex reads this as a status question]`. An abstain, a lane of no
+project or a Reflex that is not running types the note as it was. Each read is a decision of the lane's project, on
+its Reflex screen.
+
 ## Telegram
 
 `[telegram]` (`backend/src/telegram.rs`; ported from agent-watcher) sends plain text to `chat_id`. Messages are split

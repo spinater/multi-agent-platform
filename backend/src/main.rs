@@ -1,4 +1,5 @@
 mod agents;
+mod chat;
 mod api;
 mod cli_files;
 mod config;
@@ -147,6 +148,9 @@ async fn serve(config: Config) -> Result<()> {
         tokio::spawn(async move {
             if let Err(err) = hub.restart_gates().await {
                 tracing::warn!("gates reflex: {err:#}");
+            }
+            if let Err(err) = crate::chat::restart(&hub).await {
+                tracing::warn!("chat reflex: {err:#}");
             }
         });
     }

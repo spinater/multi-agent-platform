@@ -1571,7 +1571,7 @@ pub async fn tell(hub: &Hub, name: &str, verb: TellVerb, note_text: Option<&str>
         lane: cfg.name.clone(),
         session: session.unwrap_or_default(),
         verb,
-        note: one_line(note_text.unwrap_or("")).chars().take(4000).collect(),
+        note: crate::chat::hinted(hub, &cfg, verb, note_text).await,
         mins: if verb == TellVerb::Pause { Some(mins.unwrap_or(60)) } else { None },
         at: now,
         expires_at: now + Duration::minutes(TELL_TTL_MINS),

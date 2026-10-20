@@ -164,8 +164,8 @@ pub async fn feedback(hub: &Hub, project: &Project, id: i64, correct: bool, expe
     if let (false, Some(p)) = (decision.reflex_answer.is_null(), decision.confidence) {
         let outcome = same(&decision.reflex_answer, &expected);
         reflex_outcome = Some(outcome);
-        // A gate question was answered by the gates Reflex: its calibrator learns.
-        let port = if crate::gates::is_gate(&q.id) { hub.gates_target().port } else { project.port };
+        // A gate or chat question was answered by its own Reflex: that calibrator learns.
+        let port = if crate::gates::is_gate(&q.id) { hub.gates_target().port } else if q.id == crate::chat::INTENT { crate::chat::port(hub) } else { project.port };
         match hub.reflex.post(port, "/feedback", &json!({ "p": p, "outcome": outcome })).await {
             Ok(v) => refit = v["refit"].as_bool().unwrap_or(false),
             Err(err) => reflex_error = Some(format!("{err:#}")),

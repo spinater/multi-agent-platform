@@ -471,7 +471,7 @@ pub fn bootstrap_prompt(s: &KnowledgeSettings) -> String {
          3. Index: write `{index}` with a short Conventions section (the rules above, plus: a commit that changes a card's sources updates the card in the same \
          commit; a card that outgrows the cap is split, never silently cut) and a `## Cards` table with one row per card: `| [Title](domain/file.md) | one-line scope |`.\n\
          4. Rulebooks: add near the top of each rulebook that exists a line telling agents to read `{index}` first and to search `$MAP_KNOWLEDGE_URL` before \
-         grepping. If a rulebook is over {warn} bytes, move its long reference sections into cards and leave a one-line pointer; keep the rules themselves.\n\
+         grepping (a session MAP did not start uses `map-ask --search \"<words>\"`), and to ask the project's Reflex (`$MAP_DECIDE_URL`, or `map-ask`) before deciding something repetitive by judgement. If a rulebook is over {warn} bytes, move its long reference sections into cards and leave a one-line pointer; keep the rules themselves.\n\
          5. Do not touch code, do not copy secrets or credentials into any card, and commit everything in one commit.",
         rulebooks = s.rulebooks.join(", "),
         index = s.index,

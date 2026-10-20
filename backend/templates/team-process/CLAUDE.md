@@ -93,7 +93,12 @@ not ready to ask. Questions go into the card's `## Questions`.
   Cards list their `sources:` in frontmatter, stay under 200 lines, and are updated in the same commit as their
   sources (see the conventions at the top of the index).
 - Search the project's knowledge and past tasks' outcomes with `$MAP_KNOWLEDGE_URL/search?q=…` (header
-  `Authorization: Bearer $MAP_PROJECT_TOKEN`) before re-deriving something.
+  `Authorization: Bearer $MAP_PROJECT_TOKEN`) before re-deriving something. A session MAP did not start has no
+  `$MAP_KNOWLEDGE_URL`: use `map-ask --search "<words>"`.
+- Before deciding something repetitive by judgement (bug or feature, light or heavy, which area, needs a migration),
+  ask the project's Reflex: POST to `$MAP_DECIDE_URL`, or `map-ask "<facts>" --question "…" --options a,b`. Use a
+  confident answer; `abstain` means decide yourself. A message starting `[MAP Reflex reads this as …]` is MAP's
+  reading of it, not the owner's words.
 - `.docs/knowledge/domain/`: business rules. Changing a rule means updating its doc in the same commit.
 - `.docs/knowledge/ops/`: how things run (environments, jobs, accounts, limits).
 - `.docs/design/`: designs and decisions that span several cards.
