@@ -245,6 +245,8 @@ pub struct ReflexConfig {
     /// The `api` fallback's wire format: `anthropic` (Messages API, `x-api-key`) or `openai` (Chat Completions,
     /// `Authorization: Bearer`), which OpenRouter and other gateways speak.
     pub api_format: ApiFormat,
+    /// Reflex's own updates (`reflex_update.rs`): its latest release, the installer, and `auto`.
+    pub update: crate::reflex_update::UpdateConfig,
     /// The endpoint the `api` fallback posts to; unset: `https://api.anthropic.com/v1/messages` for `anthropic`,
     /// `https://api.openai.com/v1/chat/completions` for `openai`. For OpenRouter:
     /// `https://openrouter.ai/api/v1/chat/completions`.
@@ -273,6 +275,7 @@ impl Default for ReflexConfig {
             fallback_overhead_tokens: BTreeMap::new(),
             gates_port: None,
             gates_threshold: None,
+            update: Default::default(),
         }
     }
 }
@@ -1284,10 +1287,6 @@ pub fn builtin_providers() -> BTreeMap<String, ProviderSpec> {
             default_model: "gemini-3.8-flash-high".into(),
             interactive: strings(&["{binary}", "--model", "{model}"]),
             headless: strings(&["{binary}", "-p", "{prompt}", "--model", "{model}"]),
-            extra_args: vec![],
-            effort_args: vec![],
-            session_id_args: vec![],
-            resume_args: vec![],
             prompt_mode: PromptMode::Send,
             startup_secs: 6,
             idle_markers: strings(&["Type your message"]),
@@ -1330,6 +1329,7 @@ pub fn builtin_providers() -> BTreeMap<String, ProviderSpec> {
             home_keep: strings(&["CARGO_HOME=~/.cargo", "RUSTUP_HOME=~/.rustup", "GOPATH=~/go"]),
             shared_home: None,
             env: BTreeMap::new(),
+            ..ProviderSpec::default()
         },
     );
     // Cursor CLI (https://cursor.com/docs/cli/overview). Installed as `agent` and `cursor-agent`; the longer name is

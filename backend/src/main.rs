@@ -29,6 +29,7 @@ mod project_settings;
 mod projects;
 mod reflex;
 mod reflex_screen;
+mod reflex_update;
 mod savings;
 mod settings;
 mod repo;

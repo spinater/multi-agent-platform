@@ -323,7 +323,7 @@ impl UpdatesState {
         *self.report.lock().unwrap() = report;
     }
 
-    fn set_provider(&self, info: UpdateInfo) -> UpdatesReport {
+    pub(crate) fn set_provider(&self, info: UpdateInfo) -> UpdatesReport {
         let mut report = self.report.lock().unwrap();
         match report.providers.iter_mut().find(|p| p.provider == info.provider) {
             Some(p) => *p = info,
@@ -443,7 +443,7 @@ pub async fn refresh(hub: &Arc<Hub>, min_age: Duration) -> UpdatesReport {
         return prev;
     }
     let names = crate::usage::ordered_providers(&hub.config);
-    let providers = futures::future::join_all(names.iter().map(|n| check(hub, n))).await;
+    let providers = crate::reflex_update::with_reflex(hub, futures::future::join_all(names.iter().map(|n| check(hub, n))).await).await;
     let report = UpdatesReport { enabled: hub.config.updates.enabled, interval_secs: hub.config.updates.interval_secs, checked_at: Some(Utc::now()), providers };
     hub.updates.set_report(report.clone());
     announce_new(hub, &report.providers).await;
@@ -470,7 +470,7 @@ pub enum StartError {
 }
 
 /// The update command, wrapped so its exit status is printed and the pane stays a moment for the final capture.
-fn wrapped(update: &[String]) -> Vec<String> {
+pub(crate) fn wrapped(update: &[String]) -> Vec<String> {
     let script = format!("\"$@\"; s=$?; printf '\\n{EXIT_MARK}%s]\\n' \"$s\"; sleep 2; exit \"$s\"");
     ["/bin/sh".to_string(), "-c".into(), script, "sh".into()].into_iter().chain(update.iter().cloned()).collect()
 }

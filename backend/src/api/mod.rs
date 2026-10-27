@@ -840,7 +840,7 @@ async fn refresh_updates(State(hub): State<Arc<Hub>>, Json(_): Json<Value>) -> J
 /// Runs the provider's `update` command in the helper session `<prefix>update-<name>` (409 while one runs, or when
 /// the CLI is installed read-only). The version is checked again when the session ends. Takes `{}`.
 async fn start_update(State(hub): State<Arc<Hub>>, UrlPath(name): UrlPath<String>, Json(_): Json<Value>) -> ApiResult<Session> {
-    match crate::updates::start(&hub, &name).await {
+    match crate::reflex_update::start(&hub, &name).await {
         Ok(session) => Ok(Json(session)),
         Err(crate::updates::StartError::Conflict(why)) => Err(ApiError(StatusCode::CONFLICT, why)),
         Err(crate::updates::StartError::Invalid(err)) => Err(err.into()),

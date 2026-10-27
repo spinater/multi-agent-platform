@@ -46,6 +46,9 @@ nothing is tied to one repository, session name or provider.
     parallel; when they differ each sees the others' answers and reasons and answers once more, and a panel still
     split abstains. A member cooling down (quota) sits out and one that fails on quota is cooled down, so the rest
     answer alone. The decision log's raw reply shows who said what in each round.
+  - **Reflex updates** (`backend/src/reflex_update.rs`, `[reflex.update]`): Reflex is a row of the update bell. A new
+    release (GitHub's latest `tag_name`) is announced once; Run update installs it with the release installer in
+    `<prefix>update-reflex`, then every Reflex (projects', gates', chat) restarts on it. `auto = true` installs unasked.
     Agents started in a project get the endpoint as `$MAP_DECIDE_URL`, and their prompt tells them to use it.
     With `api_token` set they also get `$MAP_PROJECT_TOKEN` (and `$MAP_API_URL`): a token derived from the API token
     that opens only that project's decide/feedback/decision-log endpoints and its corpus (files and `corpus.git`).

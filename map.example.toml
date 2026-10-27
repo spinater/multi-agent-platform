@@ -299,6 +299,15 @@ timeout_secs = 600
 # logged answers above it are right; Reflex's raw confidences are small, around 1e-3..5e-2.
 # gates_threshold = 0.02
 
+# Reflex's own updates: a row of the update bell like a provider CLI. A new release is announced once; "Run update"
+# runs the installer (it checks the archive's SHA-256) in the helper session <prefix>update-reflex, {dir} being the
+# folder of reflex.binary, then every Reflex restarts on the new version. auto = true installs a release unasked.
+# latest_url = "" turns the check off.
+[reflex.update]
+# latest_url = "https://api.github.com/repos/gist-rs/reflex/releases/latest"
+# install = ["/bin/sh", "-c", "curl -fsSL https://raw.githubusercontent.com/gist-rs/reflex/main/install.sh | REFLEX_INSTALL_DIR=\"$1\" sh", "sh", "{dir}"]
+# auto = false
+
 # The Skills screen: what each agent can load in a workspace, where it comes from, and which tasks used it.
 # MAP only reads these locations. The one file it writes is <workspace>/.claude/settings.local.json, when you
 # disable or enable a skill for a project (a `Skill(name)` deny rule, plus `skillOverrides` for non-plugin skills).
