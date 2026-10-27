@@ -151,10 +151,21 @@ fn label(m: &Member) -> String {
 async fn round(hub: &Hub, project: &Project, q: &Question, members: &[Member], prompt: impl Fn(&Member) -> String, notes: &mut Vec<String>) -> Vec<Said> {
     let asks = members.iter().map(|m| {
         let p = prompt(m);
-        async move { (m, run_cli(hub, &project.slug, &m.provider, m.model.as_deref(), &p).await) }
+        // A reply with no usable answer (agy now and then prints nothing) is asked once more.
+        async move {
+            let first = run_cli(hub, &project.slug, &m.provider, m.model.as_deref(), &p).await;
+            match first {
+                Ok(r) if parse_answer(q, &r.text).is_null() => (m, run_cli(hub, &project.slug, &m.provider, m.model.as_deref(), &p).await, Some(r.text)),
+                other => (m, other, None),
+            }
+        }
     });
     let mut said = vec![];
-    for (m, result) in futures::future::join_all(asks).await {
+    for (m, result, retried) in futures::future::join_all(asks).await {
+        if let Some(raw) = retried {
+            let raw: String = raw.chars().take(200).collect();
+            notes.push(format!("{} gave no usable answer ({:?}) and was asked again", label(m), raw.trim()));
+        }
         match result {
             Ok(reply) => said.push(Said { who: label(m), answer: parse_answer(q, &reply.text), why: why(&reply.text), reply }),
             Err(err) => {
