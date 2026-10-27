@@ -20,6 +20,7 @@ mod mcp;
 mod login;
 mod model;
 mod orchestrator;
+mod panel;
 mod parallel;
 mod permissions;
 mod plans;

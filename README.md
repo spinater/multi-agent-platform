@@ -42,6 +42,10 @@ nothing is tied to one repository, session name or provider.
     milliseconds). Answers at or above the project's confidence threshold are final; only the rest go to the
     project's fallback: an LLM API (Anthropic's, or an OpenAI-compatible one such as OpenRouter: `[reflex]
     api_format`, `api_url`), or any provider run headless (`claude -p`, `codex exec`, `agy -p`, `copilot -p`, …).
+    Or a panel (`panel:gemini/gemini-4-argon-high,claude/opus`, `backend/src/panel.rs`): every member answers in
+    parallel; when they differ each sees the others' answers and reasons and answers once more, and a panel still
+    split abstains. A member cooling down (quota) sits out and one that fails on quota is cooled down, so the rest
+    answer alone. The decision log's raw reply shows who said what in each round.
     Agents started in a project get the endpoint as `$MAP_DECIDE_URL`, and their prompt tells them to use it.
     With `api_token` set they also get `$MAP_PROJECT_TOKEN` (and `$MAP_API_URL`): a token derived from the API token
     that opens only that project's decide/feedback/decision-log endpoints and its corpus (files and `corpus.git`).

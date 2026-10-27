@@ -1,13 +1,11 @@
 //! The decision gate: ask the project's Reflex first, accept its answer at or above the project's threshold, and
 //! send only the rest to the fallback (the Anthropic API or a provider CLI run headless).
 
-use std::process::Stdio;
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, bail};
 use chrono::Utc;
 use serde_json::{Value, json};
-use tokio::process::Command;
 
 use crate::config::ApiFormat;
 use crate::hub::Hub;
@@ -146,7 +144,7 @@ pub fn openai_usage(body: &Value) -> Option<(i64, i64)> {
 }
 
 /// Returns the fallback's raw reply to `text`, the question's prompt.
-async fn ask_fallback(hub: &Hub, project: &Project, text: &str) -> Result<Reply> {
+pub(crate) async fn ask_fallback(hub: &Hub, project: &Project, text: &str) -> Result<Reply> {
     let prompt_chars = text.chars().count() as i64;
     match project.fallback.as_str() {
         "none" => bail!("this project has no fallback"),
@@ -182,32 +180,7 @@ async fn ask_fallback(hub: &Hub, project: &Project, text: &str) -> Result<Reply>
                 ApiFormat::Openai => Reply::new(openai_reply(&body), prompt_chars, openai_usage(&body)),
             })
         }
-        provider => {
-            let spec = hub.spec(provider)?;
-            let model = Hub::resolve_model(spec, project.model.as_deref())?;
-            let argv: Vec<String> = spec
-                .headless
-                .iter()
-                .map(|a| a.replace("{binary}", &spec.binary).replace("{model}", &model).replace("{session}", "decide").replace("{prompt}", text))
-                .collect();
-            let Some((program, args)) = argv.split_first() else { bail!("provider `{provider}` has no headless command") };
-            // An empty directory of its own: in the workspace the agent would read CLAUDE.md and call this endpoint again.
-            let dir = hub.project_dir(&project.slug).join("fallback");
-            tokio::fs::create_dir_all(&dir).await?;
-            let mut extra: Vec<(String, String)> = hub.config.workspace.env.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
-            extra.extend(crate::env_vars::vars_for(hub, Some(&project.slug)).await);
-            let mut cmd = Command::new(program);
-            cmd.args(args)
-                .current_dir(&dir)
-                .envs(hub.run_env(provider, extra))
-                .stdin(Stdio::null())
-                .kill_on_drop(true);
-            let out = tokio::time::timeout(Duration::from_secs(180), cmd.output()).await.context("the fallback timed out")??;
-            if !out.status.success() {
-                bail!("{provider} failed: {}", String::from_utf8_lossy(&out.stderr).trim());
-            }
-            Ok(Reply::new(String::from_utf8_lossy(&out.stdout).trim().to_string(), prompt_chars, None))
-        }
+        provider => crate::panel::run_cli(hub, &project.slug, provider, project.model.as_deref(), text).await,
     }
 }
 
@@ -390,7 +363,7 @@ pub async fn decide_at(hub: &Hub, project: &Project, target: Target, state: &str
         };
 
         let (answer, lane, llm_raw, error) = if use_fallback {
-            match ask_fallback(hub, project, &text).await {
+            match crate::panel::ask(hub, project, q, &text).await {
                 Ok(reply) => {
                     (cost.tokens_in, cost.tokens_out, cost.measured) = (Some(reply.tokens_in), Some(reply.tokens_out), reply.measured);
                     let parsed = parse_answer(q, &reply.text);

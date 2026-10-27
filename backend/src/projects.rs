@@ -66,6 +66,7 @@ pub fn validate_questions(questions: &[Question]) -> Result<()> {
 pub fn validate_fallback(hub: &Hub, fallback: &str) -> Result<()> {
     match fallback {
         "none" | "api" => Ok(()),
+        p if p.starts_with(crate::panel::PREFIX) => crate::panel::validate(hub, p),
         name => {
             let spec = hub.spec(name).with_context(|| format!("fallback must be none, api or a provider; `{name}` is neither"))?;
             if spec.headless.is_empty() {

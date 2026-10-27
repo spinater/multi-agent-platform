@@ -7,10 +7,10 @@ import { useEffect, useState, type ReactNode } from "react";
 import { api, cloneUrl, fmtConf, type RepoName } from "@/lib/api";
 import type { FolderTrust } from "@/lib/generated/FolderTrust";
 import type { ProjectInfo } from "@/lib/generated/ProjectInfo";
-import type { ProviderInfo } from "@/lib/generated/ProviderInfo";
 import type { RepoListing } from "@/lib/generated/RepoListing";
 
 import { useApp } from "./app-context";
+import { FallbackSelect } from "./fallback-select";
 import { BranchesEditor } from "./branches";
 import { KnowledgeEditor } from "./knowledge/settings-editor";
 import { ProjectGit } from "./git-access";
@@ -512,21 +512,6 @@ function RepoEditor({ slug, repo }: { slug: string; repo: RepoName }) {
         </ul>
       </Box>
     </div>
-  );
-}
-
-function FallbackSelect({ value, onChange, providers }: { value: string; onChange: (v: string) => void; providers: ProviderInfo[] }) {
-  const { server } = useApp();
-  return (
-    <select value={value} onChange={(e) => onChange(e.target.value)} className="h-[38px] rounded-[7px] border border-line-2 bg-inset px-2 font-mono text-[13px] tracking-normal text-text normal-case">
-      <option value="api">{server?.api_fallback ?? "Anthropic API"}</option>
-      {providers.map((p) => (
-        <option key={p.name} value={p.name} disabled={!p.available}>
-          {p.name} (headless){p.available ? "" : " · not installed"}
-        </option>
-      ))}
-      <option value="none">None: abstain stays unanswered</option>
-    </select>
   );
 }
 

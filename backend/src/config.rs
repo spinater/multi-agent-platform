@@ -1280,7 +1280,7 @@ pub fn builtin_providers() -> BTreeMap<String, ProviderSpec> {
         "gemini".into(),
         ProviderSpec {
             binary: "agy".into(),
-            models: strings(&["gemini-3.8-pro-high", "gemini-3.8-flash-high"]),
+            models: strings(&["gemini-4-argon-high", "gemini-4-argon-medium", "gemini-3.8-flash-high"]),
             default_model: "gemini-3.8-flash-high".into(),
             interactive: strings(&["{binary}", "--model", "{model}"]),
             headless: strings(&["{binary}", "-p", "{prompt}", "--model", "{model}"]),

@@ -89,7 +89,7 @@ fn short(sha: &str) -> &str {
     &sha[..sha.len().min(10)]
 }
 
-fn looks_like_quota(output: &str) -> bool {
+pub(crate) fn looks_like_quota(output: &str) -> bool {
     let lower = output.to_lowercase();
     crate::detect::rate_limit_line(output).is_some() || lower.contains("credit balance is too low") || lower.contains("quota")
 }
