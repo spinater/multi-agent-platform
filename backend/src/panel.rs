@@ -72,7 +72,7 @@ struct Said {
     reply: Reply,
 }
 
-const FORMAT: &str = "After that line, add one line that starts with `Why:` and gives your reason in one sentence.";
+const FORMAT: &str = "Answer from the text above alone: run no command, read no file, use no tool. After that line, add one line that starts with `Why:` and gives your reason in one sentence.";
 
 fn shown(v: &Value) -> String {
     match v {
@@ -118,10 +118,11 @@ async fn debate(hub: &Hub, project: &Project, q: &Question, text: &str, members:
     }
     let mut log = vec![summary(1, &said)];
     if agreed(&said).is_none() && said.len() > 1 {
-        let earlier: Vec<(String, String)> = said.iter().map(|s| (s.who.clone(), format!("`{}`. {}", shown(&s.answer), s.why))).collect();
+        let earlier: Vec<(String, String)> = said.iter().filter(|s| !s.answer.is_null()).map(|s| (s.who.clone(), format!("`{}`. {}", shown(&s.answer), s.why))).collect();
         let still: Vec<Member> = seated.iter().filter(|m| said.iter().any(|s| s.who == label(m))).cloned().collect();
         let prompt = |m: &Member| {
             let others: Vec<String> = earlier.iter().filter(|(w, _)| *w != label(m)).map(|(w, a)| format!("- {w} answered {a}")).collect();
+            let others = if others.is_empty() { vec!["- nobody else gave a usable answer".to_string()] } else { others };
             format!(
                 "{text}\n\nYou answered this before. The other reviewers on the panel answered:\n{}\nWeigh their reasons against yours: keep your answer or change it.\nReply in the same format: the answer line first. {FORMAT}",
                 others.join("\n")
@@ -201,7 +202,8 @@ pub async fn run_cli(hub: &Hub, slug: &str, provider: &str, model: Option<&str>,
     cmd.args(args).current_dir(&dir).envs(hub.run_env(provider, extra)).stdin(Stdio::null()).kill_on_drop(true);
     let out = tokio::time::timeout(Duration::from_secs(180), cmd.output()).await.context("the fallback timed out")??;
     let stdout = String::from_utf8_lossy(&out.stdout).trim().to_string();
-    if !out.status.success() {
+    // agy prints nothing and exits 0 when a tool it wanted was denied; its stderr says why.
+    if !out.status.success() || stdout.is_empty() {
         bail!("{provider} failed: {} {}", String::from_utf8_lossy(&out.stderr).trim(), stdout.chars().take(300).collect::<String>());
     }
     Ok(Reply::new(stdout, text.chars().count() as i64, None))
