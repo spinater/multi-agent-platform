@@ -747,7 +747,7 @@ text, or still parked after the reset. A card done is announced once per card (c
 map-tell --tell clear --note "card 200 done"   # /clear, then the status prompt, once idle
 map-tell --tell ask --note "do card 188 next"
 map-tell --tell pause --mins 90
-map-tell --tell clear --session groove-agos    # another session
+map-tell --tell clear --session bistro-agos    # another session
 map-tell --tells
 ```
 

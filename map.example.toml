@@ -425,25 +425,25 @@ skip_pct = 90
 # add lanes on the dashboard (watch an existing session, or start a MAP session); those live in the database, not
 # here, and a block here with the same name wins.
 # [[lanes]]
-# name = "developer-groove"
-# project = "groove-clinic"
+# name = "developer-bistro"
+# project = "bistro-orders"
 # manager, developer or any other lowercase word.
 # role = "developer"
 # The lane's previous name: at startup its overrides, memory, queued tells and history move to `name` (once, when
 # `name` has none yet). With session_match empty, the old name also keeps matching the session (map-tell sends it).
-# rename_from = "groove-agos"
+# rename_from = "bistro-agos"
 # "" = tmux's default server (no -L).
 # socket = ""
 # Globs; default [name] (plus rename_from).
-# session_match = ["groove*"]
-# path = "~/project/groove"
+# session_match = ["bistro*"]
+# path = "~/project/bistro"
 # The agent writes {card, state: done|working|blocked, need_clear, note, at} here.
 # status_file = ".scratch/agent-status.json"
 # todo/, todo-human/, done/ are counted when todo/ exists; an empty todo/ stops the status prompt (not the notices).
 # tasks_dir = "tasks"
 # false: watch and notify only, never type.
 # actions = true
-# Typed as one line; or status_prompt_file = "~/prompts/groove-status.txt".
+# Typed as one line; or status_prompt_file = "~/prompts/bistro-status.txt".
 # status_prompt = "Read .scratch/agent-status.json; finish the card if unfinished, else take the next from tasks/todo/."
 # Context used when the pane does not print `N% context used` (current Claude Code): the newest transcript in
 # <claude_dir>/projects/<path, non-alphanumerics as ->/*.jsonl, read only, over context_window tokens.
@@ -471,8 +471,8 @@ skip_pct = 90
 # repeat_mins = 120
 #
 # [[lanes]]
-# name = "manager-groove"
-# project = "groove-clinic"
+# name = "manager-bistro"
+# project = "bistro-orders"
 # role = "manager"
 # Its tmux session is still called manager-agos: with session_match empty, rename_from keeps it matched.
 # rename_from = "manager-agos"

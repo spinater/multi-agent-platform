@@ -4,7 +4,7 @@
 #   map-tell --tell clear --note "card 200 done"    /clear (then the lane's status prompt) once the session is idle
 #   map-tell --tell ask --note "do card 188 next"    type the note (empty: the status prompt) once it is idle
 #   map-tell --tell pause --mins 90                  no automatic /clear or prompt for 90 minutes
-#   map-tell --tell clear --session groove-agos      for another session (default: the tmux session you are in)
+#   map-tell --tell clear --session bistro-agos      for another session (default: the tmux session you are in)
 #   map-tell --tells                                 what is queued (for this session, or every lane outside tmux)
 #
 # MAP_URL (default http://127.0.0.1:4400) and MAP_TOKEN (map.toml's server.api_token) come from the environment or

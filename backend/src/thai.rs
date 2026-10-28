@@ -269,18 +269,18 @@ mod tests {
 
     #[test]
     fn project_words_win_and_thai_digits_become_numbers() {
-        let extra = BTreeMap::from([("หน้าบ้าน".to_string(), "storefront".to_string()), ("กรุ๊ฟ".to_string(), "groove".to_string())]);
-        let r = gloss("แก้หน้าบ้านของกรุ๊ฟ ๒ จุด", &Glossary::new(&extra));
-        assert_eq!(r.text, "fix storefront groove 2", "{:?}", r);
+        let extra = BTreeMap::from([("หน้าบ้าน".to_string(), "storefront".to_string()), ("บิสโทร".to_string(), "bistro".to_string())]);
+        let r = gloss("แก้หน้าบ้านของบิสโทร ๒ จุด", &Glossary::new(&extra));
+        assert_eq!(r.text, "fix storefront bistro 2", "{:?}", r);
     }
 
     #[test]
     fn saved_words_are_checked() {
-        let ok = clean_words(BTreeMap::from([(" กรุ๊ฟ ".into(), "groove".into()), ("โดน".into(), "-".into()), (String::new(), String::new())])).unwrap();
-        assert_eq!(ok, BTreeMap::from([("กรุ๊ฟ".into(), "groove".into()), ("โดน".into(), "-".into())]));
-        assert!(clean_words(BTreeMap::from([("groove".into(), "groove".into())])).is_err());
-        assert!(clean_words(BTreeMap::from([("กรุ๊ฟ".into(), String::new())])).is_err());
-        assert!(clean_words(BTreeMap::from([("กรุ๊ฟ".into(), "กรุ๊ฟ".into())])).is_err());
+        let ok = clean_words(BTreeMap::from([(" บิสโทร ".into(), "bistro".into()), ("โดน".into(), "-".into()), (String::new(), String::new())])).unwrap();
+        assert_eq!(ok, BTreeMap::from([("บิสโทร".into(), "bistro".into()), ("โดน".into(), "-".into())]));
+        assert!(clean_words(BTreeMap::from([("bistro".into(), "bistro".into())])).is_err());
+        assert!(clean_words(BTreeMap::from([("บิสโทร".into(), String::new())])).is_err());
+        assert!(clean_words(BTreeMap::from([("บิสโทร".into(), "บิสโทร".into())])).is_err());
     }
 
     #[test]

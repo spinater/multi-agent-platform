@@ -58,7 +58,7 @@ There is a back button to the screen.
 - Suggestion recommended (no index, big project), not yet (small project), in progress (setup task running).
 - Project with no index: explain the convention in 3 lines and offer "Create index task".
 - All healthy.
-- Many problems (65 near-cap cards, a 57 KB rulebook, a 6 GB scratch folder). This is the real case for the groove
+- Many problems (65 near-cap cards, a 57 KB rulebook, a 6 GB scratch folder). This is the real case for the bistro
   project; it must stay scannable.
 - Searching / no results ("Nothing found. If agents search this too, it is a gap: write a card").
 

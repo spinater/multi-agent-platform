@@ -233,7 +233,7 @@ fn pane_reading_context_hint_input_and_state() {
 
 #[test]
 fn glob_and_signature() {
-    assert!(glob("groove*", "groove-agos") && glob("groove*", "groove") && !glob("groove*", "my-groove"));
+    assert!(glob("bistro*", "bistro-agos") && glob("bistro*", "bistro") && !glob("bistro*", "my-bistro"));
     assert!(glob("lane-?", "lane-a") && !glob("lane-?", "lane-ab") && glob("exact", "exact"));
     assert_eq!(done_signature(Some(&status("working", None, 0))), "");
     assert!(done_signature(Some(&status("done", None, 0))).starts_with("252|"));
@@ -283,7 +283,7 @@ pub(crate) async fn test_hub(extra: &str) -> (Arc<Hub>, Arc<FakeTerminal>, tempf
 
 fn lane_toml(dir: &Path, extra: &str) -> String {
     format!(
-        "[[lanes]]\nname = \"groove-agos\"\nsession_match = [\"groove*\"]\npath = \"{}\"\nstatus_prompt = \"pick the next card\"\n[lanes.clear_when]\nenabled = true\n{extra}",
+        "[[lanes]]\nname = \"bistro-agos\"\nsession_match = [\"bistro*\"]\npath = \"{}\"\nstatus_prompt = \"pick the next card\"\n[lanes.clear_when]\nenabled = true\n{extra}",
         dir.display()
     )
 }
@@ -321,42 +321,42 @@ async fn clear_then_prompt_only_when_idle_and_nobody_attached() {
     let t0 = Utc::now();
     write_status(proj.path(), "done", true, t0);
 
-    add_session(&term, "groove-agos", &busy(), 0);
+    add_session(&term, "bistro-agos", &busy(), 0);
     tick(&hub, t0).await;
-    assert!(term.sent("groove-agos").is_empty(), "busy: never typed");
+    assert!(term.sent("bistro-agos").is_empty(), "busy: never typed");
     assert_eq!(kinds(&hub, "lane.card_done").await, 1, "the done notice goes out at once, whatever the pane");
 
     // Idle but someone is attached: still nothing.
-    term.sessions.lock().unwrap().get_mut("groove-agos").unwrap().attached = 1;
-    term.set_pane("groove-agos", &idle_done());
+    term.sessions.lock().unwrap().get_mut("bistro-agos").unwrap().attached = 1;
+    term.set_pane("bistro-agos", &idle_done());
     tick(&hub, t0 + Duration::minutes(1)).await;
-    assert!(term.sent("groove-agos").is_empty(), "attached: never typed");
+    assert!(term.sent("bistro-agos").is_empty(), "attached: never typed");
 
     // Unsent text on the input line: still nothing.
-    term.sessions.lock().unwrap().get_mut("groove-agos").unwrap().attached = 0;
-    term.set_pane("groove-agos", &idle_done().replace("❯ \n", "❯ hold on\n"));
+    term.sessions.lock().unwrap().get_mut("bistro-agos").unwrap().attached = 0;
+    term.set_pane("bistro-agos", &idle_done().replace("❯ \n", "❯ hold on\n"));
     tick(&hub, t0 + Duration::minutes(2)).await;
-    assert!(term.sent("groove-agos").is_empty(), "typing: never typed");
+    assert!(term.sent("bistro-agos").is_empty(), "typing: never typed");
 
-    term.set_pane("groove-agos", &idle_done());
-    term.on_keys("groove-agos", &[&cleared(), &busy()]);
+    term.set_pane("bistro-agos", &idle_done());
+    term.on_keys("bistro-agos", &[&cleared(), &busy()]);
     tick(&hub, t0 + Duration::minutes(3)).await;
-    assert_eq!(term.sent("groove-agos"), ["/clear", "<Enter>", "pick the next card", "<Enter>"]);
+    assert_eq!(term.sent("bistro-agos"), ["/clear", "<Enter>", "pick the next card", "<Enter>"]);
     assert_eq!(kinds(&hub, "lane.clear").await, 1);
     assert_eq!(kinds(&hub, "lane.ask").await, 1);
     assert_eq!(kinds(&hub, "lane.card_done").await, 1, "once per card");
 
     // Done and idle again: cooldowns hold; the same card is not announced twice.
-    term.set_pane("groove-agos", &idle_done());
+    term.set_pane("bistro-agos", &idle_done());
     tick(&hub, t0 + Duration::minutes(5)).await;
-    assert_eq!(term.sent("groove-agos").len(), 4);
+    assert_eq!(term.sent("bistro-agos").len(), 4);
     assert_eq!(kinds(&hub, "lane.card_done").await, 1);
 
     let info = hub.lanes.infos(&hub).await.unwrap().remove(0);
     assert_eq!(info.sessions[0].state, LaneState::Idle);
     assert_eq!(info.status.unwrap().card.as_deref(), Some("464"));
     assert!(info.history.iter().any(|a| a.kind == "clear"));
-    assert!(hub.lanes.screen("groove-agos", None, 20).text.contains("Card 464"));
+    assert!(hub.lanes.screen("bistro-agos", None, 20).text.contains("Card 464"));
     assert!(hub.lanes.report(Utc::now()).contains("card 464"));
 }
 
@@ -366,16 +366,16 @@ async fn actions_off_and_watch_off_never_type() {
     let (hub, term, _d) = test_hub(&lane_toml(proj.path(), "")).await;
     let t0 = Utc::now();
     write_status(proj.path(), "done", true, t0);
-    add_session(&term, "groove-agos", &idle_done(), 0);
-    hub.lanes.update(&hub, "groove-agos", LanePatch { actions: Some(false), ..Default::default() }).await.unwrap();
+    add_session(&term, "bistro-agos", &idle_done(), 0);
+    hub.lanes.update(&hub, "bistro-agos", LanePatch { actions: Some(false), ..Default::default() }).await.unwrap();
     tick(&hub, t0).await;
-    assert!(term.sent("groove-agos").is_empty());
+    assert!(term.sent("bistro-agos").is_empty());
     assert_eq!(kinds(&hub, "lane.card_done").await, 1, "watched: still notified");
 
-    hub.lanes.update(&hub, "groove-agos", LanePatch { actions: Some(true), watch: Some(false), ..Default::default() }).await.unwrap();
+    hub.lanes.update(&hub, "bistro-agos", LanePatch { actions: Some(true), watch: Some(false), ..Default::default() }).await.unwrap();
     write_status(proj.path(), "done", true, t0 + Duration::minutes(1));
     tick(&hub, t0 + Duration::minutes(2)).await;
-    assert!(term.sent("groove-agos").is_empty());
+    assert!(term.sent("bistro-agos").is_empty());
     assert_eq!(kinds(&hub, "lane.card_done").await, 1, "muted: no notice");
     assert!(hub.lanes.report(Utc::now()).contains("paused via /watch"));
     assert_eq!(kinds(&hub, "lane.watch").await, 2);
@@ -390,23 +390,23 @@ async fn never_clear_while_rate_limited_and_resume_after_reset() {
     let reset = (t0 + Duration::minutes(30)).with_timezone(&chrono::Local);
     let line = format!("  ⎿  You've hit your session limit · resets {}", reset.format("%-I:%M%P"));
     let parked = claude(&format!("● Exploring\n{line}"), "", "", "new task? /clear · 90% context used");
-    add_session(&term, "groove-agos", &parked, 0);
+    add_session(&term, "bistro-agos", &parked, 0);
     tick(&hub, t0).await;
-    assert!(term.sent("groove-agos").is_empty(), "parked: no clear, no prompt");
+    assert!(term.sent("bistro-agos").is_empty(), "parked: no clear, no prompt");
     assert_eq!(kinds(&hub, "lane.rate_limited").await, 1);
     let s = &hub.lanes.infos(&hub).await.unwrap()[0].sessions[0];
     assert_eq!(s.state, LaneState::RateLimited);
 
     // A tell queued while parked waits.
-    tell(&hub, "groove-agos", TellVerb::Clear, Some("card done"), None, None, t0).await.unwrap();
+    tell(&hub, "bistro-agos", TellVerb::Clear, Some("card done"), None, None, t0).await.unwrap();
     tick(&hub, t0 + Duration::minutes(5)).await;
-    assert!(term.sent("groove-agos").is_empty());
+    assert!(term.sent("bistro-agos").is_empty());
     assert_eq!(hub.store.lane_tells(None, t0 - Duration::hours(3), Duration::hours(3)).await.unwrap().len(), 1);
 
     // After the reset: resume (not clear) first, beating the tell.
     let later = t0 + Duration::minutes(32);
     tick(&hub, later).await;
-    let sent = term.sent("groove-agos");
+    let sent = term.sent("bistro-agos");
     assert_eq!(sent, ["pick the next card", "<Enter>"], "resume, never /clear while the line is on screen");
     assert_eq!(kinds(&hub, "lane.resume").await, 1);
     assert_eq!(kinds(&hub, "lane.rate_limited").await, 1, "announced once");
@@ -417,39 +417,39 @@ async fn tells_expire_overwrite_and_pause_blocks_only_automatic_moves() {
     let proj = tempfile::tempdir().unwrap();
     let (hub, term, _d) = test_hub(&lane_toml(proj.path(), "")).await;
     let t0 = Utc::now();
-    add_session(&term, "groove-agos", &busy(), 0);
+    add_session(&term, "bistro-agos", &busy(), 0);
     tick(&hub, t0).await;
 
     // Overwrite: the same verb again replaces the first.
-    tell(&hub, "groove-agos", TellVerb::Ask, Some("first"), None, None, t0).await.unwrap();
-    tell(&hub, "groove-agos", TellVerb::Ask, Some("do card 188"), None, None, t0 + Duration::seconds(5)).await.unwrap();
-    let q = hub.store.lane_tells(Some("groove-agos"), t0 - Duration::hours(3), Duration::hours(3)).await.unwrap();
+    tell(&hub, "bistro-agos", TellVerb::Ask, Some("first"), None, None, t0).await.unwrap();
+    tell(&hub, "bistro-agos", TellVerb::Ask, Some("do card 188"), None, None, t0 + Duration::seconds(5)).await.unwrap();
+    let q = hub.store.lane_tells(Some("bistro-agos"), t0 - Duration::hours(3), Duration::hours(3)).await.unwrap();
     assert_eq!(q.len(), 1);
-    assert_eq!((q[0].note.as_str(), q[0].session.as_str()), ("do card 188", "groove-agos"), "one session: resolved to it");
+    assert_eq!((q[0].note.as_str(), q[0].session.as_str()), ("do card 188", "bistro-agos"), "one session: resolved to it");
     assert!(tell(&hub, "nope", TellVerb::Ask, None, None, None, t0).await.is_err());
-    assert!(tell(&hub, "groove-agos", TellVerb::Pause, None, Some(0), None, t0).await.is_err());
+    assert!(tell(&hub, "bistro-agos", TellVerb::Pause, None, Some(0), None, t0).await.is_err());
 
     // Expiry: three hours later it is gone.
-    let q = hub.store.lane_tells(Some("groove-agos"), t0 + Duration::minutes(181) - Duration::hours(3), Duration::hours(3)).await.unwrap();
+    let q = hub.store.lane_tells(Some("bistro-agos"), t0 + Duration::minutes(181) - Duration::hours(3), Duration::hours(3)).await.unwrap();
     assert!(q.is_empty(), "expired");
 
     // Pause, then the lane is done and idle: no automatic clear or prompt.
     write_status(proj.path(), "done", true, t0);
-    term.set_pane("groove-agos", &idle_done());
-    tell(&hub, "groove-agos", TellVerb::Pause, None, Some(90), None, t0).await.unwrap();
+    term.set_pane("bistro-agos", &idle_done());
+    tell(&hub, "bistro-agos", TellVerb::Pause, None, Some(90), None, t0).await.unwrap();
     tick(&hub, t0 + Duration::minutes(1)).await;
-    assert!(term.sent("groove-agos").is_empty(), "paused");
+    assert!(term.sent("bistro-agos").is_empty(), "paused");
     let s = &hub.lanes.infos(&hub).await.unwrap()[0];
     assert!(s.sessions[0].paused_until.is_some());
     assert!(s.tells.is_empty(), "the pause tell is used up");
     tick(&hub, t0 + Duration::minutes(2)).await;
-    assert!(term.sent("groove-agos").is_empty(), "still paused");
+    assert!(term.sent("bistro-agos").is_empty(), "still paused");
 
     // A direct clear still runs while paused (by session name, as map-tell sends it), then the status prompt.
-    tell(&hub, "groove-agos", TellVerb::Clear, Some("card 464 done"), None, Some("groove-agos"), t0 + Duration::minutes(2)).await.unwrap();
-    term.on_keys("groove-agos", &[&cleared(), &busy()]);
+    tell(&hub, "bistro-agos", TellVerb::Clear, Some("card 464 done"), None, Some("bistro-agos"), t0 + Duration::minutes(2)).await.unwrap();
+    term.on_keys("bistro-agos", &[&cleared(), &busy()]);
     tick(&hub, t0 + Duration::minutes(3)).await;
-    assert_eq!(term.sent("groove-agos"), ["/clear", "<Enter>", "pick the next card", "<Enter>"]);
+    assert_eq!(term.sent("bistro-agos"), ["/clear", "<Enter>", "pick the next card", "<Enter>"]);
     assert!(hub.store.lane_tells(None, t0 - Duration::hours(3), Duration::hours(3)).await.unwrap().is_empty());
     assert!(kinds(&hub, "lane.tell").await >= 3);
 }
@@ -460,11 +460,11 @@ async fn one_prompt_per_lane_per_round_and_no_todo_stops_the_prompt() {
     let (hub, term, _d) = test_hub(&lane_toml(proj.path(), "[lanes.ask_when]\nidle_stale_mins = 30\n")).await;
     let t0 = Utc::now();
     let idle = claude("● waiting", "✻ Cooked for 1m", "", "? for shortcuts");
-    add_session(&term, "groove-1", &idle, 0);
-    add_session(&term, "groove-2", &idle, 0);
+    add_session(&term, "bistro-1", &idle, 0);
+    add_session(&term, "bistro-2", &idle, 0);
     tick(&hub, t0).await;
     tick(&hub, t0 + Duration::minutes(31)).await;
-    let n = term.sent("groove-1").len() + term.sent("groove-2").len();
+    let n = term.sent("bistro-1").len() + term.sent("bistro-2").len();
     assert_eq!(n, 2, "one session prompted (text + Enter)");
 
     // No card left in todo/: no stale prompt, but the lane is still read.
@@ -472,7 +472,7 @@ async fn one_prompt_per_lane_per_round_and_no_todo_stops_the_prompt() {
         std::fs::create_dir_all(proj.path().join("tasks").join(d)).unwrap();
     }
     tick(&hub, t0 + Duration::minutes(200)).await;
-    assert_eq!(term.sent("groove-1").len() + term.sent("groove-2").len(), 2);
+    assert_eq!(term.sent("bistro-1").len() + term.sent("bistro-2").len(), 2);
     assert_eq!(hub.lanes.infos(&hub).await.unwrap()[0].tasks.as_ref().unwrap().todo, 0);
 }
 
@@ -482,12 +482,12 @@ async fn stall_alert_repeats_every_repeat_mins_not_every_tick() {
     let (hub, term, _d) = test_hub(&lane_toml(proj.path(), "")).await;
     let t0 = Utc::now();
     let dialog = claude("Do you want to make this edit?\n❯ 1. Yes\n  2. No", "", "", "");
-    add_session(&term, "groove-agos", &dialog, 0);
+    add_session(&term, "bistro-agos", &dialog, 0);
     for m in [0, 10, 25, 30, 60, 140, 150] {
         tick(&hub, t0 + Duration::minutes(m)).await;
     }
     assert_eq!(kinds(&hub, "lane.stall").await, 2, "at 25 min and again at 145+");
-    assert!(term.sent("groove-agos").is_empty());
+    assert!(term.sent("bistro-agos").is_empty());
 }
 
 #[tokio::test]
@@ -498,7 +498,7 @@ async fn import_watcher_fills_settings_and_refuses_outside_home() {
     let cfg = serde_json::json!({
         "telegram": { "env_file": "/somewhere/.env", "chat_id": -5168825006i64, "allowed_user_ids": [786511637] },
         "targets": [
-            { "key": "groove", "name": "groove-clinic", "session_match": ["groove*"], "path": proj.path(),
+            { "key": "bistro", "name": "bistro-orders", "session_match": ["bistro*"], "path": proj.path(),
               "ask_when": { "on_anomaly": false, "idle_stale_mins": 30, "cooldown_mins": 60, "max_sessions_per_round": 1 },
               "stall_when": { "stall_mins": 20, "repeat_mins": 120 },
               "clear_when": { "enabled": true, "idle_mins": 30, "cooldown_mins": 30, "context_pct": 15, "only_when_done": true },
@@ -509,10 +509,10 @@ async fn import_watcher_fills_settings_and_refuses_outside_home() {
     let file = home.path().join("config.json");
     std::fs::write(&file, cfg.to_string()).unwrap();
     let got = import_watcher_in(&hub, file.to_str().unwrap(), home.path()).await.unwrap();
-    assert_eq!(got.updated, ["groove-agos"]);
+    assert_eq!(got.updated, ["bistro-agos"]);
     assert_eq!(got.skipped.len(), 1);
     assert_eq!(got.chat_id, Some(-5168825006));
-    let c = hub.lanes.config("groove-agos").unwrap();
+    let c = hub.lanes.config("bistro-agos").unwrap();
     assert_eq!(c.status_prompt, "LONG STATUS PROMPT");
     assert_eq!((c.clear_when.context_pct, c.clear_when.status_max_age_mins, c.ask_when.cooldown_mins), (15, 180, 60));
     assert_eq!(hub.telegram.info().allowed_user_ids, [786511637]);
@@ -664,7 +664,7 @@ fn write_transcript(dir: &Path, name: &str, lines: &[String]) -> std::path::Path
 #[test]
 fn transcript_folder_name_and_tokens() {
     let base = Path::new("/c");
-    assert_eq!(claude_project_dir(base, Path::new("/home/linus/project/lim/groove-clinic")), Path::new("/c/projects/-home-linus-project-lim-groove-clinic"));
+    assert_eq!(claude_project_dir(base, Path::new("/home/dev/project/app/bistro-orders")), Path::new("/c/projects/-home-dev-project-app-bistro-orders"));
     assert_eq!(claude_project_dir(base, Path::new("/a/my.app_x")), Path::new("/c/projects/-a-my-app-x"));
 
     let d = tempfile::tempdir().unwrap();
@@ -726,23 +726,23 @@ async fn context_from_the_transcript_feeds_the_card_and_clear_when() {
     let (hub, term, _d) = test_hub(&toml).await;
     // A Claude pane without the old `N% context used` line.
     let pane = claude("● Card done.", "✻ Cooked for 3m 2s", "", "? for shortcuts");
-    add_session(&term, "groove-agos", &pane, 0);
+    add_session(&term, "bistro-agos", &pane, 0);
     let t0 = Utc::now();
     tick(&hub, t0).await;
     let s = hub.lanes.infos(&hub).await.unwrap().remove(0).sessions.remove(0);
     assert_eq!((s.context_pct, s.context_tokens, s.context_window, s.context_source.as_deref()), (Some(41), Some(81608), Some(200_000), Some("transcript")));
-    assert!(term.sent("groove-agos").is_empty(), "not idle long enough");
+    assert!(term.sent("bistro-agos").is_empty(), "not idle long enough");
     assert!(hub.lanes.report(t0).contains("ctx 81.6k / 200k (41%)"), "{}", hub.lanes.report(t0));
 
     // Idle 31 min at 41% ≥ 40%: the clear fires; the transcript did not change, so it is reported as not taken.
     tick(&hub, t0 + Duration::minutes(31)).await;
-    assert_eq!(term.sent("groove-agos")[..2], ["/clear", "<Enter>"]);
+    assert_eq!(term.sent("bistro-agos")[..2], ["/clear", "<Enter>"]);
     let history = hub.lanes.infos(&hub).await.unwrap().remove(0).history;
     assert!(history.iter().any(|a| a.kind == "clear" && a.message.contains("context at 41%") && a.message.contains("did not change")), "{history:?}");
 
     // The pane's own line still wins.
     let printed = claude("● ok", "✻ Cooked for 3m 2s", "", "12% context used");
     let p = parse_pane(&printed, now(), ict());
-    let cfg = hub.lanes.config("groove-agos").unwrap();
+    let cfg = hub.lanes.config("bistro-agos").unwrap();
     assert_eq!(read_context(&cfg, &p).source, Some("pane"));
 }

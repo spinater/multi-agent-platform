@@ -20,7 +20,7 @@ async fn hub_with(base: &str, extra: &str) -> (Arc<Hub>, tempfile::TempDir, temp
     std::fs::write(&env, format!("# bot\nexport MAP_TG_TEST_TOKEN=\"{TOKEN}\"\n")).unwrap();
     let toml = format!(
         "[telegram]\nenabled = true\ntoken_env = \"MAP_TG_TEST_TOKEN\"\nenv_file = \"{}\"\nchat_id = -100\napi_base = \"{}\"\n{extra}\n\
-         [[lanes]]\nname = \"groove-agos\"\nsession_match = [\"groove*\"]\n[[lanes]]\nname = \"manager-agos\"\nactions = false\n",
+         [[lanes]]\nname = \"bistro-agos\"\nsession_match = [\"bistro*\"]\n[[lanes]]\nname = \"manager-agos\"\nactions = false\n",
         env.display(),
         base
     );
@@ -135,29 +135,29 @@ async fn offset_is_persisted_and_watch_toggles_a_lane() {
     assert_eq!(sent.len(), 1, "user 8 is ignored silently");
     let rows = sent[0]["reply_markup"]["inline_keyboard"].as_array().unwrap();
     assert_eq!(rows.len(), 2);
-    assert_eq!(rows[0][0]["callback_data"], "t:groove-agos");
-    assert!(sent[0]["text"].as_str().unwrap().contains("✅ watching · groove-agos"));
+    assert_eq!(rows[0][0]["callback_data"], "t:bistro-agos");
+    assert!(sent[0]["text"].as_str().unwrap().contains("✅ watching · bistro-agos"));
 
     // The next poll starts from the stored offset.
     poll_once(&hub, TOKEN).await.unwrap();
     assert_eq!(tg.calls("getUpdates")[1]["offset"], 43);
 
-    let press = json!({ "update_id": 43, "callback_query": { "id": "cb1", "from": { "id": 7 }, "data": "t:groove-agos",
+    let press = json!({ "update_id": 43, "callback_query": { "id": "cb1", "from": { "id": 7 }, "data": "t:bistro-agos",
         "message": { "message_id": 9, "chat": { "id": -100 } } } });
     tg.reply("getUpdates", 200, json!({ "ok": true, "result": [press] }));
     poll_once(&hub, TOKEN).await.unwrap();
-    assert!(!hub.lanes.config("groove-agos").unwrap().watch);
+    assert!(!hub.lanes.config("bistro-agos").unwrap().watch);
     assert_eq!(tg.calls("answerCallbackQuery")[0]["text"], "watching off ⏸");
     let edit = &tg.calls("editMessageText")[0];
     assert_eq!(edit["message_id"], 9);
-    assert!(edit["text"].as_str().unwrap().contains("⏸ off · groove-agos"));
+    assert!(edit["text"].as_str().unwrap().contains("⏸ off · bistro-agos"));
     assert_eq!(hub.store.runtime_setting("telegram.offset").await.unwrap().as_deref(), Some("44"));
 
     // /status answers with the report; the muted lane is one line.
     tg.reply("getUpdates", 200, json!({ "ok": true, "result": [update(44, 7, "/status")] }));
     poll_once(&hub, TOKEN).await.unwrap();
     let last = tg.texts().pop().unwrap();
-    assert!(last.contains("groove-agos") && last.contains("paused via /watch"), "{last}");
+    assert!(last.contains("bistro-agos") && last.contains("paused via /watch"), "{last}");
     assert!(tg.tokens().iter().all(|t| t == TOKEN));
 }
 
@@ -195,9 +195,9 @@ async fn notices_follow_the_lane_mute_and_task_events() {
         task_id: task,
         message: msg.into(),
     };
-    assert!(notice(&hub, &ev("lane.card_done", Some("groove-agos"), None, "✅ card 1 finished")).is_some());
-    hub.lanes.update(&hub, "groove-agos", crate::lanes::LanePatch { watch: Some(false), ..Default::default() }).await.unwrap();
-    assert!(notice(&hub, &ev("lane.card_done", Some("groove-agos"), None, "✅ card 1 finished")).is_none(), "muted");
+    assert!(notice(&hub, &ev("lane.card_done", Some("bistro-agos"), None, "✅ card 1 finished")).is_some());
+    hub.lanes.update(&hub, "bistro-agos", crate::lanes::LanePatch { watch: Some(false), ..Default::default() }).await.unwrap();
+    assert!(notice(&hub, &ev("lane.card_done", Some("bistro-agos"), None, "✅ card 1 finished")).is_none(), "muted");
     assert!(notice(&hub, &ev("lane.tell", Some("manager-agos"), None, "x")).is_none(), "not a notice");
     assert_eq!(notice(&hub, &ev("task.failed", None, Some(4), "Failed: verify")).unwrap(), "❌ MAP · task #4 failed: verify");
     assert!(notice(&hub, &ev("task.held", None, Some(5), "Reflex: #5 is unclear")).unwrap().contains("held by intake"));
