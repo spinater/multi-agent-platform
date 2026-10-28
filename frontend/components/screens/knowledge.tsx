@@ -13,6 +13,7 @@ import type { KnowledgeOverview } from "@/lib/generated/KnowledgeOverview";
 import { useT } from "@/lib/i18n";
 
 import { useApp } from "../app-context";
+import { RagSwitch } from "../knowledge/rag-switch";
 import { DocViewer } from "../knowledge/doc-viewer";
 import { KnowledgeGraphView } from "../knowledge/graph";
 import { Box, Browse, Budgets, Health, Queries, SearchBox } from "../knowledge/sections";
@@ -226,6 +227,7 @@ export function KnowledgeScreen() {
               <Health data={data} projectName={projectName} known={known} onOpen={openDoc} />
               <Budgets data={data} known={known} onOpen={openDoc} />
             </div>
+            <RagSwitch slug={slug} data={data} onChange={() => setTick((t) => t + 1)} />
             <SearchBox data={data} onOpen={openDoc} />
             <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
               <Browse data={data} now={now} onOpen={openDoc} />

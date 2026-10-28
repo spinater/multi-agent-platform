@@ -21,4 +21,8 @@ rulebooks: Array<string>, card_line_cap: number, card_line_warn: number, ruleboo
 /**
  * Agent scratch folders, checked for size and for copies of the repo inside them.
  */
-scratch: Array<string>, scratch_byte_warn: number, };
+scratch: Array<string>, scratch_byte_warn: number, 
+/**
+ * RAG (`rag.rs`): agents are told to search this knowledge and read only the parts they need; off: refused.
+ */
+rag: boolean, };

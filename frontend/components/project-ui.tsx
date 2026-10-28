@@ -229,7 +229,7 @@ export const DEFAULT_KNOWLEDGE: KnowledgeSettings = {
   rulebook_byte_cap: 60_000,
   rulebook_byte_warn: 52_000,
   scratch: [".scratch"],
-  scratch_byte_warn: 2 * 1024 * 1024 * 1024,
+  scratch_byte_warn: 2 * 1024 * 1024 * 1024, rag: true,
 };
 
 export const DEFAULT_BRANCHES: ProjectBranches = { mode: "shared", base: null, land: "merge", setup: [], copy: [] };

@@ -235,12 +235,6 @@ impl Orchestrator {
                  {{\"state\": \"<the facts; English reads best, Thai goes through the project's glossary>\", \"questions\": [{{\"id\", \"kind\": \"choice\"|\"score\"|\"noul\", \"prompt\", \"options\"}}]}}. \
                  Each answer has a `lane`; `abstain` means nobody decided, so handle it yourself.\n"
             ));
-            p.push_str(
-                "- Before you start, search the project's knowledge (its docs, requirements, past tasks and their outcomes, approved plans): \
-                 `curl -s -G -H \"Authorization: Bearer $MAP_PROJECT_TOKEN\" \"$MAP_KNOWLEDGE_URL/search\" --data-urlencode \"q=<a few words>\"` \
-                 (terms of 3+ characters, Thai or English; `&kind=card|requirement|task|rulebook|doc|memory`), then read a hit with \
-                 `curl -s -G -H \"Authorization: Bearer $MAP_PROJECT_TOKEN\" \"$MAP_KNOWLEDGE_URL/doc\" --data-urlencode \"path=<path>\"` or open the file.\n",
-            );
         }
         if let Some(failure) = previous_failure {
             p.push_str(&format!("\nThe previous attempt did not pass. Fix this first:\n```\n{}\n```\n", tail(failure, 2500)));
@@ -376,7 +370,7 @@ impl Orchestrator {
             self.fail_for_person(task, reason).await?;
             return Ok(false);
         }
-        let prompt = match &step {
+        let prompt = crate::rag::with_hint(&self.hub, &task, match &step {
             Some(s) => {
                 let view = Task { prompt: s.prompt.clone(), ..task.clone() };
                 self.build_prompt(&view, &session, s.failure.as_deref(), &s.verify)
@@ -385,7 +379,8 @@ impl Orchestrator {
                 let previous_failure = if task.attempts > 1 { task.result.clone() } else { None };
                 self.build_prompt(&task, &session, previous_failure.as_deref(), &crate::project_settings::verify(&self.hub, &task).await)
             }
-        };
+        })
+        .await;
         let req = LaunchRequest {
             name: Some(session.clone()),
             provider: provider.clone(),

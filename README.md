@@ -49,6 +49,10 @@ nothing is tied to one repository, session name or provider.
   - **Reflex updates** (`backend/src/reflex_update.rs`, `[reflex.update]`): Reflex is a row of the update bell. A new
     release (GitHub's latest `tag_name`) is announced once; Run update installs it with the release installer in
     `<prefix>update-reflex`, then every Reflex (projects', gates', chat) restarts on it. `auto = true` installs unasked.
+  - **RAG switch** (`backend/src/rag.rs`, `settings.knowledge.rag`, on by default; Knowledge screen): on, every task's
+    prompt tells the agent to search the knowledge first; an agent reading a document over ~2,000 tokens gets its
+    outline and reads one `section=` at a time (`full=1` for all). Off, agents' searches and reads get 403. Searches
+    return at most ~1,500 tokens of hits, and every search and read is logged with its tokens (`knowledge_log.rs`).
     Agents started in a project get the endpoint as `$MAP_DECIDE_URL`, and their prompt tells them to use it.
     With `api_token` set they also get `$MAP_PROJECT_TOKEN` (and `$MAP_API_URL`): a token derived from the API token
     that opens only that project's decide/feedback/decision-log endpoints and its corpus (files and `corpus.git`).

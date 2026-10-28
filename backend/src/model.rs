@@ -2493,6 +2493,8 @@ pub struct KnowledgeSettings {
     pub scratch: Vec<String>,
     #[ts(type = "number")]
     pub scratch_byte_warn: u64,
+    /// RAG (`rag.rs`): agents are told to search this knowledge and read only the parts they need; off: refused.
+    pub rag: bool,
 }
 
 impl Default for KnowledgeSettings {
@@ -2507,6 +2509,7 @@ impl Default for KnowledgeSettings {
             rulebook_byte_warn: 52_000,
             scratch: vec![".scratch".into()],
             scratch_byte_warn: 2 * 1024 * 1024 * 1024,
+            rag: true,
         }
     }
 }

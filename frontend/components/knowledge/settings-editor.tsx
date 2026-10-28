@@ -8,7 +8,7 @@ import { useState } from "react";
 import type { KnowledgeSettings } from "@/lib/generated/KnowledgeSettings";
 
 import { ListEditor, fmtBytes } from "../branches";
-import { DEFAULT_KNOWLEDGE, Field, TextInput } from "../project-ui";
+import { DEFAULT_KNOWLEDGE, Field, TextInput, Toggle } from "../project-ui";
 import { fmtKB } from "./shared";
 
 const MB = 1024 * 1024;
@@ -39,6 +39,9 @@ export function KnowledgeEditor({ value, onChange }: { value: KnowledgeSettings;
   const d = DEFAULT_KNOWLEDGE;
   return (
     <div className="flex flex-col gap-4">
+      <Field label="RAG for agents" hint="On: task prompts tell agents to search this knowledge and read only the sections they need. Off: their searches and reads are refused.">
+        <Toggle on={value.rag} onClick={() => set({ rag: !value.rag })} label="RAG for agents" />
+      </Field>
       <ListEditor title="indexed folders" hint="Markdown and text files under these folders are searchable; rulebooks are added on their own." placeholder=".docs" items={value.dirs} onChange={(dirs) => set({ dirs })} />
       <Field label="Index" hint="The cards' index; the folder it is in holds the cards, each listing what it summarises under sources: in its frontmatter.">
         <TextInput value={value.index} onChange={(e) => set({ index: e.target.value })} placeholder={d.index} />

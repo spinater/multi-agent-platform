@@ -540,13 +540,15 @@ pub async fn knowledge_dismiss(State(hub): State<Arc<Hub>>, UrlPath(slug): UrlPa
     Ok(Json(crate::knowledge::overview(&hub, &project, false).await?))
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Default)]
+#[serde(default)]
 pub struct KnowledgeQueryParams {
-    #[serde(default)]
     q: String,
     kind: Option<String>,
     limit: Option<u32>,
     path: Option<String>,
+    section: Option<String>,
+    full: bool,
 }
 
 /// The caller is one of the project's agents when it holds the project token rather than the API token.
@@ -560,19 +562,18 @@ fn searched_by(hub: &Hub, slug: &str, headers: &axum::http::HeaderMap) -> &'stat
 }
 
 pub async fn knowledge_search(State(hub): State<Arc<Hub>>, UrlPath(slug): UrlPath<String>, headers: axum::http::HeaderMap, Query(p): Query<KnowledgeQueryParams>) -> ApiResult<crate::model::KnowledgeSearch> {
-    let project = load(&hub, &slug).await?;
-    let kind = match p.kind.as_deref().filter(|k| !k.is_empty()) {
-        Some(k) => Some(crate::knowledge::parse_kind(k).ok_or_else(|| ApiError(StatusCode::BAD_REQUEST, format!("unknown kind `{k}`")))?),
-        None => None,
-    };
-    let by = searched_by(&hub, &slug, &headers);
+    let (project, by) = (load(&hub, &slug).await?, searched_by(&hub, &slug, &headers));
+    crate::rag::refused(&project, by).map_or(Ok(()), |why| Err(ApiError(StatusCode::FORBIDDEN, why)))?;
+    let kind = p.kind.as_deref().filter(|k| !k.is_empty()).map(|k| crate::knowledge::parse_kind(k).ok_or_else(|| ApiError(StatusCode::BAD_REQUEST, format!("unknown kind `{k}`")))).transpose()?;
     Ok(Json(crate::knowledge::search(&hub, &project, &p.q, kind, p.limit.unwrap_or(20), by).await?))
 }
 
 pub async fn knowledge_doc(State(hub): State<Arc<Hub>>, UrlPath(slug): UrlPath<String>, headers: axum::http::HeaderMap, Query(p): Query<KnowledgeQueryParams>) -> ApiResult<crate::model::KnowledgeDocBody> {
-    let (project, path) = (load(&hub, &slug).await?, p.path.unwrap_or_default());
-    let found = crate::knowledge::doc(&hub, &project, &path).await?.ok_or_else(|| not_found("document"))?;
-    crate::knowledge_log::record_doc(&hub, &slug, &path, &found.body, searched_by(&hub, &slug, &headers)).await;
+    let (project, path, by) = (load(&hub, &slug).await?, p.path.unwrap_or_default(), searched_by(&hub, &slug, &headers));
+    crate::rag::refused(&project, by).map_or(Ok(()), |why| Err(ApiError(StatusCode::FORBIDDEN, why)))?;
+    let mut found = crate::knowledge::doc(&hub, &project, &path).await?.ok_or_else(|| not_found("document"))?;
+    found.body = crate::rag::shaped(&path, &found.body, p.section.as_deref(), p.full || by == "owner");
+    crate::knowledge_log::record_doc(&hub, &slug, &path, &found.body, by).await;
     Ok(Json(found))
 }
 

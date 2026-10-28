@@ -6,6 +6,7 @@
 #   map-ask "<facts>" --question "Does this need a migration?" --yes-no                  yes, no, or abstain
 #   map-ask --search "refund rules"                                                      knowledge and past tasks
 #   map-ask --doc .docs/knowledge/domain/refunds.md                                      one document
+#   map-ask --doc CLAUDE.md --section "Deploy"                                           one section of it
 #
 # Prints the answer (`light`, `yes`) or `abstain: <why>`; exits 0 on an answer, 3 on abstain. An abstain means nobody
 # decided: decide yourself. Facts read best in English (Thai goes through the project's glossary).
@@ -24,11 +25,11 @@ MAP_URL="${MAP_URL%/}"
 MAP_TOKEN="${MAP_TOKEN:-${MAP_PROJECT_TOKEN:-}}"
 
 usage() {
-  sed -n '2,15p' "$0" | sed 's/^# \{0,1\}//'
+  sed -n '2,16p' "$0" | sed 's/^# \{0,1\}//'
   exit "${1:-2}"
 }
 
-state="" question="" options="" yesno=0 search="" doc="" project="${MAP_PROJECT:-}"
+state="" question="" options="" yesno=0 search="" doc="" section="" project="${MAP_PROJECT:-}"
 while [ $# -gt 0 ]; do
   case "$1" in
     --question) question="${2:-}"; shift 2 || usage ;;
@@ -36,6 +37,7 @@ while [ $# -gt 0 ]; do
     --yes-no) yesno=1; shift ;;
     --search) search="${2:-}"; shift 2 || usage ;;
     --doc) doc="${2:-}"; shift 2 || usage ;;
+    --section) section="${2:-}"; shift 2 || usage ;;
     --project) project="${2:-}"; shift 2 || usage ;;
     -h|--help) usage 0 ;;
     -*) echo "map-ask: unknown argument $1" >&2; usage ;;
@@ -71,7 +73,11 @@ if [ -n "$search" ]; then
   exit 0
 fi
 if [ -n "$doc" ]; then
-  api -G "$base/knowledge/doc" --data-urlencode "path=$doc"
+  if [ -n "$section" ]; then
+    api -G "$base/knowledge/doc" --data-urlencode "path=$doc" --data-urlencode "section=$section"
+  else
+    api -G "$base/knowledge/doc" --data-urlencode "path=$doc"
+  fi
   echo
   exit 0
 fi

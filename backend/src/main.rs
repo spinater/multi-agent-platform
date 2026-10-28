@@ -28,6 +28,7 @@ mod plans;
 mod project_git;
 mod project_settings;
 mod projects;
+mod rag;
 mod reflex;
 mod reflex_screen;
 mod reflex_update;
