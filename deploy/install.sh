@@ -147,6 +147,13 @@ if [ "$MODE" = system ]; then
   # One with the machine: `map` and the lane helpers on PATH like any other tool.
   mkdir -p "$HOME/.local/bin"
   for b in map map-tell map-ask; do ln -sf "$PREFIX/bin/$b" "$HOME/.local/bin/$b"; done
+else
+  # A lane helper copied onto PATH by hand would go stale: it becomes a link to the one installed here.
+  for b in map-tell map-ask; do
+    if [ -f "$HOME/.local/bin/$b" ] && [ ! -L "$HOME/.local/bin/$b" ] && grep -q '^# map-' "$HOME/.local/bin/$b"; then
+      ln -sf "$PREFIX/bin/$b" "$HOME/.local/bin/$b"
+    fi
+  done
 fi
 rm -rf "$PREFIX/dashboard" && cp -R "$REPO/frontend/out" "$PREFIX/dashboard"
 
