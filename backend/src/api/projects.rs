@@ -569,10 +569,11 @@ pub async fn knowledge_search(State(hub): State<Arc<Hub>>, UrlPath(slug): UrlPat
     Ok(Json(crate::knowledge::search(&hub, &project, &p.q, kind, p.limit.unwrap_or(20), by).await?))
 }
 
-pub async fn knowledge_doc(State(hub): State<Arc<Hub>>, UrlPath(slug): UrlPath<String>, Query(p): Query<KnowledgeQueryParams>) -> ApiResult<crate::model::KnowledgeDocBody> {
-    let project = load(&hub, &slug).await?;
-    let path = p.path.unwrap_or_default();
-    crate::knowledge::doc(&hub, &project, &path).await?.map(Json).ok_or_else(|| not_found("document"))
+pub async fn knowledge_doc(State(hub): State<Arc<Hub>>, UrlPath(slug): UrlPath<String>, headers: axum::http::HeaderMap, Query(p): Query<KnowledgeQueryParams>) -> ApiResult<crate::model::KnowledgeDocBody> {
+    let (project, path) = (load(&hub, &slug).await?, p.path.unwrap_or_default());
+    let found = crate::knowledge::doc(&hub, &project, &path).await?.ok_or_else(|| not_found("document"))?;
+    crate::knowledge_log::record_doc(&hub, &slug, &path, &found.body, searched_by(&hub, &slug, &headers)).await;
+    Ok(Json(found))
 }
 
 // ---- parallel tasks (parallel.rs)

@@ -447,9 +447,11 @@ export function Browse({ data, now, onOpen }: { data: KnowledgeOverview; now: nu
 export function Queries({ data, now }: { data: KnowledgeOverview; now: number }) {
   const [by, setBy] = useState<"all" | "agent" | "owner">("all");
   const list = data.recent_queries.filter((q) => by === "all" || q.by === by);
-  const agents = data.recent_queries.filter((q) => q.by === "agent").length;
+  const agents = data.recent_queries.filter((q) => q.by !== "owner");
+  const tokens = (kind: string) => agents.filter((q) => q.kind === kind).reduce((n, q) => n + q.tokens, 0);
+  const note = `agents: ${plural(agents.length, "call")} · ~${tokens("search").toLocaleString()} tokens in searches, ~${tokens("doc").toLocaleString()} in documents read`;
   return (
-    <Box title="Agent searches" glyph="◎" note={`${agents} by agents · newest first`}>
+    <Box title="Agent searches and reads" glyph="◎" note={note}>
       <div className="flex flex-wrap gap-1.5">
         {(["all", "agent", "owner"] as const).map((v) => (
           <Chip key={v} active={by === v} onClick={() => setBy(v)}>
@@ -467,12 +469,15 @@ export function Queries({ data, now }: { data: KnowledgeOverview; now: number })
         <ul className="flex flex-col gap-1">
           {list.map((q, i) => (
             <li key={`${q.at}-${i}`} className="flex items-baseline gap-2.5 font-mono text-[11.5px]">
-              <span className={clsx("w-11 shrink-0 text-[10px] font-semibold tracking-[0.1em] uppercase", q.by === "agent" ? "text-accent" : "text-muted")}>{q.by === "agent" ? "agent" : "you"}</span>
+              <span className={clsx("w-14 shrink-0 text-[10px] font-semibold tracking-[0.1em] uppercase", q.by !== "owner" ? "text-accent" : "text-muted")}>{q.by === "owner" ? "you" : q.by}</span>
               <span className="min-w-0 flex-1 truncate text-text" title={q.query}>
                 {q.query}
               </span>
               <span className={clsx("shrink-0", q.hits === 0 ? "text-warn" : "text-text-2")} title={q.hits === 0 ? "found nothing: a gap in the knowledge?" : undefined}>
-                {plural(q.hits, "hit")}
+                {q.kind === "doc" ? "read" : plural(q.hits, "hit")}
+              </span>
+              <span className={clsx("w-20 shrink-0 text-right", q.tokens > 4000 ? "text-warn" : "text-muted")} title="tokens MAP returned (about 4 characters each)">
+                ~{q.tokens.toLocaleString()} tok
               </span>
               <span className="w-16 shrink-0 text-right text-muted">{ago(new Date(q.at).getTime(), now)}</span>
             </li>

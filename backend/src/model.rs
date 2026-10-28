@@ -2622,8 +2622,11 @@ pub struct KnowledgeQuery {
     pub at: DateTime<Utc>,
     pub query: String,
     pub hits: u32,
-    /// `agent` or `owner`.
+    /// `agent`, `manager` or `owner`.
     pub by: String,
+    /// `search` (`query` is the search) or `doc` (a document read, `query` is its path), and the tokens returned.
+    pub kind: String,
+    pub tokens: u32,
 }
 
 /// `GET /api/projects/{slug}/knowledge`: everything the Knowledge screen shows for one project.

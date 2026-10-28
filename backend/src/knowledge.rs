@@ -21,7 +21,7 @@ use sqlx::Row;
 
 use crate::hub::Hub;
 use crate::model::{
-    KindCount, KnowledgeCheck, KnowledgeDoc, KnowledgeDocBody, KnowledgeHit, KnowledgeIssue, KnowledgeKind, KnowledgeOverview, KnowledgeQuery,
+    KindCount, KnowledgeCheck, KnowledgeDoc, KnowledgeDocBody, KnowledgeHit, KnowledgeIssue, KnowledgeKind, KnowledgeOverview,
     KnowledgeSearch, KnowledgeSettings, Level, PlanStatus, Project, KnowledgeStats, KnowledgeSuggestion, RulebookSize, ScratchInfo, SuggestVerdict, TaskStatus,
 };
 
@@ -391,7 +391,7 @@ pub async fn overview(hub: &Hub, project: &Project, force: bool) -> Result<Knowl
         issues,
         rulebooks,
         scratch,
-        recent_queries: recent_queries(hub, &project.slug, 50).await,
+        recent_queries: crate::knowledge_log::recent(hub, &project.slug, 200, true).await,
         suggestion,
     })
 }
@@ -791,20 +791,9 @@ pub async fn search(hub: &Hub, project: &Project, q: &str, kind: Option<Knowledg
             }
         }
     }
+    let (hits, tokens) = crate::knowledge_log::within_budget(hits);
     if !q.is_empty() {
-        let _ = sqlx::query("INSERT INTO knowledge_queries (project, at, query, hits, by_whom) VALUES (?, ?, ?, ?, ?)")
-            .bind(&project.slug)
-            .bind(Utc::now())
-            .bind(cut(q, 300))
-            .bind(hits.len() as i64)
-            .bind(by)
-            .execute(&hub.store.pool)
-            .await;
-        let _ = sqlx::query("DELETE FROM knowledge_queries WHERE project = ? AND id NOT IN (SELECT id FROM knowledge_queries WHERE project = ? ORDER BY id DESC LIMIT 500)")
-            .bind(&project.slug)
-            .bind(&project.slug)
-            .execute(&hub.store.pool)
-            .await;
+        crate::knowledge_log::record(hub, &project.slug, "search", q, hits.len(), tokens, by).await;
     }
     Ok(KnowledgeSearch { query: q.to_string(), hits, took_ms: started.elapsed().as_millis() as u64 })
 }
@@ -881,10 +870,7 @@ pub async fn doc(hub: &Hub, project: &Project, path: &str) -> Result<Option<Know
     Ok(Some(KnowledgeDocBody { doc, body }))
 }
 
-pub async fn recent_queries(hub: &Hub, slug: &str, limit: i64) -> Vec<KnowledgeQuery> {
-    let rows = sqlx::query("SELECT at, query, hits, by_whom FROM knowledge_queries WHERE project = ? ORDER BY id DESC LIMIT ?").bind(slug).bind(limit).fetch_all(&hub.store.pool).await.unwrap_or_default();
-    rows.iter().map(|r| KnowledgeQuery { at: r.get("at"), query: r.get("query"), hits: r.get::<i64, _>("hits") as u32, by: r.get("by_whom") }).collect()
-}
+pub use crate::knowledge_log::recent_queries;
 
 #[cfg(test)]
 mod tests {

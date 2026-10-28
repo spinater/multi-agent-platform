@@ -5,6 +5,10 @@
  */
 export type KnowledgeQuery = { at: string, query: string, hits: number, 
 /**
- * `agent` or `owner`.
+ * `agent`, `manager` or `owner`.
  */
-by: string, };
+by: string, 
+/**
+ * `search` (`query` is the search) or `doc` (a document read, `query` is its path), and the tokens returned.
+ */
+kind: string, tokens: number, };

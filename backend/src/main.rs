@@ -14,6 +14,7 @@ mod hub;
 mod intake;
 mod knowledge;
 mod knowledge_graph;
+mod knowledge_log;
 mod lanes;
 mod manager;
 mod mcp;
