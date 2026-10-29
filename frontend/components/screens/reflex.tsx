@@ -27,6 +27,7 @@ import {
   smallest,
   toLlm,
 } from "../reflex/lib";
+import { Lessons } from "../reflex/lessons";
 import { Log } from "../reflex/log";
 import { Playground } from "../reflex/playground";
 import { QuestionsModal, starterQuestion } from "../reflex/questions";
@@ -357,7 +358,10 @@ function ProjectReflex({ info }: { info: ProjectInfo }) {
           emptyText={p.questions.length ? "No decisions yet. Ask one in the playground." : "No questions defined yet, so nothing has been routed."}
         />
       </RxSection>
-      <RxSection id="rx-thai" n="06" title="Thai words" meta="Thai → English for Reflex">
+      <RxSection id="rx-lessons" n="06" title="Lessons" meta="what the corpus learned">
+        <Lessons slug={p.slug} tick={decisions.length} toast={toast} />
+      </RxSection>
+      <RxSection id="rx-thai" n="07" title="Thai words" meta="Thai → English for Reflex">
         <ThaiWords info={info} toast={toast} />
       </RxSection>
       {editing && (

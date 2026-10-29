@@ -8,16 +8,24 @@
 //! project has no threshold, enough lessons fit one (the ρ-quantile of Reflex's confidence on the ones it got right,
 //! kept only if Reflex is right on at least 90% of the answers it would then give). An option that is not a valid
 //! domain name, Thai the glossary cannot read, or a ninth domain is not learned.
+//!
+//! The Reflex screen lists the lessons (`GET /projects/{slug}/corpus/lessons`); removing one (`DELETE …/{id}`)
+//! takes its line out of the corpus and the lesson out of the threshold's data, so a wrong panel answer is undone.
 
 use std::collections::HashMap;
 use std::sync::{Arc, LazyLock, Mutex};
 use std::time::Duration;
 
-use anyhow::Result;
-use chrono::Utc;
+use anyhow::{Context, Result};
+use axum::Json;
+use axum::extract::{Path as UrlPath, State};
+use axum::http::StatusCode;
+use chrono::{DateTime, Utc};
+use serde::Serialize;
 use serde_json::Value;
 use sqlx::Row;
 use tokio::time::Instant;
+use ts_rs::TS;
 
 use crate::decide::{for_reflex, quantile_threshold, same};
 use crate::hub::Hub;
@@ -38,6 +46,26 @@ const RHO: f64 = 0.3;
 const SETTLE: Duration = Duration::from_secs(60);
 
 static PENDING: LazyLock<Mutex<HashMap<String, Instant>>> = LazyLock::new(Default::default);
+
+/// One answer the corpus learned, with what Reflex said before it learned it.
+#[derive(Debug, Clone, Serialize, TS)]
+#[ts(export)]
+pub struct CorpusLesson {
+    #[ts(type = "number")]
+    pub id: i64,
+    pub at: DateTime<Utc>,
+    #[ts(type = "number")]
+    pub decision_id: i64,
+    pub domain: String,
+    /// `panel` or `owner`.
+    pub by: String,
+    pub reflex_answer: Option<String>,
+    pub confidence: Option<f64>,
+    /// Reflex's own answer was this one already.
+    pub correct: bool,
+    /// The line it added to `<domain>/learned.md`.
+    pub example: String,
+}
 
 /// The corpus domain for an option: lower case, spaces as `_`; `None` when it is not a valid domain name.
 pub fn domain(option: &str) -> Option<String> {
@@ -93,13 +121,14 @@ async fn try_learn(hub: &Hub, project: &Project, d: &Decision, answer: &Value, b
         return Ok(());
     }
     let path = format!("{domain}/{FILE}");
-    let Some(content) = with_example(repo::read(&corpus, &path).await.as_deref(), &domain, &line(&read.state)) else { return Ok(()) };
+    let example = line(&read.state);
+    let Some(content) = with_example(repo::read(&corpus, &path).await.as_deref(), &domain, &example) else { return Ok(()) };
     let mut files = vec![(path, Some(content))];
     if placeholder {
         files.push(("example/example.md".into(), None));
     }
     repo::commit(&corpus, &files, &format!("Learn `{domain}` from decision {} ({by})", d.id)).await?;
-    record(hub, project, d, answer, &domain, by).await;
+    record(hub, project, d, answer, &domain, by, &example).await;
     hub.event(Level::Info, "reflex.learn", None, None, format!("{}: Reflex learned `{domain}` from decision {} ({by})", project.slug, d.id)).await;
     PENDING.lock().unwrap().insert(project.slug.clone(), Instant::now());
     if project.threshold.is_none() {
@@ -108,9 +137,10 @@ async fn try_learn(hub: &Hub, project: &Project, d: &Decision, answer: &Value, b
     Ok(())
 }
 
-async fn record(hub: &Hub, project: &Project, d: &Decision, answer: &Value, domain: &str, by: &str) {
+async fn record(hub: &Hub, project: &Project, d: &Decision, answer: &Value, domain: &str, by: &str, example: &str) {
     let reflex_said = d.reflex_answer.as_str().map(String::from);
-    let _ = sqlx::query("INSERT INTO corpus_lessons (project, at, decision_id, domain, by_whom, reflex_answer, confidence, correct) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
+    let sql = "INSERT INTO corpus_lessons (project, at, decision_id, domain, by_whom, reflex_answer, confidence, correct, example) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)";
+    let _ = sqlx::query(sql)
         .bind(&project.slug)
         .bind(Utc::now())
         .bind(d.id)
@@ -119,8 +149,74 @@ async fn record(hub: &Hub, project: &Project, d: &Decision, answer: &Value, doma
         .bind(reflex_said)
         .bind(d.confidence)
         .bind(!d.reflex_answer.is_null() && same(&d.reflex_answer, answer))
+        .bind(example)
         .execute(&hub.store.pool)
         .await;
+}
+
+/// The project's lessons, newest first.
+pub async fn lessons(hub: &Hub, slug: &str, limit: i64) -> Result<Vec<CorpusLesson>> {
+    let rows = sqlx::query("SELECT * FROM corpus_lessons WHERE project = ? ORDER BY id DESC LIMIT ?").bind(slug).bind(limit).fetch_all(&hub.store.pool).await?;
+    Ok(rows
+        .iter()
+        .map(|r| CorpusLesson {
+            id: r.get("id"),
+            at: r.get("at"),
+            decision_id: r.get("decision_id"),
+            domain: r.get("domain"),
+            by: r.get("by_whom"),
+            reflex_answer: r.get("reflex_answer"),
+            confidence: r.get("confidence"),
+            correct: r.get("correct"),
+            example: r.get("example"),
+        })
+        .collect())
+}
+
+/// `learned` without the line `example`, or `None` when no example is left (the file goes).
+fn without_example(learned: &str, example: &str) -> Option<String> {
+    let kept: Vec<&str> = learned.lines().filter(|l| *l != example).collect();
+    kept.iter().any(|l| l.starts_with("- ")).then(|| format!("{}\n", kept.join("\n")))
+}
+
+/// Removes lesson `id`: its line from the corpus (Reflex restarts on it) and its row from the threshold's data.
+pub async fn remove(hub: &Hub, slug: &str, id: i64) -> Result<Option<CorpusLesson>> {
+    let Some(lesson) = lessons(hub, slug, 1000).await?.into_iter().find(|l| l.id == id) else { return Ok(None) };
+    let mut example = lesson.example.clone();
+    if example.is_empty() {
+        // A lesson from before examples were kept: its line is the decision's facts, as they were learned.
+        let project = hub.store.project(slug).await?.context("no such project")?;
+        let d = hub.store.decision(slug, lesson.decision_id).await?.context("its decision is gone")?;
+        example = line(&for_reflex(&project, &d.state, std::slice::from_ref(&d.question)).state);
+    }
+    let (corpus, path) = (hub.corpus_repo(slug), format!("{}/{FILE}", lesson.domain));
+    if let Some(learned) = repo::read(&corpus, &path).await.filter(|t| t.lines().any(|l| l == example)) {
+        repo::commit(&corpus, &[(path, without_example(&learned, &example))], &format!("Unlearn `{}` from decision {}", lesson.domain, lesson.decision_id)).await?;
+        PENDING.lock().unwrap().insert(slug.to_string(), Instant::now());
+    }
+    sqlx::query("DELETE FROM corpus_lessons WHERE project = ? AND id = ?").bind(slug).bind(id).execute(&hub.store.pool).await?;
+    hub.event(Level::Info, "reflex.learn", None, None, format!("{slug}: lesson `{}` from decision {} removed", lesson.domain, lesson.decision_id)).await;
+    Ok(Some(lesson))
+}
+
+type ApiResult<T> = std::result::Result<Json<T>, (StatusCode, String)>;
+
+fn failed(err: anyhow::Error) -> (StatusCode, String) {
+    (StatusCode::INTERNAL_SERVER_ERROR, format!("{err:#}"))
+}
+
+/// `GET /api/projects/{slug}/corpus/lessons`: the newest 200.
+pub async fn list_api(State(hub): State<Arc<Hub>>, UrlPath(slug): UrlPath<String>) -> ApiResult<Vec<CorpusLesson>> {
+    lessons(&hub, &slug, 200).await.map(Json).map_err(failed)
+}
+
+/// `DELETE /api/projects/{slug}/corpus/lessons/{id}`.
+pub async fn remove_api(State(hub): State<Arc<Hub>>, UrlPath((slug, id)): UrlPath<(String, i64)>) -> ApiResult<CorpusLesson> {
+    match remove(&hub, &slug, id).await {
+        Ok(Some(l)) => Ok(Json(l)),
+        Ok(None) => Err((StatusCode::NOT_FOUND, "no such lesson".into())),
+        Err(err) => Err(failed(err)),
+    }
 }
 
 /// The threshold the held-out lessons support: (confidence, Reflex was right) of the lessons Reflex answered.
@@ -232,5 +328,16 @@ mod tests {
         let n: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM corpus_lessons WHERE correct = 0").fetch_one(&hub.store.pool).await.unwrap();
         assert_eq!(n, 1, "one lesson, Reflex had said feature");
         assert!(PENDING.lock().unwrap().contains_key(&p.slug));
+        let listed = lessons(&hub, &p.slug, 10).await.unwrap();
+        assert_eq!((listed.len(), listed[0].example.as_str()), (1, "- The save button crashes the page"));
+        let other = Decision { id: 8, state: "Checkout totals are wrong".into(), ..d.clone() };
+        learn(&hub, &p, &other, &Value::from("bug"), "owner").await;
+        remove(&hub, &p.slug, listed[0].id).await.unwrap().unwrap();
+        let doc = repo::read(&hub.corpus_repo(&p.slug), "bug/learned.md").await.unwrap();
+        assert!(!doc.contains("save button") && doc.contains("- Checkout totals are wrong"), "{doc}");
+        let last = lessons(&hub, &p.slug, 10).await.unwrap()[0].id;
+        remove(&hub, &p.slug, last).await.unwrap().unwrap();
+        assert!(repo::read(&hub.corpus_repo(&p.slug), "bug/learned.md").await.is_none(), "the last example takes the file");
+        assert!(remove(&hub, &p.slug, last).await.unwrap().is_none());
     }
 }

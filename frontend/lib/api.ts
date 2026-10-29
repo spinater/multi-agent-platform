@@ -77,6 +77,7 @@ import type { TrustAnswer } from "./generated/TrustAnswer";
 import type { WorktreeEstimate } from "./generated/WorktreeEstimate";
 // Reflex screen.
 import type { ArchiveResult } from "./generated/ArchiveResult";
+import type { CorpusLesson } from "./generated/CorpusLesson";
 import type { DecisionFeedback } from "./generated/DecisionFeedback";
 import type { DecisionSummary } from "./generated/DecisionSummary";
 import type { ReflexCase } from "./generated/ReflexCase";
@@ -266,6 +267,8 @@ export const api = {
     request<DecisionFeedback>("POST", `/projects/${slug}/decisions/${id}/feedback`, body),
   /** Moves domains to `_archive/` in the corpus repo (default: the smallest until 8 are left), or back with `restore`. */
   archiveDomains: (slug: string, body: { domains?: string[]; restore?: boolean }) => request<ArchiveResult>("POST", `/projects/${slug}/corpus/archive`, body),
+  corpusLessons: (slug: string) => request<CorpusLesson[]>("GET", `/projects/${slug}/corpus/lessons`),
+  removeLesson: (slug: string, id: number) => request<CorpusLesson>("DELETE", `/projects/${slug}/corpus/lessons/${id}`),
   /** Tokens Reflex saved against what the fallbacks spent over the last `hours`; `project: null` is every project. */
   savings: (hours: number, project: string | null) => request<SavingsReport>("GET", `/reflex/savings?hours=${hours}&project=${encodeURIComponent(project ?? "")}`),
   // ---- knowledge (Knowledge screen): the project's docs, their health, search; fix tasks go through createTask

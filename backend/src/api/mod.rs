@@ -142,7 +142,6 @@ pub fn router(hub: Arc<Hub>) -> Router {
         .route("/updates", get(updates))
         .route("/updates/refresh", post(refresh_updates))
         .route("/providers/{name}/update", post(start_update))
-        // ----
         // Reflex screen: calibration cases, decision feedback and summary, corpus archive.
         .route("/projects/{slug}/cases", get(projects::cases).post(projects::add_cases))
         .route("/projects/{slug}/cases/fit", post(projects::fit_cases))
@@ -150,6 +149,7 @@ pub fn router(hub: Arc<Hub>) -> Router {
         .route("/projects/{slug}/decisions/summary", get(projects::decision_summary))
         .route("/projects/{slug}/decisions/{id}/feedback", post(projects::decision_feedback))
         .route("/projects/{slug}/corpus/archive", post(projects::archive))
+        .route("/projects/{slug}/corpus/lessons", get(crate::corpus_learn::list_api)).route("/projects/{slug}/corpus/lessons/{id}", axum::routing::delete(crate::corpus_learn::remove_api))
         .route("/reflex/savings", get(projects::savings))
         // ---- templates: lay a development process into a project's folder, then queue the init agent
         // ---- git access: MAP's SSH key, identity and host tests; a project folder's git status and sync
