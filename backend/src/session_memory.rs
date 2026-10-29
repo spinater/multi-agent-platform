@@ -4,8 +4,9 @@
 //! owner's messages and the agent's replies, never tool calls or their output, each message cut and masked
 //! (`trace::SECRETS`), and the newest part of a long session. Agents reach it only with RAG on, like all knowledge.
 //!
-//! Transcripts are read from the owner's Claude folder (`[skills] claude_transcripts`) and MAP's isolated Claude home;
-//! a file is parsed again only when it changed.
+//! Transcripts are read from MAP's Claude folder (`[skills] claude_transcripts`) and the owner's own (`~/.claude`,
+//! the claude provider's `default_home`), where the owner's lanes keep theirs; a file is parsed again only when it
+//! changed.
 
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader};
@@ -129,10 +130,11 @@ fn files(roots: &[PathBuf], workspace: &Path) -> Vec<PathBuf> {
 pub async fn docs(hub: &Hub, slug: &str) -> Vec<SessionDoc> {
     let Ok(Some(project)) = hub.store.project(slug).await else { return vec![] };
     let workspace = hub.workspace_of(&project);
-    let mut roots = vec![hub.config.skills.claude_transcripts.clone()];
-    if hub.config.agents_home.isolated() {
-        roots.push(hub.config.agents_home.dir().join("claude/projects"));
-    }
+    // MAP's own Claude folder (`claude_transcripts` follows it in isolated mode) and the owner's, where the lanes
+    // the owner runs in the project's folder keep theirs.
+    let owner = hub.config.providers.get("claude").and_then(|c| c.default_home.clone()).unwrap_or_else(|| "~/.claude".into());
+    let mut roots = vec![hub.config.skills.claude_transcripts.clone(), crate::login::expand_home(&owner).join("projects")];
+    roots.dedup();
     let cutoff = Utc::now() - Duration::days(DAYS);
     tokio::task::spawn_blocking(move || files(&roots, &workspace).iter().filter_map(|f| read(f)).filter(|d| d.3 >= cutoff).collect()).await.unwrap_or_default()
 }

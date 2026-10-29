@@ -81,10 +81,8 @@ fn tail(file: &Path) -> Option<String> {
 pub async fn tokens(hub: &Hub, slug: &str) -> Option<u64> {
     let project = hub.store.project(slug).await.ok().flatten()?;
     let workspace = hub.workspace_of(&project);
-    let mut roots = vec![hub.config.skills.claude_transcripts.clone()];
-    if hub.config.agents_home.isolated() {
-        roots.insert(0, hub.config.agents_home.dir().join("claude/projects"));
-    }
+    // `claude_transcripts` follows the folder MAP's Claude really uses (its isolated home in isolated mode).
+    let roots = [hub.config.skills.claude_transcripts.clone()];
     let name = crate::manager::session_name(hub, slug);
     tokio::task::spawn_blocking(move || {
         roots.iter().filter_map(|r| crate::skills::transcript_dir(r, &workspace)).find_map(|d| transcript(&d, &name)).and_then(|f| tail(&f)).and_then(|t| last_context(&t))
