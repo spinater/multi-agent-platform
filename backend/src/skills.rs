@@ -666,7 +666,7 @@ pub fn encode_project_dir(path: &Path) -> String {
     path.to_string_lossy().chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '-' }).collect()
 }
 
-fn transcript_dir(root: &Path, workspace: &Path) -> Option<PathBuf> {
+pub(crate) fn transcript_dir(root: &Path, workspace: &Path) -> Option<PathBuf> {
     let mut names = vec![encode_project_dir(workspace)];
     if let Ok(real) = workspace.canonicalize() {
         names.push(encode_project_dir(&real));

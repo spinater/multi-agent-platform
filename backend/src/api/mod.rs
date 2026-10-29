@@ -192,7 +192,7 @@ pub fn router(hub: Arc<Hub>) -> Router {
         .route("/lanes/{name}/tells/{verb}", axum::routing::delete(lanes::cancel_tell))
         // ---- a project's manager (manager.rs) and the project-scoped routes its token opens (manager_scope)
         .route("/projects/{slug}/manager", get(manager::get).put(manager::put))
-        .route("/projects/{slug}/manager/start", post(manager::start))
+        .route("/projects/{slug}/manager/start", post(manager::start)).route("/projects/{slug}/manager/compact", get(crate::manager_compact::get_api).post(crate::manager_compact::post_api))
         .route("/manager/instructions", get(manager::instructions))
         .route("/projects/{slug}/overview", get(manager::overview))
         // ---- the activity graph (trace.rs)

@@ -18,6 +18,7 @@ mod knowledge_graph;
 mod knowledge_log;
 mod lanes;
 mod manager;
+mod manager_compact;
 mod mcp;
 mod login;
 mod model;
@@ -34,10 +35,12 @@ mod reflex;
 mod reflex_screen;
 mod reflex_update;
 mod savings;
+mod session_memory;
 mod settings;
 mod repo;
 mod roots;
 mod rules;
+mod skill_drafts;
 mod skills;
 mod store;
 mod telegram;
@@ -149,6 +152,8 @@ async fn serve(config: Config) -> Result<()> {
     tokio::spawn(manager::run(hub.clone()));
     tokio::spawn(telegram::run(hub.clone()));
     tokio::spawn(corpus_learn::run(hub.clone()));
+    tokio::spawn(skill_drafts::run(hub.clone()));
+    tokio::spawn(manager_compact::run(hub.clone()));
     {
         let hub = hub.clone();
         tokio::spawn(async move {

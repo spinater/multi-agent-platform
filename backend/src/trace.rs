@@ -31,7 +31,7 @@ const MAX_DETAIL: usize = 300;
 
 // ---- masking and naming commands
 
-static SECRETS: LazyLock<Vec<(Regex, &'static str)>> = LazyLock::new(|| {
+pub(crate) static SECRETS: LazyLock<Vec<(Regex, &'static str)>> = LazyLock::new(|| {
     vec![
         (Regex::new(r"(?i)(authorization:\s*(?:bearer|token|basic)\s+)[^\s'\x22]+").unwrap(), "${1}***"),
         (Regex::new(r"(?i)(--?(?:token|password|passwd|pass|api[-_]?key|secret|auth)(?:=|\s+))[^\s'\x22]+").unwrap(), "${1}***"),

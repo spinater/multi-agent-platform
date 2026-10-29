@@ -10,6 +10,7 @@ import { useCallback, useEffect, useState } from "react";
 import { managerApi } from "@/lib/api";
 import { providerColor } from "@/lib/colors";
 import type { LaneInfo } from "@/lib/generated/LaneInfo";
+import type { ManagerContextInfo } from "@/lib/generated/ManagerContextInfo";
 import type { ManagerInfo } from "@/lib/generated/ManagerInfo";
 import { attachCommand } from "@/lib/tmux";
 
@@ -26,6 +27,7 @@ export function ManagerPanel({ slug }: { slug: string }) {
   const [lanes, setLanes] = useState<LaneInfo[]>([]);
   const [busy, setBusy] = useState(false);
   const [pick, setPick] = useState<{ provider: string; model: string } | null>(null);
+  const [ctx, setCtx] = useState<ManagerContextInfo | null>(null);
 
   const name = info?.session_name ?? `${server?.session_prefix ?? "map-"}mgr-${slug}`;
   const session = sessions.find((s) => s.name === name);
@@ -36,6 +38,7 @@ export function ManagerPanel({ slug }: { slug: string }) {
   const load = useCallback(() => {
     managerApi.get(slug).then(setInfo, () => {});
     managerApi.lanes(slug).then(setLanes, () => {});
+    managerApi.context(slug).then(setCtx, () => {});
   }, [slug]);
   useEffect(() => load(), [load, sessionState]);
 
@@ -78,6 +81,18 @@ export function ManagerPanel({ slug }: { slug: string }) {
     }
   };
 
+  const compact = async () => {
+    setBusy(true);
+    try {
+      setCtx(await managerApi.compact(slug));
+      toast("Manager compressing its conversation");
+    } catch (e) {
+      toast(errText(e), "bad");
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const state = info?.state ?? "off";
   return (
     <div className="grid min-w-0 gap-6 xl:grid-cols-[minmax(0,1.15fr)_minmax(0,1fr)]">
@@ -95,6 +110,14 @@ export function ManagerPanel({ slug }: { slug: string }) {
             <span className="text-[12.5px] font-semibold text-text">{settings?.enabled ? "On · kept running" : "Off"}</span>
           </label>
           {info?.resumes && <span className="font-mono text-[10.5px] text-muted">restarts resume its conversation</span>}
+          {live && ctx && (
+            <span className="flex items-center gap-2 font-mono text-[10.5px] text-muted" title={ctx.blocked ?? `Compressed by itself past ${ctx.limit.toLocaleString()} tokens`}>
+              context {ctx.tokens == null ? "unknown" : `${Math.round(ctx.tokens / 1000)}k`} / {Math.round(ctx.limit / 1000)}k tokens
+              <Btn size="sm" disabled={busy || !!ctx.blocked} onClick={() => void compact()}>
+                Compress
+              </Btn>
+            </span>
+          )}
           {(state === "stopped" || state === "failed" || state === "restarting") && (
             <Btn size="sm" kind="primary" disabled={busy} onClick={() => void startNow()}>
               Start now

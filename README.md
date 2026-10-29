@@ -63,6 +63,12 @@ nothing is tied to one repository, session name or provider.
     Reflex restarts a minute after the last lesson. With no threshold yet, 16 lessons fit one from what Reflex said
     before each lesson, kept only at 90% precision (`corpus_learn.rs`). The Reflex screen's Lessons list shows each
     one (who taught it, what Reflex said before); Remove takes its line out of the corpus and out of the threshold.
+  - **Learning from the work (after Hermes Agent).** With RAG on: every task and the manager are nudged to save
+    what the next task would need as a knowledge card (`rag::card_nudge`); the project's past Claude Code sessions
+    (its manager's and lanes' words, not tool output, secrets masked) are searchable as `map://sessions/<id>`
+    (`session_memory.rs`); a hard-won task (heavy, retried, or sent back by verify, audit or review) gets a draft
+    plan to turn it into a skill, for the owner to approve (`skill_drafts.rs`). A manager past 120k context tokens,
+    or on Compress in its panel, is sent `/compact` while idle (`manager_compact.rs`).
   - **Create.** Creating a project returns check lines: the folder used (its git branch and commits) or created,
     the corpus repo, Reflex started or why not, each provider found and signed in.
   - **Settings.** Each project can set its own provider order (with a model and a session limit per provider), verify

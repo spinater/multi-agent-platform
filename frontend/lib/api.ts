@@ -78,6 +78,7 @@ import type { WorktreeEstimate } from "./generated/WorktreeEstimate";
 // Reflex screen.
 import type { ArchiveResult } from "./generated/ArchiveResult";
 import type { CorpusLesson } from "./generated/CorpusLesson";
+import type { ManagerContextInfo } from "./generated/ManagerContextInfo";
 import type { DecisionFeedback } from "./generated/DecisionFeedback";
 import type { DecisionSummary } from "./generated/DecisionSummary";
 import type { ReflexCase } from "./generated/ReflexCase";
@@ -423,6 +424,9 @@ export const managerApi = {
   set: (slug: string, body: ManagerSettings & { force?: boolean }) => request<ManagerInfo>("PUT", `${projPath(slug)}/manager`, body),
   /** Start now, also after MAP stopped restarting it. */
   start: (slug: string) => request<Session>("POST", `${projPath(slug)}/manager/start`, {}),
+  /** Its context tokens (from its transcript) and whether Compress (`/compact`) can run now. */
+  context: (slug: string) => request<ManagerContextInfo>("GET", `${projPath(slug)}/manager/compact`),
+  compact: (slug: string) => request<ManagerContextInfo>("POST", `${projPath(slug)}/manager/compact`, {}),
   lanes: (slug: string) => request<LaneInfo[]>("GET", `${projPath(slug)}/lanes`),
   openLane: (slug: string, body: OpenLane) => request<OwnedLaneRecord>("POST", `${projPath(slug)}/lanes`, body),
   startLane: (slug: string, name: string) => request<Session>("POST", `${projPath(slug)}/lanes/${encodeURIComponent(name)}/start`, {}),

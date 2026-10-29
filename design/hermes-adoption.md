@@ -12,7 +12,7 @@ next starts.
 Measured on groove: a branch-filter bug Reflex abstained on (confidence 0.004) was answered `bug` at 0.72 after one
 lesson on a similar task.
 
-## 1. Lessons on the Reflex screen
+## 1. Lessons on the Reflex screen (done, 2026-10-29)
 
 What the corpus learned, newest first: the decision, the domain, who taught it (panel or owner), what Reflex said
 before. One click removes a lesson (deletes its line, restarts Reflex). Without this a wrong panel answer teaches
@@ -21,42 +21,45 @@ Reflex silently.
 - Backend: `GET /projects/{slug}/corpus/lessons`, `DELETE …/lessons/{id}` over `corpus_lessons`.
 - Done when: a lesson made on live shows up, and removing it removes its line from `learned.md`.
 
-## 2. Nudge agents to save what they learned (memory nudges)
+## 2. Nudge agents to save what they learned (done, 2026-10-29)
 
 Hermes reminds its agent to persist knowledge. MAP has knowledge cards but waits for agents to think of it.
 
 - With RAG on, a task's prompt ends with: if you found a fact about this project that the next task would need (a
-  trap, a rule, where something lives), save it as a card in the project's card folder (an API to write
-  one comes with this step).
-- The manager gets the same line every 20 turns.
+  trap, a rule, where something lives), save it as a card under the index's folder, linked from the index, committed
+  with the change (`rag::card_nudge`). Cards are files in the repo, so no API was needed.
+- The manager gets the same line in its starting prompt.
 - Done when: the Knowledge screen shows cards written by agents, and the reads log shows them found later.
 
-## 3. Skills from finished work
+## 3. Skills from finished work (done, 2026-10-29)
 
 Hermes writes a skill after a complex task. In MAP a skill is a proposal, never a silent write into the project.
 
-- When a heavy task passes its audit, a cheap model drafts `.claude/skills/<name>/SKILL.md` (what the task did, the
-  steps, the checks) and submits it as a plan; the owner approves or drops it on the Plans screen.
-- One draft per kind of task: a draft whose name or steps match an existing skill updates that one instead.
+- When a hard-won task is done (tiered heavy, retried, or sent back by verify, audit or review), MAP submits a
+  one-task draft plan: an agent reads the task's record and commits, then writes `.claude/skills/<name>/SKILL.md`,
+  improves the skill that already covers it, or changes nothing. No LLM call until the owner approves it.
+- At most one skill draft open per project; tasks of the last day only (`skill_drafts.rs`).
 - Done when: an approved draft is loaded by a later task (the Skills screen counts loads).
 
-## 4. Search past sessions
+## 4. Search past sessions (done, 2026-10-29)
 
 Hermes searches past sessions with FTS5 and summarizes the hits. MAP's knowledge search (FTS5 already) covers docs,
 cards, tasks and plans, not what was said in the lanes.
 
-- When a manager or persistent-lane session ends, or each night, a cheap model summarizes its transcript into a
-  `session` document (decisions made, owner's words quoted, open questions) and indexes it.
+- The Claude Code transcripts opened in the project's folder (the manager, the lanes; the owner's and MAP's homes)
+  are indexed as `map://sessions/<id>`: the owner's and the agent's words only, each message cut to 600 characters
+  and masked, the newest 40,000 characters of each of the 40 newest sessions of the last 30 days. No summarizing
+  model: FTS5 finds the passage, which is what Hermes's search returns before it summarizes (`session_memory.rs`).
 - Searched like any document, inside the RAG switch and the 1,500-token search budget.
 - Done when: `map-ask --search` answers "what did we decide about X yesterday" from a session summary.
 
-## 5. Compress a long manager
+## 5. Compress a long manager (done, 2026-10-29)
 
 Hermes has `/compress`. A project's manager runs for days and its context grows.
 
-- The manager's card shows its context size (from the provider's own usage lines); above a limit
-  (`[manager] compress_at_tokens`), MAP asks it for a summary, starts a new session, and hands it the summary.
-- A Compress button does the same on demand.
+- The Manager panel shows its context (the last reply's tokens in its transcript). Past 120k tokens, or on Compress,
+  MAP types `/compact` into it while it is idle and nobody is attached: the CLI summarises and carries on
+  (`manager_compact.rs`; Claude Code and Codex).
 - Done when: a manager past the limit restarts with its summary and still answers about earlier decisions.
 
 ## Not taken

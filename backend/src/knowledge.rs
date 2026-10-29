@@ -221,7 +221,7 @@ fn scan_files(root: &Path, s: &KnowledgeSettings) -> Vec<Scanned> {
 }
 
 /// What MAP remembers of the project: each finished or failed task (what was asked, what came of it, what went wrong
-/// on the way) and each approved plan.
+/// on the way), each approved plan, and its past sessions (`session_memory.rs`).
 async fn memory(hub: &Hub, slug: &str) -> Vec<Scanned> {
     let mut out = vec![];
     for t in hub.store.tasks().await.unwrap_or_default().into_iter().filter(|t| t.project.as_deref() == Some(slug)) {
@@ -229,9 +229,7 @@ async fn memory(hub: &Hub, slug: &str) -> Vec<Scanned> {
             continue;
         }
         let mut body = format!("# Task #{}: {}\n\nstatus: {} · attempts: {}", t.id, t.title, t.status.as_str(), t.attempts);
-        if let Some(p) = &t.provider {
-            body.push_str(&format!(" · provider: {p}"));
-        }
+        body.push_str(&t.provider.as_ref().map(|p| format!(" · provider: {p}")).unwrap_or_default());
         if let Some(g) = &t.git {
             body.push_str(&format!("\nbranch: {} from {}", g.branch, g.base));
             if let Some(m) = &g.merged {
@@ -262,6 +260,7 @@ async fn memory(hub: &Hub, slug: &str) -> Vec<Scanned> {
         let body = format!("# Plan #{}: {}\n\napproved plan, revision {}\n\n{}\n\n## Tasks\n\n{}\n", p.id, p.title, p.revision, cut(&p.summary, 4000), tasks.join("\n"));
         out.push(memory_doc(format!("map://plans/{}", p.id), format!("Plan #{}: {}", p.id, p.title), body, p.created_at));
     }
+    out.extend(crate::session_memory::docs(hub, slug).await.into_iter().map(|(path, title, body, at)| memory_doc(path, title, body, at)));
     out
 }
 

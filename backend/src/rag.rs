@@ -2,6 +2,8 @@
 //! task's prompt tells the agent to search the project's knowledge before it starts and to read only the parts it
 //! needs; off: the prompt says nothing of it and agents' searches and reads are refused (the owner's still work).
 //!
+//! With RAG on, the task's prompt also nudges the agent to save what it learned as a knowledge card ([`card_nudge`]).
+//!
 //! A document an agent reads comes back in parts: up to [`DOC_BUDGET_TOKENS`] it is whole; above that it is its
 //! outline (each heading with its size) and the text before the first heading, and `section=<heading>` reads one
 //! section. `full=1` reads it whole anyway. A rulebook read whole cost ~14,000 tokens; one section, a few hundred.
@@ -29,10 +31,27 @@ pub fn on(project: &Project) -> bool {
 /// `prompt` with the RAG instructions when the task is in a project with RAG on.
 pub async fn with_hint(hub: &Hub, task: &Task, mut prompt: String) -> String {
     let Some(slug) = &task.project else { return prompt };
-    if hub.store.project(slug).await.ok().flatten().is_some_and(|p| on(&p)) {
+    if let Some(p) = hub.store.project(slug).await.ok().flatten().filter(on) {
         prompt.push_str(TASK_HINT);
+        prompt.push_str(&card_nudge(&p));
     }
     prompt
+}
+
+/// The memory nudge (Hermes Agent's idea): save what the next task would need as a knowledge card, in the folder of
+/// the cards' index, listed in the index. Empty with RAG off.
+pub fn card_nudge(project: &Project) -> String {
+    let index = project.settings.knowledge.index.trim();
+    if !on(project) || index.is_empty() {
+        return String::new();
+    }
+    let folder = std::path::Path::new(index).parent().map(|d| d.display().to_string()).filter(|d| !d.is_empty()).unwrap_or_else(|| ".".into());
+    format!(
+        "- Before you finish: if you learned a fact about this project the next task would need and no card holds yet (a trap, a rule, \
+         where something lives, why a choice was made), save it as a knowledge card: a short Markdown file under `{folder}/` with a \
+         `sources:` frontmatter list of the files it is about, linked from `{index}`, committed with your change. One fact per card; \
+         update a card that already covers it instead of adding a second.\n"
+    )
 }
 
 /// Why `by` may not search or read the project's knowledge: RAG is off and it is not the owner.
@@ -133,5 +152,25 @@ mod tests {
         let d = "x".repeat(20_000);
         let s = shaped("a.txt", &d, None, false);
         assert!(s.len() < 9000 && s.contains("has no headings"));
+    }
+
+    #[test]
+    fn the_card_nudge_names_the_index_and_follows_the_switch() {
+        let mut p = Project {
+            slug: "s".into(),
+            name: "S".into(),
+            description: String::new(),
+            port: 0,
+            threshold: None,
+            fallback: "none".into(),
+            model: None,
+            questions: vec![],
+            created_at: chrono::Utc::now(),
+            settings: Default::default(),
+        };
+        let n = card_nudge(&p);
+        assert!(n.contains("`.docs/knowledge/`") && n.contains("`.docs/knowledge/index.md`"), "{n}");
+        p.settings.knowledge.rag = false;
+        assert_eq!(card_nudge(&p), "");
     }
 }

@@ -175,11 +175,8 @@ pub fn prompt(hub: &Hub, instructions: &str, project: &Project, folder: &Path, c
     if !ctx.drafts.is_empty() {
         p.push_str(&format!("- Plans waiting for approval: {}.\n", ctx.drafts.join(" · ")));
     }
-    if ctx.lanes.is_empty() {
-        p.push_str("- Lanes: none.\n");
-    } else {
-        p.push_str(&format!("- Lanes: {}.\n", ctx.lanes.join(", ")));
-    }
+    p.push_str(&format!("- Lanes: {}.\n", if ctx.lanes.is_empty() { "none".into() } else { ctx.lanes.join(", ") }));
+    p.push_str(&crate::rag::card_nudge(project));
     p.push_str("\nGreet the owner in one line and wait for them.\n");
     p
 }
