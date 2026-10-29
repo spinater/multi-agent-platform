@@ -30,6 +30,7 @@ const SESSION_CHARS: usize = 40_000;
 pub type SessionDoc = (String, String, String, DateTime<Utc>);
 
 type Cached = (SystemTime, u64, Option<SessionDoc>);
+static PASTED: LazyLock<regex::Regex> = LazyLock::new(|| regex::Regex::new(r"</?pasted_content[^>]*>").unwrap());
 static CACHE: LazyLock<Mutex<HashMap<PathBuf, Cached>>> = LazyLock::new(Default::default);
 
 fn masked(text: &str) -> String {
@@ -55,7 +56,9 @@ fn words(entry: &Value) -> Option<(&'static str, String)> {
         Value::Array(items) => items.iter().filter(|i| i.get("type").and_then(Value::as_str) == Some("text")).filter_map(|i| i.get("text").and_then(Value::as_str)).collect::<Vec<_>>().join("\n"),
         _ => return None,
     };
-    let t = text.trim();
+    // Text the owner pasted is theirs; other tags (commands, reminders, caveats) are the CLI's.
+    let unwrapped = PASTED.replace_all(&text, "");
+    let t = unwrapped.trim();
     (!t.is_empty() && !t.starts_with('<') && !t.starts_with("[Request interrupted")).then(|| (role, masked(t)))
 }
 
@@ -151,6 +154,7 @@ mod tests {
             r#"{"type":"user","message":{"content":"We keep refunds off. token sk-abcdefghijklmnopqrstuvwx"},"timestamp":"2026-10-28T09:01:00Z"}"#,
             r#"{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Bash","input":{"command":"ls"}},{"type":"text","text":"Noted: refunds stay off."}]},"timestamp":"2026-10-28T09:02:00Z"}"#,
             r#"{"type":"user","message":{"content":[{"type":"tool_result","content":"secret file list"}]},"timestamp":"2026-10-28T09:03:00Z"}"#,
+            r#"{"type":"user","message":{"content":"\n<pasted_content id=\"a1\">\nShip card 452 first.\n</pasted_content>"},"timestamp":"2026-10-28T09:03:30Z"}"#,
             r#"{"type":"assistant","isSidechain":true,"message":{"content":[{"type":"text","text":"subagent chatter"}]},"timestamp":"2026-10-28T09:04:00Z"}"#,
         ]
         .join("\n");
@@ -159,8 +163,9 @@ mod tests {
         assert_eq!(title, "Session manager-shop · 2026-10-28 – 2026-10-28");
         assert!(body.contains("**owner** 2026-10-28 09:01: We keep refunds off. token ***"), "{body}");
         assert!(body.contains("**agent** 2026-10-28 09:02: Noted: refunds stay off."));
+        assert!(body.contains("**owner** 2026-10-28 09:03: Ship card 452 first."), "a paste is the owner's words");
         assert!(!body.contains("clear") && !body.contains("secret file list") && !body.contains("subagent") && !body.contains("sk-abc"));
-        assert_eq!(at.to_rfc3339(), "2026-10-28T09:02:00+00:00");
+        assert_eq!(at.to_rfc3339(), "2026-10-28T09:03:30+00:00");
         assert!(parse(r#"{"type":"mode"}"#.as_bytes(), "x").is_none());
     }
 
