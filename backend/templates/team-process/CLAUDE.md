@@ -98,7 +98,8 @@ not ready to ask. Questions go into the card's `## Questions`.
   as its outline: read the section you need with `&section=<heading>` (`map-ask --doc <path> --section "<heading>"`).
 - Before deciding something repetitive by judgement (bug or feature, light or heavy, which area, needs a migration),
   ask the project's Reflex: POST to `$MAP_DECIDE_URL`, or `map-ask "<facts>" --question "…" --options a,b`. Use a
-  confident answer; `abstain` means decide yourself. A message starting `[MAP Reflex reads this as …]` is MAP's
+  confident answer; `abstain` means decide yourself. Name the options the same way every time (`bug,feature`,
+  `sonnet,opus`): each option is a corpus domain, and the answers the panel agrees on teach Reflex that domain. A message starting `[MAP Reflex reads this as …]` is MAP's
   reading of it, not the owner's words.
 - `.docs/knowledge/domain/`: business rules. Changing a rule means updating its doc in the same commit.
 - `.docs/knowledge/ops/`: how things run (environments, jobs, accounts, limits).

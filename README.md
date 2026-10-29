@@ -58,6 +58,10 @@ nothing is tied to one repository, session name or provider.
     that opens only that project's decide/feedback/decision-log endpoints and its corpus (files and `corpus.git`).
   - **Corpus content.** One top-level folder per Reflex domain (1–8), prose `.md` files inside. A push or an edit
     restarts the project's Reflex on the new corpus.
+  - **The corpus learns.** A choice answer the fallback panel agreed on (two or more members) or the owner confirmed
+    becomes one example line in `<answer>/learned.md` (the placeholder `example` domain goes with the first one), and
+    Reflex restarts a minute after the last lesson. With no threshold yet, 16 lessons fit one from what Reflex said
+    before each lesson, kept only at 90% precision (`corpus_learn.rs`).
   - **Create.** Creating a project returns check lines: the folder used (its git branch and commits) or created,
     the corpus repo, Reflex started or why not, each provider found and signed in.
   - **Settings.** Each project can set its own provider order (with a model and a session limit per provider), verify

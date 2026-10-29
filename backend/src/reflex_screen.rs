@@ -10,7 +10,7 @@ use serde_json::{Value, json};
 
 use crate::decide::{self, same};
 use crate::hub::Hub;
-use crate::model::{ArchiveResult, CaseScore, DecisionFeedback, FitResult, Project, Question, QuestionKind, ReflexCase, RepoFile};
+use crate::model::{ArchiveResult, CaseScore, Decision, DecisionFeedback, FitResult, Project, Question, QuestionKind, ReflexCase, RepoFile};
 use crate::{reflex, repo};
 
 /// Fitting a threshold on fewer cases than this is noise.
@@ -151,6 +151,9 @@ pub async fn feedback(hub: &Hub, project: &Project, id: i64, correct: bool, expe
     };
     hub.store.set_decision_feedback(&project.slug, id, Some(correct)).await?;
     decision.feedback = Some(correct);
+    if !crate::gates::is_gate(&q.id) && q.id != crate::chat::INTENT {
+        crate::corpus_learn::learn(hub, project, &Decision { question: q.clone(), ..decision.clone() }, &expected, "owner").await;
+    }
 
     let saved = project.questions.iter().any(|x| x.id == q.id);
     let readable = decide::for_reflex(project, &decision.state, std::slice::from_ref(&q)).unreadable().is_none();

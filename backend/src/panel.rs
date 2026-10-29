@@ -136,7 +136,7 @@ async fn debate(hub: &Hub, project: &Project, q: &Question, text: &str, members:
     }
     log.extend(notes);
     let (tokens_in, tokens_out) = said.iter().fold((0, 0), |(i, o), s| (i + s.reply.tokens_in, o + s.reply.tokens_out));
-    let reply = |first_line: String| Reply { text: format!("{first_line}\n{}", log.join("\n")), tokens_in, tokens_out, measured: false };
+    let reply = |first_line: String| Reply { text: format!("{first_line}\n{}", log.join("\n")), tokens_in, tokens_out, measured: false, voters: said.len() };
     match agreed(&said) {
         Some(answer) => Ok(reply(shown(&answer))),
         None if said.len() == 1 => Ok(reply(said[0].reply.text.lines().next().unwrap_or("").to_string())),

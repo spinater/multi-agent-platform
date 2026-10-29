@@ -3,6 +3,7 @@ mod chat;
 mod api;
 mod cli_files;
 mod config;
+mod corpus_learn;
 mod decide;
 mod decisions;
 mod detect;
@@ -147,6 +148,7 @@ async fn serve(config: Config) -> Result<()> {
     tokio::spawn(lanes::run(hub.clone()));
     tokio::spawn(manager::run(hub.clone()));
     tokio::spawn(telegram::run(hub.clone()));
+    tokio::spawn(corpus_learn::run(hub.clone()));
     {
         let hub = hub.clone();
         tokio::spawn(async move {

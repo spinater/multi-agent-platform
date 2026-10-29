@@ -105,6 +105,8 @@ pub struct Reply {
     pub tokens_out: i64,
     /// The provider reported the tokens; else they are estimated from the prompt and the reply.
     pub measured: bool,
+    /// How many fallback members gave this answer: a panel's when it agreed, else 1 (`corpus_learn::MIN_VOTERS`).
+    pub voters: usize,
 }
 
 impl Reply {
@@ -112,10 +114,10 @@ impl Reply {
     /// A headless CLI reports nothing, and its own system prompt is not counted (`fallback_overhead_tokens`).
     pub fn new(text: String, prompt_chars: i64, usage: Option<(i64, i64)>) -> Self {
         match usage {
-            Some((tokens_in, tokens_out)) => Self { text, tokens_in, tokens_out, measured: true },
+            Some((tokens_in, tokens_out)) => Self { text, tokens_in, tokens_out, measured: true, voters: 1 },
             None => {
                 let tokens_out = estimate_tokens(text.chars().count() as i64);
-                Self { text, tokens_in: estimate_tokens(prompt_chars), tokens_out, measured: false }
+                Self { text, tokens_in: estimate_tokens(prompt_chars), tokens_out, measured: false, voters: 1 }
             }
         }
     }
@@ -362,9 +364,11 @@ pub async fn decide_at(hub: &Hub, project: &Project, target: Target, state: &str
             ..DecisionCost::default()
         };
 
+        let mut voters = 0;
         let (answer, lane, llm_raw, error) = if use_fallback {
             match crate::panel::ask(hub, project, q, &text).await {
                 Ok(reply) => {
+                    voters = reply.voters;
                     (cost.tokens_in, cost.tokens_out, cost.measured) = (Some(reply.tokens_in), Some(reply.tokens_out), reply.measured);
                     let parsed = parse_answer(q, &reply.text);
                     let lane = if parsed.is_null() { Lane::Abstain } else { Lane::Llm };
@@ -404,6 +408,9 @@ pub async fn decide_at(hub: &Hub, project: &Project, target: Target, state: &str
                 0
             }
         };
+        if lane == Lane::Llm && voters >= crate::corpus_learn::MIN_VOTERS && target.port == project.port {
+            crate::corpus_learn::learn(hub, project, &Decision { id: decision_id, ..record }, &answer, "panel").await;
+        }
         answers.push(Answer { question_id: q.id.clone(), answer, lane, confidence, probabilities, reflex_answer, llm_raw, error, ms, reason, decision_id });
     }
     hub.announce_project(&project.slug).await;
