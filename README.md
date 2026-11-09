@@ -756,6 +756,13 @@ text, or still parked after the reset. A card done is announced once per card (c
 `lane.*` event (`lane.clear`, `lane.ask`, `lane.resume`, `lane.stall`, `lane.card_done`, `lane.rate_limited`,
 `lane.tell`, `lane.watch`) and a line of the lane's history.
 
+**Chat** (a lane card's Chat button) talks to a lane the way Claude's phone app does: the conversation read from the
+lane's Claude Code transcript (the newest one whose `agent-name` is the session's, so lanes sharing a folder never
+mix; masked and cut), a message box that types into the session at once (a busy Claude Code lane runs it next), and
+the screen with Esc, the numbered options and the arrows for an open dialog. A message is refused over an open dialog
+or unsent text; C-c is never offered. A lane without a transcript (Codex, a shell) shows its screen. Owner token only:
+`GET`/`POST /api/lanes/{name}/chat` (`{text}` or `{key}`, and `session`); each message is a `lane.chat` event.
+
 `deploy/map-tell` mirrors `watcher.py --tell` from inside the lane's session (it reads the session name from tmux):
 
 ```sh

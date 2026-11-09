@@ -648,19 +648,19 @@ pub fn glob(pattern: &str, name: &str) -> bool {
 // ---- the terminal, narrowed
 
 /// The only things MAP does to a lane session: list, capture, type a line. No spawn, kill, rename or resize.
-struct LaneTerm(Arc<dyn Terminal>, StdDuration);
+pub(crate) struct LaneTerm(pub(crate) Arc<dyn Terminal>, pub(crate) StdDuration);
 
 impl LaneTerm {
-    async fn list(&self) -> Result<Vec<TermSession>> {
+    pub(crate) async fn list(&self) -> Result<Vec<TermSession>> {
         self.0.list().await
     }
 
-    async fn capture(&self, name: &str) -> Result<String> {
+    pub(crate) async fn capture(&self, name: &str) -> Result<String> {
         self.0.capture(name, CAPTURE_LINES, true).await
     }
 
     /// Types `text` literally, waits for the TUI, then presses Enter.
-    async fn type_line(&self, name: &str, text: &str) -> Result<()> {
+    pub(crate) async fn type_line(&self, name: &str, text: &str) -> Result<()> {
         self.0.send_text(name, text, false).await?;
         tokio::time::sleep(self.1).await;
         self.0.send_key(name, "Enter").await
@@ -895,7 +895,7 @@ impl Lanes {
         configs.into_iter().find(|c| c.session_match.iter().any(|g| glob(g, name))).map(|c| (c, Some(name.to_string())))
     }
 
-    fn term(&self, socket: &str, key_delay_ms: u64) -> LaneTerm {
+    pub(crate) fn term(&self, socket: &str, key_delay_ms: u64) -> LaneTerm {
         let mut terms = self.terms.lock().unwrap();
         let t = terms.entry(socket.to_string()).or_insert_with(|| Arc::new(Tmux::new((!socket.is_empty()).then(|| socket.to_string()))));
         LaneTerm(t.clone(), StdDuration::from_millis(key_delay_ms))

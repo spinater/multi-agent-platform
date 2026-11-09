@@ -91,6 +91,7 @@ import type { ManagerSettings } from "./generated/ManagerSettings";
 import type { OpenLane } from "./generated/OpenLane";
 import type { OwnedLaneRecord } from "./generated/OwnedLaneRecord";
 import type { LaneScreen } from "./generated/LaneScreen";
+import type { LaneChat } from "./generated/LaneChat";
 import type { LaneTell } from "./generated/LaneTell";
 import type { TmuxSessionInfo } from "./generated/TmuxSessionInfo";
 import type { WatchLane } from "./generated/WatchLane";
@@ -388,6 +389,10 @@ export const lanesApi = {
   /** Queues an instruction, done on the next tick the session is idle and nobody is attached; expires after 3 h. */
   tell: (name: string, body: { verb: TellVerb; note?: string; mins?: number; session?: string }) => request<LaneTell>("POST", `${lanePath(name)}/tell`, body),
   tells: (name: string) => request<LaneTell[]>("GET", `${lanePath(name)}/tells`),
+  /** The lane's chat: its transcript's messages, state and screen tail; without `session`, its first session. */
+  chat: (name: string, session?: string | null) => request<LaneChat>("GET", `${lanePath(name)}/chat${session ? `?${sessionQuery(session)}` : ""}`),
+  /** Types a message (then Enter) or presses one key in the lane's session at once (409 over a dialog or unsent text). */
+  sendChat: (name: string, body: { text?: string; key?: string; session?: string }) => request<LaneChat>("POST", `${lanePath(name)}/chat`, body),
   /** Cancels a queued tell; `session` empty: the one for any session. */
   cancelTell: (name: string, verb: TellVerb, session?: string | null) => {
     const q = sessionQuery(session);

@@ -1,8 +1,7 @@
 "use client";
 
-/** One lane on the Lanes screen: its sessions, the agent's status file, cards, git, the switches, queued tells, what
- * MAP did, the screen tail and the status prompt. Nothing here types into tmux directly: a tell is queued and the
- * backend does it when the session is idle and nobody is attached. */
+/** One lane on the Lanes screen: its sessions, status file, cards, git, switches, queued tells, what MAP did, the screen
+ * tail and the status prompt. A tell is queued for when the session is idle; only Chat (`lane-chat.tsx`) types at once. */
 
 import clsx from "clsx";
 import { ChevronDown, ChevronRight, RefreshCw, X } from "lucide-react";
@@ -16,18 +15,12 @@ import type { LaneState } from "@/lib/generated/LaneState";
 import type { TellVerb } from "@/lib/generated/TellVerb";
 
 import { useApp } from "../app-context";
+import { LaneChatButton } from "./lane-chat";
 import { Btn, TextInput, Toggle, errText } from "../project-ui";
 import { Card, SectionTitle } from "../shell/page";
 import { Badge, relative, type Tone } from "../ui";
 
-const STATE_TONE: Record<LaneState, Tone> = {
-  busy: "ok",
-  idle: "idle",
-  waiting: "accent",
-  pending_input: "warn",
-  rate_limited: "warn",
-  missing: "bad",
-};
+const STATE_TONE: Record<LaneState, Tone> = { busy: "ok", idle: "idle", waiting: "accent", pending_input: "warn", rate_limited: "warn", missing: "bad" };
 
 /** States that need someone to look. */
 const LOUD: LaneState[] = ["waiting", "pending_input", "rate_limited", "missing"];
@@ -614,6 +607,7 @@ export function LaneCard({ lane, onChange, onReload, focused }: { lane: LaneInfo
         </div>
       )}
 
+      <LaneChatButton lane={lane} />
       <ScreenTail lane={lane} />
       <StatusPrompt lane={lane} patch={patch} busy={!!busy} />
       <Disclosure title="Thresholds" note="map.toml">

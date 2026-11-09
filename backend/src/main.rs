@@ -4,6 +4,7 @@ mod api;
 mod cli_files;
 mod config;
 mod corpus_learn;
+mod lane_chat;
 mod decide;
 mod decisions;
 mod detect;

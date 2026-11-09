@@ -188,7 +188,7 @@ pub fn router(hub: Arc<Hub>) -> Router {
         .route("/lanes/{name}", axum::routing::patch(lanes::update))
         .route("/lanes/{name}/screen", get(lanes::screen))
         .route("/lanes/{name}/tell", post(lanes::tell))
-        .route("/lanes/{name}/tells", get(lanes::tells))
+        .route("/lanes/{name}/tells", get(lanes::tells)).route("/lanes/{name}/chat", get(crate::lane_chat::get_api).post(crate::lane_chat::post_api))
         .route("/lanes/{name}/tells/{verb}", axum::routing::delete(lanes::cancel_tell))
         // ---- a project's manager (manager.rs) and the project-scoped routes its token opens (manager_scope)
         .route("/projects/{slug}/manager", get(manager::get).put(manager::put))
