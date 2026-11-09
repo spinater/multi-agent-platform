@@ -226,6 +226,13 @@ async fn sessions(term: &LaneTerm, cfg: &LaneConfig) -> anyhow::Result<Vec<(Stri
     Ok(s)
 }
 
+/// The bottom [`SCREEN_LINES`] of the capture, without its colours and trailing blank lines.
+fn screen(raw: &str) -> String {
+    let text = lanes::strip(raw);
+    let lines: Vec<&str> = text.trim_end().lines().map(str::trim_end).collect();
+    lines[lines.len().saturating_sub(SCREEN_LINES)..].join("\n")
+}
+
 fn state_name(raw: Raw) -> &'static str {
     match raw {
         Raw::Busy => "busy",
@@ -252,9 +259,9 @@ pub async fn chat(hub: &Hub, cfg: &LaneConfig, want: Option<&str>) -> anyhow::Re
     };
     let Some((name, _)) = pick else { return Ok(out) };
     let raw = term.capture(&name).await?;
-    let (state, why, pane) = lanes::classify(&raw, &raw, Utc::now(), lanes::local_offset());
+    let (state, why, _) = lanes::classify(&raw, &raw, Utc::now(), lanes::local_offset());
     (out.state, out.why) = (state_name(state).into(), why);
-    out.screen = lanes::screen_tail(&pane, SCREEN_LINES);
+    out.screen = screen(&raw);
     if let Some(file) = transcript(cfg, &name) {
         out.transcript = file.file_name().map(|f| f.to_string_lossy().into_owned());
         out.messages = chat_of(&file);
@@ -386,5 +393,35 @@ mod tests {
         assert_eq!(transcript_in(dir.path(), "developer-x").unwrap().file_name().unwrap(), "old.jsonl");
         assert_eq!(transcript_in(dir.path(), "manager-x").unwrap().file_name().unwrap(), "other.jsonl");
         assert!(transcript_in(dir.path(), "nobody").is_none());
+    }
+
+    fn pane(body: &str, input: &str) -> String {
+        let rule = "─".repeat(40);
+        format!("{body}\n\n{rule}\n❯ {input}\n{rule}\n  ? for shortcuts\n")
+    }
+
+    #[tokio::test]
+    async fn a_message_is_typed_at_once_but_never_into_a_dialog_or_over_unsent_text() {
+        let lane = "[[lanes]]\nname = \"dev-x\"\nsession_match = [\"dev-x\"]\n";
+        let (hub, term, _dir) = crate::lanes::tests::test_hub(lane).await;
+        let add = |p: String| term.sessions.lock().unwrap().insert("dev-x".into(), crate::terminal::fake::FakeSession { pane: p, attached: 1, ..Default::default() });
+        let cfg = hub.lanes.config("dev-x").unwrap();
+        let body = |t: Option<&str>, k: Option<&str>| ChatSend { session: None, text: t.map(String::from), key: k.map(String::from) };
+
+        add(pane("● Done.", ""));
+        let c = send(&hub, &cfg, &body(Some("next card\nplease"), None)).await.unwrap();
+        assert_eq!((c.state.as_str(), c.attached, c.transcript.is_none()), ("idle", true, true));
+        assert_eq!(term.sent("dev-x"), vec!["next card\nplease".to_string(), "<Enter>".into()], "typed even with someone attached");
+
+        add(pane("Do you want to make this edit?\n❯ 1. Yes\n  2. No", ""));
+        assert!(matches!(send(&hub, &cfg, &body(Some("hi"), None)).await, Err(SendError::Conflict(_))));
+        send(&hub, &cfg, &body(None, Some("1"))).await.unwrap();
+        assert_eq!(term.sent("dev-x"), vec!["<1>".to_string()], "a dialog is answered with its keys");
+
+        add(pane("● Done.", "half a thought"));
+        assert!(matches!(send(&hub, &cfg, &body(Some("hi"), None)).await, Err(SendError::Conflict(_))));
+        assert!(matches!(send(&hub, &cfg, &body(None, Some("C-c"))).await, Err(SendError::Bad(_))));
+        assert!(matches!(send(&hub, &cfg, &body(Some("  "), None)).await, Err(SendError::Bad(_))));
+        assert!(term.sent("dev-x").is_empty());
     }
 }
