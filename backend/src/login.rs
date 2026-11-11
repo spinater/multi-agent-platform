@@ -315,7 +315,7 @@ pub async fn state(hub: &Hub, provider: &str) -> Result<LoginState> {
     };
     let parsed = parse(&text);
     let live = session.as_ref().is_some_and(|s| s.state.is_live());
-    let (phase, hint) = phase(spec, &text, &parsed, live);
+    let (phase, hint) = phase(&spec, &text, &parsed, live);
     if parsed.success || session.as_ref().is_some_and(|s| !s.state.is_live()) {
         hub.announce_providers_if_changed();
     }
@@ -328,8 +328,8 @@ pub async fn state(hub: &Hub, provider: &str) -> Result<LoginState> {
         code: parsed.code,
         wants_code: parsed.wants_code,
         success: parsed.success,
-        signed_in: signed_in(hub, spec),
-        credentials_updated_at: credentials_updated_at(spec),
+        signed_in: signed_in(hub, &spec),
+        credentials_updated_at: credentials_updated_at(&spec),
         phase,
         hint,
     })
@@ -423,7 +423,7 @@ mod tests {
         let term = Arc::new(FakeTerminal::default());
         let hub = Hub::new(config, crate::store::Store::memory().await.unwrap(), term.clone());
 
-        assert_eq!(signed_in(&hub, hub.spec("codex").unwrap()), Some(false));
+        assert_eq!(signed_in(&hub, &hub.spec("codex").unwrap()), Some(false));
         let session = start(&hub, "codex").await.unwrap();
         assert_eq!(session.name, "agp-login-codex");
         let script = term.sessions.lock().unwrap()["agp-login-codex"].script.clone();
@@ -436,7 +436,7 @@ mod tests {
         let st = state(&hub, "codex").await.unwrap();
         assert_eq!(st.signed_in, Some(true));
         assert!(st.credentials_updated_at.is_some());
-        assert_eq!(info(&hub, "codex", hub.spec("codex").unwrap()).command, "/bin/sh login --device-auth");
+        assert_eq!(info(&hub, "codex", &hub.spec("codex").unwrap()).command, "/bin/sh login --device-auth");
     }
 
     #[tokio::test]
@@ -454,8 +454,8 @@ mod tests {
         let hub = Hub::new(config("isolated"), crate::store::Store::memory().await.unwrap(), term.clone());
         let ah = dir.path().join("ah");
         // Nothing is copied over: not signed in until the helper session has run in MAP's folder.
-        assert_eq!(signed_in(&hub, hub.spec("codex").unwrap()), Some(false));
-        assert_eq!(info(&hub, "codex", hub.spec("codex").unwrap()).credentials, [ah.join("codex/auth.json").display().to_string()]);
+        assert_eq!(signed_in(&hub, &hub.spec("codex").unwrap()), Some(false));
+        assert_eq!(info(&hub, "codex", &hub.spec("codex").unwrap()).credentials, [ah.join("codex/auth.json").display().to_string()]);
         for (provider, export) in [
             ("codex", format!("export CODEX_HOME={}/codex\n", ah.display())),
             ("claude", format!("export CLAUDE_CONFIG_DIR={}/claude\n", ah.display())),
@@ -467,10 +467,10 @@ mod tests {
         }
         std::fs::create_dir_all(ah.join("codex")).unwrap();
         std::fs::write(ah.join("codex/auth.json"), "{}").unwrap();
-        assert_eq!(signed_in(&hub, hub.spec("codex").unwrap()), Some(true));
+        assert_eq!(signed_in(&hub, &hub.spec("codex").unwrap()), Some(true));
         std::fs::create_dir_all(ah.join("gemini-home/.gemini")).unwrap();
         std::fs::write(ah.join("gemini-home/.gemini/jetski-standalone-oauth-token"), "t").unwrap();
-        assert_eq!(signed_in(&hub, hub.spec("gemini").unwrap()), Some(true));
+        assert_eq!(signed_in(&hub, &hub.spec("gemini").unwrap()), Some(true));
 
         // Shared mode: the same launch exports none of them.
         let term = Arc::new(FakeTerminal::default());
@@ -497,9 +497,9 @@ mod tests {
         let term = Arc::new(FakeTerminal::default());
         let hub = Hub::new(config(""), crate::store::Store::memory().await.unwrap(), term.clone());
         let spec = hub.spec("openrouter").unwrap();
-        assert_eq!(signed_in(&hub, spec), Some(false), "no sign-in command: the key is the sign-in");
+        assert_eq!(signed_in(&hub, &spec), Some(false), "no sign-in command: the key is the sign-in");
         assert!(start(&hub, "openrouter").await.is_err(), "nothing to sign in with");
-        let info = info(&hub, "openrouter", spec);
+        let info = info(&hub, "openrouter", &spec);
         assert_eq!((info.command.as_str(), info.api_key_env.as_deref(), info.api_key_set), ("", Some("MAP_TEST_OR_KEY_7F3"), false));
 
         hub.launch(LaunchRequest { name: Some("or".into()), provider: "openrouter".into(), model: None, role: Role::Manual, task_id: None, project: None, prompt: Some("hi".into()) }).await.unwrap();
@@ -514,7 +514,7 @@ mod tests {
 
         // The key in [workspace.env]: signed in, and only ever a boolean in what the dashboard gets.
         let hub = Hub::new(config("[workspace.env]\nMAP_TEST_OR_KEY_7F3 = \"sk-or-v1-SECRET-42\""), crate::store::Store::memory().await.unwrap(), term.clone());
-        assert_eq!(signed_in(&hub, hub.spec("openrouter").unwrap()), Some(true));
+        assert_eq!(signed_in(&hub, &hub.spec("openrouter").unwrap()), Some(true));
         let json = serde_json::to_string(&hub.providers()).unwrap();
         assert!(!json.contains("SECRET"), "{json}");
         assert!(json.contains("\"api_key_set\":true"), "{json}");
@@ -613,7 +613,7 @@ mod tests {
             }
             tokio::time::sleep(Duration::from_millis(200)).await;
         }
-        assert_eq!(signed_in(&hub, hub.spec("gemini").unwrap()), Some(true));
+        assert_eq!(signed_in(&hub, &hub.spec("gemini").unwrap()), Some(true));
         assert!(send_code(&hub, "gemini", "again").await.is_err(), "no code prompt any more: nothing typed");
         drop(tmux);
     }

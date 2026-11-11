@@ -20,6 +20,7 @@ mod knowledge_log;
 mod lanes;
 mod manager;
 mod manager_compact;
+mod model_catalog;
 mod mcp;
 mod login;
 mod model;
@@ -155,6 +156,7 @@ async fn serve(config: Config) -> Result<()> {
     tokio::spawn(corpus_learn::run(hub.clone()));
     tokio::spawn(skill_drafts::run(hub.clone()));
     tokio::spawn(manager_compact::run(hub.clone()));
+    tokio::spawn(model_catalog::run(hub.clone()));
     {
         let hub = hub.clone();
         tokio::spawn(async move {

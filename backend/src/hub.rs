@@ -57,6 +57,8 @@ pub struct Hub {
     pub managers: crate::manager::Managers,
     /// The last connection test of each MCP server (`mcp.rs`, Configure → MCP).
     pub mcp_tests: crate::mcp::Tests,
+    /// The provider specs with the models their CLIs list (`model_catalog.rs`); read through [`Hub::spec`].
+    pub models: crate::model_catalog::Catalog,
 }
 
 pub struct LaunchRequest {
@@ -109,6 +111,7 @@ impl Hub {
             providers_sig: Mutex::new(None),
             managers: Default::default(),
             mcp_tests: Default::default(),
+            models: Default::default(),
         })
     }
 
@@ -476,9 +479,7 @@ impl Hub {
         self.send(ServerMessage::Updates { report });
     }
 
-    pub fn spec(&self, provider: &str) -> Result<&ProviderSpec> {
-        self.config.providers.get(provider).with_context(|| format!("unknown provider `{provider}`"))
-    }
+    pub fn spec(&self, provider: &str) -> Result<Arc<ProviderSpec>> { self.models.spec(&self.config, provider).with_context(|| format!("unknown provider `{provider}`")) }
 
     /// The provider CLI's state folder (sign-in, settings, history) as the CLI sees it: see [`Config::provider_home`].
     pub fn provider_home(&self, provider: &str) -> Option<PathBuf> {
@@ -487,9 +488,7 @@ impl Hub {
 
     /// The variables every run of `provider` gets before `[workspace.env]` (isolated mode only): see
     /// [`Config::provider_env`].
-    pub fn provider_env(&self, provider: &str) -> Vec<(String, String)> {
-        self.config.provider_env(provider)
-    }
+    pub fn provider_env(&self, provider: &str) -> Vec<(String, String)> { self.config.provider_env(provider) }
 
     /// Every variable a command MAP runs itself for `provider` gets, in order: [`Hub::provider_env`], `extra`
     /// (`[workspace.env]`, or [`Hub::command_env`]), then the provider's own `env` with its references resolved in
@@ -534,7 +533,7 @@ impl Hub {
         let providers = self.providers();
         let sig: String = providers
             .iter()
-            .map(|p| format!("{}|{}|{:?}|{:?}|{};", p.name, p.available, p.signed_in, p.cooldown_until, p.login.api_key_set))
+            .map(|p| format!("{}|{}|{:?}|{:?}|{}|{}|{};", p.name, p.available, p.signed_in, p.cooldown_until, p.login.api_key_set, p.models.join(","), p.default_model))
             .collect();
         let mut last = self.providers_sig.lock().unwrap();
         let first = last.is_none();
@@ -553,15 +552,16 @@ impl Hub {
     pub fn providers(&self) -> Vec<ProviderInfo> {
         self.config
             .providers
-            .iter()
+            .keys()
+            .filter_map(|name| Some((name, self.spec(name).ok()?)))
             .map(|(name, spec)| ProviderInfo {
                 name: name.clone(),
                 models: spec.models.clone(),
                 default_model: spec.default_model.clone(),
                 available: self.provider_available(name),
                 cooldown_until: self.cooldown_until(name),
-                signed_in: crate::login::signed_in(self, spec),
-                login: crate::login::info(self, name, spec),
+                signed_in: crate::login::signed_in(self, &spec),
+                login: crate::login::info(self, name, &spec),
             })
             .collect()
     }

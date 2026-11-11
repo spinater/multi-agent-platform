@@ -955,6 +955,8 @@ pub struct ProviderSpec {
     pub binary: String,
     pub models: Vec<String>,
     pub default_model: String,
+    /// Where the CLI lists its models (`model_catalog.rs`); `None`: the source MAP knows for the binary, if any.
+    pub models_from: Option<crate::model_catalog::ModelsFrom>,
     pub interactive: Vec<String>,
     pub headless: Vec<String>,
     pub extra_args: Vec<String>,
@@ -1128,8 +1130,7 @@ pub struct ChannelSource {
 #[serde(deny_unknown_fields)]
 struct ProviderOverride {
     binary: Option<String>,
-    models: Option<Vec<String>>,
-    default_model: Option<String>,
+    models: Option<Vec<String>>, default_model: Option<String>, models_from: Option<crate::model_catalog::ModelsFrom>,
     interactive: Option<Vec<String>>,
     headless: Option<Vec<String>>,
     extra_args: Option<Vec<String>>,
@@ -1228,7 +1229,7 @@ pub fn builtin_providers() -> BTreeMap<String, ProviderSpec> {
             isolated_dir: None,
             home_keep: vec![],
             shared_home: None,
-            env: BTreeMap::new(),
+            ..ProviderSpec::default()
         },
     );
     map.insert(
@@ -1276,7 +1277,7 @@ pub fn builtin_providers() -> BTreeMap<String, ProviderSpec> {
             isolated_dir: None,
             home_keep: vec![],
             shared_home: None,
-            env: BTreeMap::new(),
+            ..ProviderSpec::default()
         },
     );
     map.insert(
@@ -1381,7 +1382,7 @@ pub fn builtin_providers() -> BTreeMap<String, ProviderSpec> {
             isolated_dir: Some("cursor-home".into()),
             home_keep: strings(&["CARGO_HOME=~/.cargo", "RUSTUP_HOME=~/.rustup", "GOPATH=~/go"]),
             shared_home: None,
-            env: BTreeMap::new(),
+            ..ProviderSpec::default()
         },
     );
     // GitHub Copilot CLI (https://docs.github.com/en/copilot/how-tos/copilot-cli), npm @github/copilot.
@@ -1433,7 +1434,7 @@ pub fn builtin_providers() -> BTreeMap<String, ProviderSpec> {
             isolated_dir: None,
             home_keep: vec![],
             shared_home: None,
-            env: BTreeMap::new(),
+            ..ProviderSpec::default()
         },
     );
     // OpenRouter (https://openrouter.ai/docs/guides/guides/coding-agents): Claude Code against OpenRouter's
@@ -1505,6 +1506,7 @@ impl ProviderOverride {
             }
         };
         Ok(ProviderSpec {
+            models_from: crate::model_catalog::source(self.models_from, self.models.is_some(), self.default_model.is_some(), self.binary.as_deref().unwrap_or(&base.binary)),
             binary: self.binary.unwrap_or(base.binary),
             models: self.models.unwrap_or(base.models),
             default_model: self.default_model.unwrap_or(base.default_model),
@@ -1521,10 +1523,7 @@ impl ProviderOverride {
             auth_markers: self.auth_markers.unwrap_or(base.auth_markers),
             trust_markers: self.trust_markers.unwrap_or(base.trust_markers),
             trust_accept: self.trust_accept.unwrap_or(base.trust_accept),
-            trust: match self.trust {
-                Some(t) => t.apply(base.trust, name)?,
-                None => base.trust,
-            },
+            trust: match self.trust { Some(t) => t.apply(base.trust, name)?, None => base.trust },
             login: self.login.unwrap_or(base.login),
             login_send: optional(self.login_send, base.login_send),
             login_warning: optional(self.login_warning, base.login_warning),

@@ -153,7 +153,7 @@ pub async fn create_task(State(hub): State<Arc<Hub>>, caller: CallerExt, UrlPath
     if let Some(p) = &provider {
         let spec = hub.spec(p)?;
         if model.is_some() {
-            Hub::resolve_model(spec, model.as_deref())?;
+            Hub::resolve_model(&spec, model.as_deref())?;
         }
     }
     for dep in &b.depends_on {

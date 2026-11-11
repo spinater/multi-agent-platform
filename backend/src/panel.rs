@@ -51,7 +51,7 @@ pub fn validate(hub: &Hub, fallback: &str) -> Result<()> {
         if spec.headless.is_empty() {
             bail!("provider `{}` has no headless command, so it cannot sit on a panel", m.provider);
         }
-        Hub::resolve_model(spec, m.model.as_deref())?;
+        Hub::resolve_model(&spec, m.model.as_deref())?;
     }
     Ok(())
 }
@@ -187,7 +187,7 @@ async fn round(hub: &Hub, project: &Project, q: &Question, members: &[Member], p
 /// would read CLAUDE.md and call the decide endpoint again).
 pub async fn run_cli(hub: &Hub, slug: &str, provider: &str, model: Option<&str>, text: &str) -> Result<Reply> {
     let spec = hub.spec(provider)?;
-    let model = Hub::resolve_model(spec, model)?;
+    let model = Hub::resolve_model(&spec, model)?;
     let argv: Vec<String> = spec
         .headless
         .iter()

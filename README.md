@@ -594,6 +594,14 @@ providers, or pick them for a session. A provider whose binary is not on the age
 is skipped. Everything below is a default that `[providers.<name>]` in `map.toml` overrides (`map.example.toml` lists
 every field).
 
+**Models come from the CLIs.** Each hour (and at start) MAP reads what Codex lists in `models_cache.json` (in its state
+folder), `agy models` and `cursor-agent --list-models` print, and offers those, so a new model can be picked without a
+change to MAP (`model_catalog.rs`). Until a read works (a CLI not signed in, Codex not yet run there) the built-in list
+stays; a failed read keeps the last good list. The default stays when listed, else it is the first listed (Codex's own
+order). Claude Code lists nothing: its aliases (`opus`, `sonnet`, …) already follow the newest model. Setting
+`models` turns the reading off for that provider; `models_from = { command = [...] }` or `{ file = "{home}/…", list =
+"/models", id = "slug", skip = { visibility = "hide" } }` names a source of your own.
+
 | provider | CLI | sign-in | headless | folder trust | sub-agents | usage |
 | --- | --- | --- | --- | --- | --- | --- |
 | `claude` | Claude Code | `claude auth login`, or `ANTHROPIC_API_KEY` | `claude -p` | written | `.claude/agents` | account endpoint |
@@ -603,8 +611,8 @@ every field).
 | `copilot` | [GitHub Copilot CLI](https://docs.github.com/en/copilot/how-tos/copilot-cli) (`copilot`) | `copilot login --device-code`, or `COPILOT_GITHUB_TOKEN` | `copilot -p … -s --no-ask-user` | written (`trusted_folders`) | loads `.claude/agents` | none |
 | `openrouter` | Claude Code via [OpenRouter](https://openrouter.ai/docs/guides/guides/coding-agents) | `OPENROUTER_API_KEY` only | `claude -p` | written | `.claude/agents` | key limit |
 
-- **Cursor** takes its first prompt as an argument. Its model list is just `auto`: `cursor-agent --list-models` prints
-  the ids your account has; add them to `models`. Where it keeps its sign-in and trusted folders is not documented,
+- **Cursor** takes its first prompt as an argument. Its built-in model list is just `auto`; MAP adds what
+  `cursor-agent --list-models` prints. Where it keeps its sign-in and trusted folders is not documented,
   so the dashboard shows its sign-in as unknown (unless `CURSOR_API_KEY` is set) and its "Trust this workspace"
   question as `needs_trust`. Unattended workers need `extra_args = ["--force"]` to run commands.
 - **Copilot** gets its first prompt typed in (`-i <prompt>` cannot be left empty for a session without one). Its

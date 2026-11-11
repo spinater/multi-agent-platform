@@ -609,7 +609,7 @@ pub async fn init(hub: &Hub, slug: &str, req: InitRequest) -> Result<InitStarted
     let spec = hub.spec(&req.provider)?;
     let model = req.model.map(|m| m.trim().to_string()).filter(|m| !m.is_empty());
     if model.is_some() {
-        Hub::resolve_model(spec, model.as_deref())?;
+        Hub::resolve_model(&spec, model.as_deref())?;
     }
     if !hub.provider_available(&req.provider) {
         bail!("{} is not found on PATH; pick another provider or install it", req.provider);

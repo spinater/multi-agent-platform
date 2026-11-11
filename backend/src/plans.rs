@@ -84,7 +84,7 @@ pub fn validate_tasks(hub: &Hub, tasks: Vec<PlanTaskInput>) -> Result<Vec<PlanTa
         if let Some(p) = &provider {
             let spec = hub.spec(p).with_context(|| format!("task {key}"))?;
             if model.is_some() {
-                Hub::resolve_model(spec, model.as_deref()).with_context(|| format!("task {key}"))?;
+                Hub::resolve_model(&spec, model.as_deref()).with_context(|| format!("task {key}"))?;
             }
         }
         let mut depends_on: Vec<String> = vec![];
@@ -469,13 +469,13 @@ pub async fn start(hub: &Arc<Hub>, project: Option<&str>, provider: Option<Strin
     };
     let model = clean(model);
     let spec = hub.spec(&provider)?;
-    Hub::resolve_model(spec, model.as_deref())?;
+    Hub::resolve_model(&spec, model.as_deref())?;
 
     let instructions = instructions(hub)?;
     let folder = hub.work_dir(project).await;
     let cards = folder.join("tasks/README.md").is_file();
     let recent = hub.store.plans(Some(project.unwrap_or("")), 10).await?;
-    let providers = hub.config.providers.iter().filter(|(n, _)| hub.provider_available(n)).map(|(n, s)| (n.clone(), s.models.clone())).collect();
+    let providers = hub.config.providers.keys().filter(|n| hub.provider_available(n)).filter_map(|n| Some((n.clone(), hub.spec(n).ok()?.models.clone()))).collect();
     let url = plans_url(hub, project);
     let ctx = PlannerContext {
         project: p.as_ref(),

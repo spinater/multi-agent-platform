@@ -370,14 +370,14 @@ pub async fn check(hub: &Hub, name: &str) -> UpdateInfo {
         info.error = Some(format!("unknown provider `{name}`"));
         return info;
     };
-    let mut info = blank(&hub.config, name, spec);
+    let mut info = blank(&hub.config, name, &spec);
     let timeout = Duration::from_secs(hub.config.updates.timeout_secs);
     let binary = hub.binary_path(&spec.binary);
     let installed = async {
         match &binary {
             _ if spec.version.is_empty() => Ok(None),
             None => Err(format!("`{}` is not on the workspace PATH", spec.binary)),
-            Some(b) => installed_version(hub, name, spec, b, timeout).await.map(Some),
+            Some(b) => installed_version(hub, name, &spec, b, timeout).await.map(Some),
         }
     };
     let latest = async {

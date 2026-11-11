@@ -566,7 +566,7 @@ pub(crate) async fn ask_with(hub: &Hub, mut req: ConfigAskRequest, timeout: Dura
     if req.prompt.trim().is_empty() && !from_runs {
         bail!("say what the agent should do");
     }
-    let model = Hub::resolve_model(spec, req.model.as_deref())?;
+    let model = Hub::resolve_model(&spec, req.model.as_deref())?;
     let project = req.project.clone().filter(|p| !p.is_empty());
     req.project = project.clone();
     let mut context = req.context.clone();
@@ -586,7 +586,7 @@ pub(crate) async fn ask_with(hub: &Hub, mut req: ConfigAskRequest, timeout: Dura
         bail!("suggesting from runs needs the workflow (`workflow_id`)");
     }
     let text = prompt(&req, &context, runs.as_ref());
-    let argv = argv(spec, &model, req.effort, &text);
+    let argv = argv(&spec, &model, req.effort, &text);
     let dir = scratch()?;
     let mut cmd = Command::new(&argv[0]);
     cmd.args(&argv[1..]).current_dir(&dir).envs(hub.run_env(&provider, hub.command_env()));
@@ -758,7 +758,7 @@ mod tests {
     #[tokio::test]
     async fn codex_gets_a_real_effort_flag() {
         let (hub, dir) = hub(RECORD).await;
-        let mut spec = hub.spec("codex").unwrap().clone();
+        let mut spec = (*hub.spec("codex").unwrap()).clone();
         spec.effort_args = vec!["-c".into(), "model_reasoning_effort={effort}".into()];
         let args = argv(&spec, "m", Some(Effort::Max), "PROMPT");
         let n = args.len();
@@ -766,7 +766,7 @@ mod tests {
         assert_eq!(argv(&spec, "m", None, "P").len(), n - 2);
         // claude has no effort flag: only the prompt says it.
         let claude = hub.spec("claude").unwrap();
-        assert!(!argv(claude, "opus", Some(Effort::Low), "P").iter().any(|a| a.contains("effort")));
+        assert!(!argv(&claude, "opus", Some(Effort::Low), "P").iter().any(|a| a.contains("effort")));
         let _ = dir;
     }
 

@@ -201,7 +201,7 @@ async fn context(hub: &Hub, slug: &str) -> Result<ManagerContext> {
         .collect();
     let drafts = hub.store.plans(Some(slug), 20).await?.into_iter().filter(|p| p.status == PlanStatus::Draft).map(|p| format!("#{} {}", p.id, p.title)).collect();
     let lanes = hub.lanes.configs().into_iter().filter(|c| c.owned.as_ref().is_some_and(|o| o.project == slug && o.kind == "lane")).map(|c| c.name).collect();
-    let providers = hub.config.providers.iter().filter(|(n, _)| hub.provider_available(n)).map(|(n, s)| (n.clone(), s.models.clone())).collect();
+    let providers = hub.config.providers.keys().filter(|n| hub.provider_available(n)).filter_map(|n| Some((n.clone(), hub.spec(n).ok()?.models.clone()))).collect();
     Ok(ManagerContext { providers, orchestrator_running: hub.orchestrator_running(), open_tasks, drafts, lanes })
 }
 
@@ -238,7 +238,7 @@ pub async fn start(hub: &Arc<Hub>, slug: &str) -> Result<Session> {
     let settings = p.settings.manager.clone();
     let provider = pick_provider(hub, &p, settings.provider.as_deref())?;
     let spec = hub.spec(&provider)?;
-    Hub::resolve_model(spec, settings.model.as_deref())?;
+    Hub::resolve_model(&spec, settings.model.as_deref())?;
     let (args, resumed) = conversation_args(hub, &provider, &name).await?;
     let folder = hub.work_dir(Some(slug)).await;
     let text = if resumed {
@@ -278,7 +278,7 @@ pub async fn configure(hub: &Arc<Hub>, slug: &str, settings: ManagerSettings, fo
     let model = settings.model.map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
     if let Some(name) = &provider {
         let spec = hub.spec(name)?;
-        Hub::resolve_model(spec, model.as_deref())?;
+        Hub::resolve_model(&spec, model.as_deref())?;
     }
     let before = p.settings.manager.clone();
     let next = ManagerSettings { enabled: settings.enabled, provider, model };
@@ -526,7 +526,7 @@ pub async fn open_lane(hub: &Arc<Hub>, slug: &str, body: OpenLane, by: &str) -> 
     }
     let provider = pick_provider(hub, &p, body.provider.as_deref())?;
     let model = body.model.map(|m| m.trim().to_string()).filter(|m| !m.is_empty());
-    Hub::resolve_model(hub.spec(&provider)?, model.as_deref())?;
+    Hub::resolve_model(&*hub.spec(&provider)?, model.as_deref())?;
     let rec = OwnedLaneRecord {
         lane: lane.clone(),
         project: slug.into(),

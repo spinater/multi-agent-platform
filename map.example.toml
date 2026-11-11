@@ -170,6 +170,9 @@ timeout_secs = 600
 # Every provider has this field; only codex has it set by default.
 # effort_args = ["-c", "model_reasoning_effort={effort}"]
 # default_model = "gpt-6-sol"
+# The models offered are the ones Codex itself lists (models_cache.json in its folder, refreshed hourly); setting
+# `models` pins a list of your own instead. Every provider has `models_from`; this is codex's built-in source.
+# models_from = { file = "{home}/models_cache.json", list = "/models", id = "slug", skip = { visibility = "hide" } }
 # Device-code sign-in. codex signs out the current account as soon as it starts.
 # login = ["{binary}", "login", "--device-auth"]
 # credentials = ["~/.codex/auth.json"]
@@ -182,6 +185,8 @@ timeout_secs = 600
 [providers.gemini]
 # binary = "agy"
 # default_model = "gemini-3.8-flash-high"
+# The models offered are what `agy models` prints (when signed in), refreshed hourly.
+# models_from = { command = ["{binary}", "models"] }
 # agy signs in from its TUI; it may keep the token in the system keyring instead of the file below.
 # login = ["{binary}"]
 # login_send = "/login"
@@ -200,7 +205,7 @@ timeout_secs = 600
 # Cursor CLI (https://cursor.com/docs/cli/overview), installed as `cursor-agent` (and `agent`).
 [providers.cursor]
 # binary = "cursor-agent"
-# `cursor-agent --list-models` prints the ids your account can use; list them here (the built-in list is just "auto").
+# MAP offers what `cursor-agent --list-models` prints (refreshed hourly); `models` pins a list instead.
 # models = ["auto"]
 # default_model = "auto"
 # Unattended workers: --force runs commands without asking (unless denied in ~/.cursor/cli-config.json).
