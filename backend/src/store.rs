@@ -573,8 +573,8 @@ impl Store {
     pub async fn insert_decision(&self, d: &Decision, cost: &DecisionCost) -> Result<i64> {
         let id = sqlx::query(
             "INSERT INTO decisions (project, at, state, question, answer, lane, confidence, reflex_answer, ms, error,
-               prompt_chars, tokens_in, tokens_out, tokens_measured, fallback, skipped_thai)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id",
+               prompt_chars, tokens_in, tokens_out, tokens_measured, fallback, skipped_thai, laya)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id",
         )
         .bind(&d.project)
         .bind(d.at)
@@ -592,10 +592,17 @@ impl Store {
         .bind(cost.measured)
         .bind(&cost.fallback)
         .bind(cost.skipped_thai)
+        .bind(d.laya.as_ref().map(serde_json::to_string).transpose()?)
         .fetch_one(&self.pool)
         .await?
         .get("id");
         Ok(id)
+    }
+
+    /// Records what laya said for a decision made before laya was asked (`laya::fit`).
+    pub async fn set_decision_laya(&self, id: i64, laya: &crate::model::LayaRead) -> Result<()> {
+        sqlx::query("UPDATE decisions SET laya = ? WHERE id = ?").bind(serde_json::to_string(laya)?).bind(id).execute(&self.pool).await?;
+        Ok(())
     }
 
     fn decision_row(row: &SqliteRow) -> Result<Decision> {
@@ -612,6 +619,7 @@ impl Store {
             ms: row.get("ms"),
             error: row.get("error"),
             feedback: row.get("feedback"),
+            laya: row.get::<Option<String>, _>("laya").and_then(|s| serde_json::from_str(&s).ok()),
         })
     }
 
@@ -1244,6 +1252,7 @@ mod tests {
             ms: 1,
             error: None,
             feedback: None,
+            laya: None,
         };
         store.insert_decision(&d, &DecisionCost::default()).await.unwrap();
         store.insert_decision(&Decision { lane: Lane::Llm, ..d.clone() }, &DecisionCost::default()).await.unwrap();
@@ -1286,6 +1295,7 @@ mod tests {
             ms: 4,
             error: None,
             feedback: None,
+            laya: None,
         };
         (store, d)
     }

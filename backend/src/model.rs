@@ -541,6 +541,8 @@ pub struct Answer {
     /// What Reflex chose, even when it was below the threshold.
     #[ts(type = "string | boolean | null")]
     pub reflex_answer: serde_json::Value,
+    /// What laya said, when it was asked; a `reflex` lane answer Reflex itself did not pass is laya's.
+    pub laya: Option<LayaRead>,
     pub llm_raw: Option<String>,
     pub error: Option<String>,
     #[ts(type = "number")]
@@ -584,6 +586,9 @@ pub struct Decision {
     pub error: Option<String>,
     /// The user's verdict on the answer: `true` right, `false` wrong, `null` none yet.
     pub feedback: Option<bool>,
+    /// What laya said, when it was asked (`laya.rs`).
+    #[serde(default)]
+    pub laya: Option<LayaRead>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
@@ -1191,6 +1196,10 @@ pub struct ProjectSettings {
     pub paused: bool,
     /// Decisions the orchestrator asks the project's Reflex first, never an LLM.
     pub reflex_gates: ReflexGates,
+    /// Laya, Reflex's model lane, as a second stage before the fallback (`laya.rs`). Changed through
+    /// `PUT /api/projects/{slug}/laya` only (optional here: a settings PATCH keeps it).
+    #[ts(as = "Option<ReflexLaya>", optional)]
+    pub reflex_laya: ReflexLaya,
     /// Shared folder or a branch and worktree per task.
     pub branches: ProjectBranches,
     /// Where the project keeps its knowledge and the limits the Knowledge screen checks.
@@ -1263,6 +1272,29 @@ pub struct TaskScope {
     /// The analyst (`analyst:<provider>`), or the agent that submitted it (`planner`, a session name).
     pub by: String,
     pub at: DateTime<Utc>,
+}
+
+/// Laya, the model lane of the project's Reflex (a ModernBERT-large port run locally, about 1.7 GB of memory while
+/// on). It reads the whole question, where the default lane only matches corpus words, so it is asked when the
+/// default lane is unsure, and the fallback only when laya is unsure too.
+#[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize, TS)]
+#[serde(default)]
+#[ts(export)]
+pub struct ReflexLaya {
+    pub enabled: bool,
+    /// Laya answers at or above this confidence; `None` is shadow (it scores, the fallback answers) until the
+    /// lessons fit one.
+    pub threshold: Option<f64>,
+}
+
+/// What laya said for one question.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[ts(export)]
+pub struct LayaRead {
+    /// The option text (choice, score) or a boolean (noul); `null` when it abstained.
+    #[ts(type = "string | boolean | null")]
+    pub answer: serde_json::Value,
+    pub confidence: f64,
 }
 
 /// Repeated orchestrator decisions answered by the project's Reflex (its `orchestration` corpus domain). An answer

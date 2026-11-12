@@ -126,13 +126,15 @@ pub async fn update(State(hub): State<Arc<Hub>>, UrlPath(slug): UrlPath<String>,
     }
     if let Some(s) = b.settings {
         // The source is fixed at creation, and the Thai words have their own endpoint (`thai/words`).
-        // The manager has its own endpoint (`PUT …/manager`), which also starts and stops it; the env has `PUT /api/env`
+        // The manager has its own endpoint (`PUT …/manager`), which also starts and stops it; laya has `PUT …/laya`,
+        // which restarts Reflex; the env has `PUT /api/env`
         // the hooks `PUT /api/hooks`, the workflows
         // `PUT /api/workflows`.
         let s = ProjectSettings {
             source: p.settings.source.clone(),
             thai_glossary: p.settings.thai_glossary.clone(),
             manager: p.settings.manager.clone(),
+            reflex_laya: p.settings.reflex_laya,
             env: p.settings.env.clone(),
             hooks: p.settings.hooks.clone(),
             workflows: p.settings.workflows.clone(),

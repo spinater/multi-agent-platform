@@ -78,6 +78,7 @@ import type { WorktreeEstimate } from "./generated/WorktreeEstimate";
 // Reflex screen.
 import type { ArchiveResult } from "./generated/ArchiveResult";
 import type { CorpusLesson } from "./generated/CorpusLesson";
+import type { LayaInfo } from "./generated/LayaInfo";
 import type { ManagerContextInfo } from "./generated/ManagerContextInfo";
 import type { DecisionFeedback } from "./generated/DecisionFeedback";
 import type { DecisionSummary } from "./generated/DecisionSummary";
@@ -271,6 +272,10 @@ export const api = {
   archiveDomains: (slug: string, body: { domains?: string[]; restore?: boolean }) => request<ArchiveResult>("POST", `/projects/${slug}/corpus/archive`, body),
   corpusLessons: (slug: string) => request<CorpusLesson[]>("GET", `/projects/${slug}/corpus/lessons`),
   removeLesson: (slug: string, id: number) => request<CorpusLesson>("DELETE", `/projects/${slug}/corpus/lessons/${id}`),
+  /** Laya, Reflex's model lane, as the project's second stage before the fallback. */
+  laya: (slug: string) => request<LayaInfo>("GET", `/projects/${slug}/laya`),
+  /** Turning it on or off restarts the project's Reflex; `threshold: null` has it fitted from the lessons again. */
+  setLaya: (slug: string, body: { enabled?: boolean; threshold?: number | null }) => request<LayaInfo>("PUT", `/projects/${slug}/laya`, body),
   /** Tokens Reflex saved against what the fallbacks spent over the last `hours`; `project: null` is every project. */
   savings: (hours: number, project: string | null) => request<SavingsReport>("GET", `/reflex/savings?hours=${hours}&project=${encodeURIComponent(project ?? "")}`),
   // ---- knowledge (Knowledge screen): the project's docs, their health, search; fix tasks go through createTask

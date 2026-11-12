@@ -92,7 +92,7 @@ pub async fn restart(hub: &Hub) -> Result<ReflexStatus> {
     }
     let (live, log) = (dir.join("corpus-live"), dir.join("reflex.log"));
     let paths = crate::reflex::Paths { corpus_repo: &repo_path, corpus_live: &live, log: &log };
-    let status = hub.reflex.restart(&hub.config.reflex.binary, KEY, port(hub), paths).await;
+    let status = hub.reflex.restart(&hub.config.reflex.binary, KEY, port(hub), paths, false).await;
     let level = if status.state == ReflexState::Error { Level::Warning } else { Level::Info };
     hub.event(level, "reflex.chat", None, None, format!("chat Reflex {:?} {}", status.state, status.message.lines().next().unwrap_or(""))).await;
     Ok(status)

@@ -219,7 +219,7 @@ impl Hub {
         let repo_path = self.gates_corpus().await?;
         let (live, log) = (dir.join("corpus-live"), dir.join("reflex.log"));
         let port = self.gates_target().port;
-        let status = self.reflex.restart(&self.config.reflex.binary, crate::gates::KEY, port, reflex::Paths { corpus_repo: &repo_path, corpus_live: &live, log: &log }).await;
+        let status = self.reflex.restart(&self.config.reflex.binary, crate::gates::KEY, port, reflex::Paths { corpus_repo: &repo_path, corpus_live: &live, log: &log }, false).await;
         let level = if status.state == crate::model::ReflexState::Error { Level::Warning } else { Level::Info };
         self.event(level, "reflex.gates", None, None, format!("gates Reflex {:?} {}", status.state, status.message.lines().next().unwrap_or(""))).await;
         Ok(status)
@@ -375,7 +375,7 @@ impl Hub {
         let project = self.store.project(slug).await?.with_context(|| format!("unknown project `{slug}`"))?;
         let live = self.project_dir(slug).join("corpus-live");
         let (repo, log) = (self.corpus_repo(slug), self.reflex_log(slug));
-        let restart = self.reflex.restart(&self.config.reflex.binary, slug, project.port, reflex::Paths { corpus_repo: &repo, corpus_live: &live, log: &log });
+        let restart = self.reflex.restart(&self.config.reflex.binary, slug, project.port, reflex::Paths { corpus_repo: &repo, corpus_live: &live, log: &log }, project.settings.reflex_laya.enabled);
         tokio::pin!(restart);
         // Announce "starting" as soon as it is set, then the outcome.
         let status = tokio::select! {

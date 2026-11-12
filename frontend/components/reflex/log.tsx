@@ -95,6 +95,12 @@ export function Log({ summary, decisions, emptyText, now }: { summary: DecisionS
               <span className="flex min-w-0 flex-col gap-[3px]">
                 <span className="truncate text-[11.5px] leading-[1.35] font-medium">
                   {fmtAnswer(d.answer)} <span className="font-normal text-r-faint">· {d.question.id}</span>
+                  {d.laya && (
+                    <span className="font-normal text-r-faint" title="Laya's answer to the same question, and its confidence">
+                      {" "}
+                      · laya {fmtAnswer(d.laya.answer)} {d.laya.confidence.toFixed(2)}
+                    </span>
+                  )}
                 </span>
                 <span className="truncate text-[10.5px] leading-[1.35] text-r-muted" title={d.state}>
                   {d.state}

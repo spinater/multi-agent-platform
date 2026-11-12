@@ -58,6 +58,12 @@ pub fn read_version(binary: &str) -> Option<String> {
     out.status.success().then(|| line.to_string())
 }
 
+/// `<binary> --version` lists `feature` among its compiled features.
+pub fn has_feature(binary: &str, feature: &str) -> bool {
+    let Ok(out) = std::process::Command::new(binary).arg("--version").stdin(Stdio::null()).stderr(Stdio::null()).output() else { return false };
+    String::from_utf8_lossy(&out.stdout).lines().filter(|l| l.contains("features")).any(|l| l.split_whitespace().any(|w| w == feature))
+}
+
 impl Manager {
     /// The installed Reflex's version, cached for 10 seconds.
     pub fn version(&self, binary: &str) -> Option<String> {
@@ -105,19 +111,19 @@ impl Manager {
         self.locks.lock().await.remove(slug);
     }
 
-    pub async fn restart(&self, binary: &str, slug: &str, port: u16, paths: Paths<'_>) -> ReflexStatus {
+    pub async fn restart(&self, binary: &str, slug: &str, port: u16, paths: Paths<'_>, laya: bool) -> ReflexStatus {
         let lock = self.locks.lock().await.entry(slug.to_string()).or_default().clone();
         let _guard = lock.lock().await;
         self.kill(slug).await;
         self.set(slug, status(ReflexState::Starting, "exporting the corpus", vec![]));
-        let s = match self.boot(binary, slug, port, paths).await {
+        let s = match self.boot(binary, slug, port, paths, laya).await {
             Ok(s) => s,
             Err(err) => status(ReflexState::Error, format!("{err:#}"), vec![]),
         };
         self.set(slug, s)
     }
 
-    async fn boot(&self, binary: &str, slug: &str, port: u16, paths: Paths<'_>) -> Result<ReflexStatus> {
+    async fn boot(&self, binary: &str, slug: &str, port: u16, paths: Paths<'_>, laya: bool) -> Result<ReflexStatus> {
         let domains = repo::export_corpus(paths.corpus_repo, paths.corpus_live).await?;
         if domains.is_empty() {
             return Ok(status(ReflexState::NoCorpus, "The corpus repo has no domains yet: add <domain>/<file>.md", domains));
@@ -131,9 +137,14 @@ impl Manager {
             return Ok(status(ReflexState::Error, format!("port {port} is already in use by another process (a Reflex left over from an earlier run?); stop it, then restart"), domains));
         }
         let log = std::fs::File::create(paths.log)?;
-        let mut child = Command::new(binary)
-            .env("RIIR_REFLEX_CORPUS", paths.corpus_live)
-            .env("RIIR_REFLEX_BIND", format!("127.0.0.1:{port}"))
+        let mut command = Command::new(binary);
+        command.env("RIIR_REFLEX_CORPUS", paths.corpus_live).env("RIIR_REFLEX_BIND", format!("127.0.0.1:{port}"));
+        // Never inherited: the model lane loads only for a project that turned it on (`laya.rs`).
+        match laya {
+            true => command.env("RIIR_REFLEX_LAYA", "1"),
+            false => command.env_remove("RIIR_REFLEX_LAYA"),
+        };
+        let mut child = command
             .stdin(Stdio::null())
             .stdout(log.try_clone()?)
             .stderr(log)
@@ -154,9 +165,24 @@ impl Manager {
         Ok(status(ReflexState::Error, format!("reflex did not answer /healthz:\n{}", tail(paths.log, 20).await), domains))
     }
 
+    /// `lanes.<lane>` of the Reflex's `/healthz` (`ready`, `loading`, `off`); `None` when it does not answer.
+    pub async fn lane_state(&self, port: u16, lane: &str) -> Option<String> {
+        let resp = self.http.get(url(port, "/healthz")).timeout(Duration::from_secs(2)).send().await.ok()?;
+        resp.json::<Value>().await.ok()?["lanes"][lane].as_str().map(String::from)
+    }
+
     /// POSTs JSON to the project's Reflex and returns its reply, turning Reflex's `{"error"}` bodies into errors.
     pub async fn post(&self, port: u16, path: &str, body: &Value) -> Result<Value> {
-        let resp = self.http.post(url(port, path)).json(body).timeout(Duration::from_secs(30)).send().await.context("Reflex is not reachable")?;
+        self.post_lane(port, path, body, None).await
+    }
+
+    /// `post`, asking for one of Reflex's lanes (`X-Reflex-Lane`); `None` is its default lane.
+    pub async fn post_lane(&self, port: u16, path: &str, body: &Value, lane: Option<&str>) -> Result<Value> {
+        let mut request = self.http.post(url(port, path)).json(body).timeout(Duration::from_secs(30));
+        if let Some(lane) = lane {
+            request = request.header("X-Reflex-Lane", lane);
+        }
+        let resp = request.send().await.context("Reflex is not reachable")?;
         let code = resp.status();
         let value: Value = resp.json().await.context("Reflex returned non-JSON")?;
         if !code.is_success() {

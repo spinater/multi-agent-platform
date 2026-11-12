@@ -63,6 +63,14 @@ nothing is tied to one repository, session name or provider.
     Reflex restarts a minute after the last lesson. With no threshold yet, 16 lessons fit one from what Reflex said
     before each lesson, kept only at 90% precision (`corpus_learn.rs`). The Reflex screen's Lessons list shows each
     one (who taught it, what Reflex said before); Remove takes its line out of the corpus and out of the threshold.
+  - **Laya, a second opinion (off by default).** Reflex also carries a small model lane, laya, that reads the whole
+    question instead of matching corpus words. The Reflex screen's Laya card (`PUT /api/projects/{slug}/laya`
+    `{"enabled": true}`) turns it on for one project: a question Reflex does not settle is asked of laya first, and
+    only what laya does not settle either reaches the fallback. It costs about 1.7 GB of memory while on, and its
+    first start downloads about 800 MB of open weights. Laya has a threshold of its own: without one it runs in
+    shadow (its answer is logged with each decision, the fallback answers); MAP scores it on the project's lessons
+    and, from 16 of them, sets the lowest confidence at which it stayed 90% right (`laya.rs`). `{"threshold": 0.5}`
+    sets one by hand, `{"threshold": null}` goes back to fitting.
   - **Learning from the work (after Hermes Agent).** With RAG on: every task and the manager are nudged to save
     what the next task would need as a knowledge card (`rag::card_nudge`); the project's past Claude Code sessions
     (its manager's and lanes' words, not tool output, secrets masked) are searchable as `map://sessions/<id>`

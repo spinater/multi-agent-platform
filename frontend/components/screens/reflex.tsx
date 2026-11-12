@@ -27,6 +27,7 @@ import {
   smallest,
   toLlm,
 } from "../reflex/lib";
+import { Laya } from "../reflex/laya";
 import { Lessons } from "../reflex/lessons";
 import { Log } from "../reflex/log";
 import { Playground } from "../reflex/playground";
@@ -361,7 +362,10 @@ function ProjectReflex({ info }: { info: ProjectInfo }) {
       <RxSection id="rx-lessons" n="06" title="Lessons" meta="what the corpus learned">
         <Lessons slug={p.slug} tick={decisions.length} toast={toast} />
       </RxSection>
-      <RxSection id="rx-thai" n="07" title="Thai words" meta="Thai → English for Reflex">
+      <RxSection id="rx-laya" n="07" title="Laya" meta="a second opinion before the fallback">
+        <Laya slug={p.slug} tick={decisions.length} can={installed} toast={toast} />
+      </RxSection>
+      <RxSection id="rx-thai" n="08" title="Thai words" meta="Thai → English for Reflex">
         <ThaiWords info={info} toast={toast} />
       </RxSection>
       {editing && (

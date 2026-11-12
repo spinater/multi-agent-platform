@@ -8,6 +8,7 @@ import type { ProjectParallel } from "./ProjectParallel";
 import type { ProjectProvider } from "./ProjectProvider";
 import type { ProjectSource } from "./ProjectSource";
 import type { ReflexGates } from "./ReflexGates";
+import type { ReflexLaya } from "./ReflexLaya";
 import type { Workflow } from "./Workflow";
 
 /**
@@ -34,6 +35,11 @@ paused: boolean,
  * Decisions the orchestrator asks the project's Reflex first, never an LLM.
  */
 reflex_gates: ReflexGates, 
+/**
+ * Laya, Reflex's model lane, as a second stage before the fallback (`laya.rs`). Changed through
+ * `PUT /api/projects/{slug}/laya` only (optional here: a settings PATCH keeps it).
+ */
+reflex_laya?: ReflexLaya, 
 /**
  * Shared folder or a branch and worktree per task.
  */

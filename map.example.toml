@@ -278,7 +278,8 @@ timeout_secs = 600
 
 # Projects: each one is a folder on this machine (used in place), a corpus repo and its own Reflex decision engine
 # (https://reflex.gist.rs).
-# Questions go to Reflex first; only those below the project's threshold reach the fallback LLM.
+# Questions go to Reflex first; only those below the project's threshold reach the fallback LLM. A project can put
+# laya, Reflex's model lane, in between (the Reflex screen's Laya card; about 1.7 GB of memory, per project).
 [reflex]
 # binary = "reflex"
 # port_base = 7400

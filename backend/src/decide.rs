@@ -340,20 +340,34 @@ pub async fn decide_at(hub: &Hub, project: &Project, target: Target, state: &str
     let reflex_ms = started.elapsed().as_millis() as u64;
     let by_id = |id: &str| reflex.as_ref().and_then(|v| v["answers"].as_array()).and_then(|a| a.iter().find(|x| x["question_id"] == id)).cloned();
 
+    // Laya, the project's second stage (`laya.rs`): never for the gates' or the chat's Reflex, nor when the caller
+    // asked for Reflex's own answer.
+    let laya_cfg = project.settings.reflex_laya;
+    let laya_on = laya_cfg.enabled && target.port == project.port && matches!(route, Route::Auto | Route::ReflexGated);
+
     let mut answers = vec![];
-    for q in questions {
+    for (q, wire) in questions.iter().zip(&read.questions) {
         let t0 = Instant::now();
         let r = by_id(&q.id);
         let confidence = r.as_ref().and_then(|a| a["confidence"].as_f64());
         let probabilities = r.as_ref().and_then(|a| serde_json::from_value::<Vec<f64>>(a["probabilities"].clone()).ok());
         let reflex_answer = r.as_ref().map_or(Value::Null, |a| decode(q, &a["outcome"]));
         let g = gate(route, thai, target.threshold, &reflex_answer, confidence, r.is_some());
+        // Laya is asked what Reflex was asked and did not settle.
+        let laya = match g {
+            Gate::Abstained | Gate::Shadow(_) | Gate::Below(..) if laya_on => crate::laya::ask(hub, target.port, &read.state, wire, q).await,
+            _ => None,
+        };
+        let laya_passes = laya.as_ref().is_some_and(|l| crate::laya::passes(l, laya_cfg.threshold));
         let use_fallback = match route {
             Route::Llm => true,
             Route::Reflex | Route::ReflexGated => false,
-            Route::Auto => !g.passes() && project.fallback != "none",
+            Route::Auto => !g.passes() && !laya_passes && project.fallback != "none",
         };
         let mut reason = format!("{}{}", if route == Route::Llm { String::new() } else { read.note() }, g.reason(use_fallback.then_some(project.fallback.as_str())));
+        if let Some(l) = &laya {
+            reason = format!("{reason} {}", crate::laya::reason(l, laya_cfg.threshold));
+        }
         // What the fallback is (or would have been) sent, recorded for every decision: the savings report prices a
         // reflex-lane answer by it.
         let text = prompt(state, q);
@@ -379,6 +393,8 @@ pub async fn decide_at(hub: &Hub, project: &Project, target: Target, state: &str
             }
         } else if g.passes() {
             (reflex_answer.clone(), Lane::Reflex, None, None)
+        } else if let Some(l) = laya.as_ref().filter(|_| laya_passes) {
+            (l.answer.clone(), Lane::Reflex, None, None)
         } else {
             (Value::Null, Lane::Abstain, None, None)
         };
@@ -400,6 +416,7 @@ pub async fn decide_at(hub: &Hub, project: &Project, target: Target, state: &str
             ms: ms as i64,
             error: error.clone(),
             feedback: None,
+            laya: laya.clone(),
         };
         let decision_id = match hub.store.insert_decision(&record, &cost).await {
             Ok(id) => id,
@@ -411,7 +428,7 @@ pub async fn decide_at(hub: &Hub, project: &Project, target: Target, state: &str
         if lane == Lane::Llm && voters >= crate::corpus_learn::MIN_VOTERS && target.port == project.port {
             crate::corpus_learn::learn(hub, project, &Decision { id: decision_id, ..record }, &answer, "panel").await;
         }
-        answers.push(Answer { question_id: q.id.clone(), answer, lane, confidence, probabilities, reflex_answer, llm_raw, error, ms, reason, decision_id });
+        answers.push(Answer { question_id: q.id.clone(), answer, lane, confidence, probabilities, reflex_answer, laya, llm_raw, error, ms, reason, decision_id });
     }
     hub.announce_project(&project.slug).await;
     Ok(DecideResponse {

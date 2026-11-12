@@ -134,6 +134,7 @@ async fn try_learn(hub: &Hub, project: &Project, d: &Decision, answer: &Value, b
     if project.threshold.is_none() {
         fit_threshold(hub, &project.slug).await;
     }
+    crate::laya::fit(hub, &project.slug).await;
     Ok(())
 }
 
@@ -317,7 +318,7 @@ mod tests {
         let q = Question { id: "q".into(), kind: QuestionKind::Choice, prompt: "Bug or feature?".into(), options: Some(vec!["bug".into(), "feature".into()]), criteria: None };
         let d = Decision {
             id: 7, project: p.slug.clone(), at: Utc::now(), state: "The save button\ncrashes the page".into(), question: q,
-            answer: Value::Null, lane: Lane::Llm, confidence: Some(0.4), reflex_answer: Value::from("feature"), ms: 0, error: None, feedback: None,
+            answer: Value::Null, lane: Lane::Llm, confidence: Some(0.4), reflex_answer: Value::from("feature"), ms: 0, error: None, feedback: None, laya: None,
         };
         learn(&hub, &p, &d, &Value::from("bug"), "panel").await;
         learn(&hub, &p, &d, &Value::from("bug"), "panel").await;

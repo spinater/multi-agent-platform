@@ -149,6 +149,7 @@ pub fn router(hub: Arc<Hub>) -> Router {
         .route("/projects/{slug}/decisions/summary", get(projects::decision_summary))
         .route("/projects/{slug}/decisions/{id}/feedback", post(projects::decision_feedback))
         .route("/projects/{slug}/corpus/archive", post(projects::archive))
+        .route("/projects/{slug}/laya", get(crate::laya::get_api).put(crate::laya::put_api))
         .route("/projects/{slug}/corpus/lessons", get(crate::corpus_learn::list_api)).route("/projects/{slug}/corpus/lessons/{id}", axum::routing::delete(crate::corpus_learn::remove_api))
         .route("/reflex/savings", get(projects::savings))
         // ---- templates: lay a development process into a project's folder, then queue the init agent

@@ -245,11 +245,17 @@ pub mod fake {
     }
 
     pub async fn start(answers: Vec<Value>) -> FakeReflex {
+        start_lanes(answers, None).await
+    }
+
+    /// `start`, with a laya lane too: a request with `X-Reflex-Lane: laya` gets `laya`'s answers.
+    pub async fn start_lanes(answers: Vec<Value>, laya: Option<Vec<Value>>) -> FakeReflex {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let port = listener.local_addr().unwrap().port();
         let bodies = Arc::new(Mutex::new(vec![]));
         let seen = bodies.clone();
         let reply = json!({ "answers": answers, "routing": { "reason": "fake" } }).to_string();
+        let laya = laya.map(|answers| json!({ "answers": answers, "routing": { "reason": "fake", "lane": "laya" } }).to_string());
         tokio::spawn(async move {
             loop {
                 let Ok((mut s, _)) = listener.accept().await else { return };
@@ -275,6 +281,8 @@ pub mod fake {
                 if let Some(body) = body {
                     seen.lock().unwrap().push(serde_json::from_slice(&body).unwrap_or(Value::Null));
                 }
+                let asked_laya = String::from_utf8_lossy(&buf).to_ascii_lowercase().contains("x-reflex-lane: laya");
+                let reply = laya.as_ref().filter(|_| asked_laya).unwrap_or(&reply);
                 let resp = format!("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{reply}", reply.len());
                 let _ = s.write_all(resp.as_bytes()).await;
             }

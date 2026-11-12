@@ -18,6 +18,7 @@ mod knowledge;
 mod knowledge_graph;
 mod knowledge_log;
 mod lanes;
+mod laya;
 mod manager;
 mod manager_compact;
 mod model_catalog;
@@ -154,6 +155,7 @@ async fn serve(config: Config) -> Result<()> {
     tokio::spawn(manager::run(hub.clone()));
     tokio::spawn(telegram::run(hub.clone()));
     tokio::spawn(corpus_learn::run(hub.clone()));
+    tokio::spawn(laya::run(hub.clone()));
     tokio::spawn(skill_drafts::run(hub.clone()));
     tokio::spawn(manager_compact::run(hub.clone()));
     tokio::spawn(model_catalog::run(hub.clone()));
