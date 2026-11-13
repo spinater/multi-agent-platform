@@ -30,8 +30,18 @@ pub fn expand_home(path: &str) -> PathBuf {
     }
 }
 
-/// A credential file counts when it exists, is small, is not empty, and parses as JSON if it looks like JSON.
-/// Its contents are dropped right away.
+/// A sign-in the file itself says is over: Claude Code's `claudeAiOauth` records why a login ended (`loginEnded`,
+/// e.g. its time limit) and when its refresh token expires. The access token's own expiry says nothing: it is
+/// renewed as long as the refresh token lives.
+fn ended(credential: &serde_json::Value) -> bool {
+    let oauth = &credential["claudeAiOauth"];
+    let over = oauth["loginEnded"].as_str().is_some_and(|why| !why.is_empty());
+    let expired = oauth["refreshTokenExpiresAt"].as_i64().is_some_and(|at| at > 0 && at < chrono::Utc::now().timestamp_millis());
+    over || expired
+}
+
+/// A credential file counts when it exists, is small, is not empty, and, if it looks like JSON, parses as JSON and
+/// does not say its sign-in is over. Its contents are dropped right away.
 fn credential_ok(path: &PathBuf) -> bool {
     let Ok(meta) = std::fs::metadata(path) else { return false };
     if !meta.is_file() || meta.len() == 0 || meta.len() > MAX_CREDENTIAL_BYTES {
@@ -39,7 +49,7 @@ fn credential_ok(path: &PathBuf) -> bool {
     }
     let Ok(bytes) = std::fs::read(path) else { return false };
     let looks_json = path.extension().is_some_and(|e| e == "json") || bytes.iter().find(|b| !b.is_ascii_whitespace()) == Some(&b'{');
-    !looks_json || serde_json::from_slice::<serde_json::Value>(&bytes).is_ok()
+    !looks_json || serde_json::from_slice::<serde_json::Value>(&bytes).is_ok_and(|v| !ended(&v))
 }
 
 /// Whether the provider's key variable has a value: in `[workspace.env]`, MAP's environment, or the provider's own
@@ -337,6 +347,24 @@ pub async fn state(hub: &Hub, provider: &str) -> Result<LoginState> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_sign_in_the_credential_says_is_over_does_not_count() {
+        use serde_json::json;
+        let now = chrono::Utc::now().timestamp_millis();
+        // An expired access token alone is fine: it is renewed.
+        assert!(!super::ended(&json!({"claudeAiOauth": {"accessToken": "a", "expiresAt": 0, "refreshTokenExpiresAt": now + 60_000}})));
+        assert!(!super::ended(&json!({"claudeAiOauth": {"accessToken": "a", "loginEnded": null}})));
+        assert!(!super::ended(&json!({"tokens": {"id_token": "x"}})));
+        assert!(super::ended(&json!({"claudeAiOauth": {"accessToken": "a", "loginEnded": "time_limit", "refreshTokenExpiresAt": now + 60_000}})));
+        assert!(super::ended(&json!({"claudeAiOauth": {"accessToken": "a", "refreshTokenExpiresAt": now - 1}})));
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join(".credentials.json");
+        std::fs::write(&file, r#"{"claudeAiOauth":{"accessToken":"a","loginEnded":"time_limit"}}"#).unwrap();
+        assert!(!super::credential_ok(&file));
+        std::fs::write(&file, r#"{"claudeAiOauth":{"accessToken":"a"}}"#).unwrap();
+        assert!(super::credential_ok(&file));
+    }
+
     use super::*;
 
     /// Captured from `codex login --device-auth` (codex-cli 0.159.2) in a 200-column tmux pane.
